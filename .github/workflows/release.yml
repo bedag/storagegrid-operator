@@ -21,12 +21,12 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v6
       with:
-        go-version: '1.23.5'
+        go-version-file: "go.mod"
         cache: true
 
     - name: Download dependencies
@@ -90,12 +90,12 @@ jobs:
     needs: build-and-push-image
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v6
       with:
-        go-version: '1.23.5'
+        go-version-file: "go.mod"
         cache: true
 
     - name: Download dependencies

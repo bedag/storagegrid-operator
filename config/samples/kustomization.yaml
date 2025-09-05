@@ -1,0 +1,8 @@
+## Append samples of your project ##
+resources:
+- s3_v1alpha1_s3tenant.yaml
+- s3_v1alpha1_storagegrid.yaml
+- s3_v1alpha1_s3bucket.yaml
+- s3_v1alpha1_s3tenantclass.yaml
+- s3_v1alpha1_s3tenantaccount.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

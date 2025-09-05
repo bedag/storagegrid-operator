@@ -1,0 +1,593 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+  name: s3tenants.s3.bedag.ch
+spec:
+  group: s3.bedag.ch
+  names:
+    kind: S3Tenant
+    listKind: S3TenantList
+    plural: s3tenants
+    shortNames:
+    - s3tnts
+    - s3tnt
+    singular: s3tenant
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: The StorageGrid this tenant account belongs to
+      jsonPath: .spec.storageGridRef.name
+      name: StorageGrid
+      type: string
+    - description: The class of the tenant
+      jsonPath: .status.s3ApiEndpoint.s3TenantClassName
+      name: TenantClass
+      type: string
+    - description: Current phase of the tenant
+      jsonPath: .status.phase
+      name: Phase
+      type: string
+    - description: Backing S3 Tenant Account
+      jsonPath: .status.s3TenantAccountRef.name
+      name: Account
+      type: string
+    - description: Configured capacity of the tenant
+      jsonPath: .status.quota.limit
+      name: Capacity
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: AGE
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: S3Tenant is the Schema for the s3tenants API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: S3TenantSpec defines the desired state of S3Tenant
+            properties:
+              additionalTenantMetadata:
+                additionalProperties:
+                  type: string
+                description: |-
+                  As there is no metadata field in the backend, you can use this to add <field>:<value> pairs to the description
+                  This will always include the specified owner and description as default fields.
+                type: object
+              adminSecretRef:
+                default: {}
+                description: |-
+                  SecretRef for the admin tenant user
+                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentails
+                  the secret must contain the following keys:
+                    data:
+                      username: <base64 encoded username>
+                      password: <base64 encoded password>
+                  the admin user is used to manage the tenant and perform administrative tasks
+                properties:
+                  apiVersion:
+                    description: API version of the referent.
+                    type: string
+                  fieldPath:
+                    description: |-
+                      If referring to a piece of an object instead of an entire object, this string
+                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                      For example, if the object reference is to a container within a pod, this would take on a value like:
+                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                      the event) or if no container name is specified "spec.containers[2]" (container with
+                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                      referencing a part of an object.
+                      TODO: this design is not final and this field is subject to change in the future.
+                    type: string
+                  kind:
+                    description: |-
+                      Kind of the referent.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                    type: string
+                  name:
+                    description: |-
+                      Name of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                    type: string
+                  resourceVersion:
+                    description: |-
+                      Specific resourceVersion to which this reference is made, if any.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                    type: string
+                  uid:
+                    description: |-
+                      UID of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              allowedNamespaces:
+                description: |-
+                  Configure which namespaces are allowed to create buckets in this tenant (supports wildcards)
+                  if unset only the namespace of the tenant is allowed
+                items:
+                  type: string
+                type: array
+              defaultBucketRegion:
+                description: |-
+                  default bucket region to use
+                  if not set, the default region of the StorageGrid will be used
+                type: string
+              description:
+                description: |-
+                  User facing description of the S3 Tenant in Kubernetes
+                  This will be reflected in the backend.
+                type: string
+              name:
+                description: |-
+                  Name to identify the S3 Tenant in the backned
+                  This name will be prefixed with predefined values
+                  to ensure uniqueness across the backend.
+                type: string
+              owner:
+                default: unknown
+                description: |-
+                  Owner of the S3 Tenant
+                  Specify the owning resource of the tenant (e.g., a user or a team).
+                  This will be added to the tenant description in the bakcned
+                  There is no validation for the owner, so you can use any string.
+                type: string
+              s3AdminKeysSecretRef:
+                default: {}
+                description: |-
+                  SecretRef for the admin s3 keys
+                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-s3-admin-keypair
+                  the secret must contain the following keys:
+                    data:
+                      accessKeyId: <base64 encoded access key id>
+                      secretAccessKey: <base64 encoded secret access key>
+                  this is the administrative keypair to manage buckets and objects in the tenant
+                properties:
+                  apiVersion:
+                    description: API version of the referent.
+                    type: string
+                  fieldPath:
+                    description: |-
+                      If referring to a piece of an object instead of an entire object, this string
+                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                      For example, if the object reference is to a container within a pod, this would take on a value like:
+                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                      the event) or if no container name is specified "spec.containers[2]" (container with
+                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                      referencing a part of an object.
+                      TODO: this design is not final and this field is subject to change in the future.
+                    type: string
+                  kind:
+                    description: |-
+                      Kind of the referent.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                    type: string
+                  name:
+                    description: |-
+                      Name of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                    type: string
+                  resourceVersion:
+                    description: |-
+                      Specific resourceVersion to which this reference is made, if any.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                    type: string
+                  uid:
+                    description: |-
+                      UID of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              s3TenantClassName:
+                description: |-
+                  define tenantclassname for s3 endpoint accessibility
+                  if not specified the default tenant class will be used
+                maxLength: 63
+                type: string
+              storageGridRef:
+                description: StorageGrid reference
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      TODO: Add other useful fields. apiVersion, kind, uid?
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      TODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: storageGridRef is immutable
+                  rule: self == oldSelf
+              storageQuota:
+                anyOf:
+                - type: integer
+                - type: string
+                description: |-
+                  the storage quota for the S3 Tenant
+                  should be specified using a quantity string (e.g., "512Mi", "1Gi").
+                  Example:
+                    storageQuota: "1Gi"
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
+            type: object
+          status:
+            default: {}
+            description: S3TenantStatus defines the observed state of S3Tenant
+            properties:
+              adminSecretRef:
+                default: {}
+                description: |-
+                  SecretRef for the admin tenant user
+                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentails
+                  the secret must contain the following keys:
+                    data:
+                      username: <base64 encoded username>
+                      password: <base64 encoded password>
+                  the admin user is used to manage the tenant and perform administrative tasks
+                properties:
+                  apiVersion:
+                    description: API version of the referent.
+                    type: string
+                  fieldPath:
+                    description: |-
+                      If referring to a piece of an object instead of an entire object, this string
+                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                      For example, if the object reference is to a container within a pod, this would take on a value like:
+                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                      the event) or if no container name is specified "spec.containers[2]" (container with
+                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                      referencing a part of an object.
+                      TODO: this design is not final and this field is subject to change in the future.
+                    type: string
+                  kind:
+                    description: |-
+                      Kind of the referent.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                    type: string
+                  name:
+                    description: |-
+                      Name of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                    type: string
+                  resourceVersion:
+                    description: |-
+                      Specific resourceVersion to which this reference is made, if any.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                    type: string
+                  uid:
+                    description: |-
+                      UID of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              conditions:
+                description: Track s3Tenant conditions
+                items:
+                  description: "Condition contains details for one aspect of the current
+                    state of this API Resource.\n---\nThis struct is intended for
+                    direct use as an array at the field path .status.conditions.  For
+                    example,\n\n\n\ttype FooStatus struct{\n\t    // Represents the
+                    observations of a foo's current state.\n\t    // Known .status.conditions.type
+                    are: \"Available\", \"Progressing\", and \"Degraded\"\n\t    //
+                    +patchMergeKey=type\n\t    // +patchStrategy=merge\n\t    // +listType=map\n\t
+                    \   // +listMapKey=type\n\t    Conditions []metav1.Condition `json:\"conditions,omitempty\"
+                    patchStrategy:\"merge\" patchMergeKey:\"type\" protobuf:\"bytes,1,rep,name=conditions\"`\n\n\n\t
+                    \   // other fields\n\t}"
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: |-
+                        type of condition in CamelCase or in foo.example.com/CamelCase.
+                        ---
+                        Many .condition.type values are consistent across resources like Available, but because arbitrary conditions can be
+                        useful (see .node.status.conditions), the ability to deconflict is important.
+                        The regex it matches is (dns1123SubdomainFmt/)?(qualifiedNameFmt)
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              defaultBucketRegion:
+                description: Default region for the buckets of the tenant inherited
+                  from grid if not specified by the tenant
+                type: string
+              gridEndpoint:
+                description: |-
+                  grid endpoint of the backend
+                  this is the endpoint to access the StorageGrid management API
+                type: string
+              linkedBuckets:
+                description: |-
+                  keep track of linked buckets in this tenant
+                  all buckets are within the same namespace as the tenant
+                items:
+                  type: string
+                type: array
+              phase:
+                default: Pending
+                description: |-
+                  Phase displays the current state of the S3 Tenant
+                  Possible values:
+                  - "Pending": The tenant is being created.
+                  - "Ready": The tenant is ready to use.
+                  - "Failed": The tenant creation failed.
+                  - "Deleting": The tenant is being deleted.
+                  - "InProgress": The tenant is being updated.
+                  - "Retaining": The tenant is being retained after deletion.
+                  - "RetainWait": The tenant is retained until deletion timestamp is reached.
+                  - "Bound": The S3Tenant is bound to the S3TenantAccount and is ready to use.
+                enum:
+                - Pending
+                - Ready
+                - Failed
+                - Deleting
+                - InProgress
+                - Retaining
+                - RetainWait
+                - Bound
+                type: string
+              quota:
+                description: Quota of the S3 Tenant storage
+                properties:
+                  limit:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Total storage limit for the S3 Tenant configured
+                      on the backend
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                  used:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: Total storage used by the S3 Tenant
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    x-kubernetes-int-or-string: true
+                type: object
+              regions:
+                description: Available Regions for the S3 Tenant
+                items:
+                  type: string
+                type: array
+              s3AdminAccessKeyId:
+                description: |-
+                  S3AdminAccessKeyId is the ID for the administrative S3 access key
+                  this key is used to manage buckets and objects in the tenant
+                type: string
+              s3AdminKeysSecretRef:
+                description: |-
+                  SecretRef for the admin s3 keys
+                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-s3-admin-keypair
+                  the secret must contain the following keys:
+                    data:
+                      accessKeyId: <base64 encoded access key id>
+                      secretAccessKey: <base64 encoded secret access key>
+                  this is the administrative keypair to manage buckets and objects in the tenant
+                properties:
+                  apiVersion:
+                    description: API version of the referent.
+                    type: string
+                  fieldPath:
+                    description: |-
+                      If referring to a piece of an object instead of an entire object, this string
+                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                      For example, if the object reference is to a container within a pod, this would take on a value like:
+                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                      the event) or if no container name is specified "spec.containers[2]" (container with
+                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                      referencing a part of an object.
+                      TODO: this design is not final and this field is subject to change in the future.
+                    type: string
+                  kind:
+                    description: |-
+                      Kind of the referent.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                    type: string
+                  name:
+                    description: |-
+                      Name of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                    type: string
+                  resourceVersion:
+                    description: |-
+                      Specific resourceVersion to which this reference is made, if any.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                    type: string
+                  uid:
+                    description: |-
+                      UID of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              s3ApiEndpoint:
+                default: {}
+                description: |-
+                  S3 endpoint to use for tenant users
+                  Includes URLs and VIPs to access your buckets and objects
+                properties:
+                  pathStyleAccess:
+                    default: false
+                    description: |-
+                      Use pathstyle access for the s3 api endpoint
+                      Defaults to false if not set
+                    type: boolean
+                  port:
+                    description: Port for the S3 API endpoint
+                    format: int32
+                    type: integer
+                  s3TenantClassName:
+                    default: ""
+                    description: TenantClassName which this S3ApiEndpoint belongs
+                      to
+                    type: string
+                  s3Urls:
+                    description: urls of the s3 api endpoint
+                    items:
+                      type: string
+                    type: array
+                  s3VIPs:
+                    description: S3 VIPs to use for potential fw requests
+                    items:
+                      type: string
+                    type: array
+                type: object
+              s3TenantAccountRef:
+                description: track a reference to the tenantAccount binding this tenant
+                properties:
+                  apiVersion:
+                    description: API version of the referent.
+                    type: string
+                  fieldPath:
+                    description: |-
+                      If referring to a piece of an object instead of an entire object, this string
+                      should contain a valid JSON/Go field access statement, such as desiredState.manifest.containers[2].
+                      For example, if the object reference is to a container within a pod, this would take on a value like:
+                      "spec.containers{name}" (where "name" refers to the name of the container that triggered
+                      the event) or if no container name is specified "spec.containers[2]" (container with
+                      index 2 in this pod). This syntax is chosen only to have some well-defined way of
+                      referencing a part of an object.
+                      TODO: this design is not final and this field is subject to change in the future.
+                    type: string
+                  kind:
+                    description: |-
+                      Kind of the referent.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+                    type: string
+                  name:
+                    description: |-
+                      Name of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/
+                    type: string
+                  resourceVersion:
+                    description: |-
+                      Specific resourceVersion to which this reference is made, if any.
+                      More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#concurrency-control-and-consistency
+                    type: string
+                  uid:
+                    description: |-
+                      UID of the referent.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              tenantID:
+                description: TenantID of the S3 Tenant
+                type: string
+              tenantManagerURL:
+                description: |-
+                  TenantManagerURL of the S3 Tenant
+                  Use this URL to manage the tenant using the Web UI
+                type: string
+              usage:
+                description: Usage of the S3 Tenant
+                properties:
+                  bucketCount:
+                    description: total buckets created by the S3 Tenant
+                    type: integer
+                  objectCount:
+                    description: total objects stored by the S3 Tenant
+                    format: int64
+                    type: integer
+                type: object
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

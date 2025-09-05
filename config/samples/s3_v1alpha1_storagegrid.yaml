@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: shared-co-creds
+  namespace: default
+type: Opaque
+stringData:
+  username: "root"
+  password: "One8Storman$"
+---
+apiVersion: s3.bedag.ch/v1alpha1
+kind: StorageGrid
+metadata:
+  labels:
+    app.kubernetes.io/name: storagegrid-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: shared-co
+spec:
+  secretRef:
+    name: shared-co-creds
+    namespace: default
+  endpoint: "https://mcostr0015gw1.svc.bedag.ch/"
+  s3ApiEndpoint:
+    pathStyleAccess: true
+    url: https://x7aa-s3-shcofe.svc.bedag.ch:10443

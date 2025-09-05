@@ -1,0 +1,227 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+  name: s3tenantclasses.s3.bedag.ch
+spec:
+  group: s3.bedag.ch
+  names:
+    kind: S3TenantClass
+    listKind: S3TenantClassList
+    plural: s3tenantclasses
+    shortNames:
+    - s3class
+    singular: s3tenantclass
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - description: The StorageGrid this tenant account belongs to
+      jsonPath: .spec.storageGridRef.name
+      name: StorageGrid
+      type: string
+    - description: Displayname within StorageGrid
+      jsonPath: .status.displayName
+      name: DisplayName
+      type: string
+    - description: Where it will be enforced, so only tenants in this class can use
+        the backing gateway
+      jsonPath: .spec.enforce
+      name: Enforce
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: AGE
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: S3TenantClass is the Schema for the s3tenantclasses API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: S3TenantClassSpec defines the desired state of S3TenantClass
+            properties:
+              backingID:
+                description: |-
+                  The backing ID on the StorageGrid
+                  Need to point to an existing gateway in the StorageGrid
+                type: string
+                x-kubernetes-validations:
+                - message: storageGridRef is immutable
+                  rule: self == oldSelf
+              enforce:
+                default: false
+                description: |-
+                  Enforce make sure that only the tenants in this class can
+                  use the backing gateway in the StorageGrid
+                type: boolean
+              refreshInterval:
+                default: 60m
+                description: Frequency to check for changes in the StorageGrid in
+                  minutes
+                type: string
+              storageGridRef:
+                description: StorageGrid Reference for the TenantClass
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      TODO: Add other useful fields. apiVersion, kind, uid?
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      TODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: storageGridRef is immutable
+                  rule: self == oldSelf
+              usePathStyleAccess:
+                default: false
+                description: pathstyle access means the bucketname is part of the
+                  path
+                type: boolean
+            type: object
+          status:
+            description: S3TenantClassStatus defines the observed state of S3TenantClass
+            properties:
+              conditions:
+                description: Track S3TenantClass conditions
+                items:
+                  description: "Condition contains details for one aspect of the current
+                    state of this API Resource.\n---\nThis struct is intended for
+                    direct use as an array at the field path .status.conditions.  For
+                    example,\n\n\n\ttype FooStatus struct{\n\t    // Represents the
+                    observations of a foo's current state.\n\t    // Known .status.conditions.type
+                    are: \"Available\", \"Progressing\", and \"Degraded\"\n\t    //
+                    +patchMergeKey=type\n\t    // +patchStrategy=merge\n\t    // +listType=map\n\t
+                    \   // +listMapKey=type\n\t    Conditions []metav1.Condition `json:\"conditions,omitempty\"
+                    patchStrategy:\"merge\" patchMergeKey:\"type\" protobuf:\"bytes,1,rep,name=conditions\"`\n\n\n\t
+                    \   // other fields\n\t}"
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: |-
+                        type of condition in CamelCase or in foo.example.com/CamelCase.
+                        ---
+                        Many .condition.type values are consistent across resources like Available, but because arbitrary conditions can be
+                        useful (see .node.status.conditions), the ability to deconflict is important.
+                        The regex it matches is (dns1123SubdomainFmt/)?(qualifiedNameFmt)
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              displayName:
+                description: The displayname of the S3TenantClass
+                type: string
+              ipv4AccessEnabled:
+                default: true
+                description: Define whether ipv4 access is enabled
+                type: boolean
+              ipv6AccessEnabled:
+                default: false
+                description: Define whether ipv6 access is enabled
+                type: boolean
+              lastUpdated:
+                description: Track the last time the S3TenantClass was updated
+                format: date-time
+                type: string
+              port:
+                description: Port for the S3TenantClass
+                format: int32
+                type: integer
+              s3Endpoints:
+                description: S3 Endpoint
+                items:
+                  type: string
+                type: array
+              s3VIPs:
+                description: S3 VIP
+                items:
+                  type: string
+                type: array
+              secure:
+                description: Secure defines whether TLS is enabled on the endpoint
+                  or not
+                type: boolean
+              tenants:
+                description: |-
+                  track a list of tenants that use this class
+                  needed to update the tenantclass when a tenant is created or deleted
+                items:
+                  type: string
+                type: array
+              untrustedNetworksDropped:
+                default: false
+                description: drop requests on untrusted client networks
+                type: boolean
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

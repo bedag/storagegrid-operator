@@ -37,8 +37,6 @@ jobs:
       uses: golangci/golangci-lint-action@v8
       with:
         version: ${{ env.GOLANGCI_VERSION }}
-        skip-pkg-cache: true
-        skip-build-cache: true
 
   test:
     name: Test

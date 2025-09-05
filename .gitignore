@@ -1,0 +1,31 @@
+DS_Store
+/bin
+
+# ignore vim swp
+*.swp
+
+# ignore ide files (debug config etc...)
+/.vscode
+/.idea
+
+# helm chart dependencies
+**/charts/*.tgz
+**/charts/**/requirements.lock
+.tagmanifest
+deploy/charts/external-secrets/templates/crds/*.yaml
+
+site/
+e2e/k8s/deploy
+e2e/suites/argocd/argocd.test
+e2e/suites/flux/flux.test
+e2e/suites/provider/provider.test
+e2e/suites/generator/generator.test
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Temporary files
+tmp/
+tests/crds/*.yml
+.tilt-tmp

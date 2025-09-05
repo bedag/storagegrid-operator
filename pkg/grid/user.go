@@ -1,3 +1,19 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package grid
 
 import (
@@ -28,37 +44,36 @@ func createUser(ctx context.Context, username string, groupID string, tenantClie
 	return *createdUser.Id, nil
 }
 
-func userExists(ctx context.Context, username string, tenantClient *TenantClient) (bool, string, error) {
+func userExists(ctx context.Context, username string, tenantClient *TenantClient) (bool, string) {
 	log := log.FromContext(ctx).WithValues("func", "userExists")
 	log.V(1).Info(fmt.Sprintf("Checking if user %s exists", username))
 
 	user, err := tenantClient.Users.GetByName(ctx, username)
 	if err == nil {
 		log.V(1).Info(fmt.Sprintf("User %s exists", username))
-		return true, *user.Id, nil
+		return true, *user.Id
 	}
 
 	log.V(1).Info(fmt.Sprintf("User %s does not exist", username))
-	return false, "", nil
+	return false, ""
 }
 
 func createUserIfNotExists(ctx context.Context, username string, groupID string, tenantClient *TenantClient) (string, error) {
 	log := log.FromContext(ctx).WithValues("func", "createUserIfNotExists")
 
-	// check if the user already exists
-	exists, userID, err := userExists(ctx, username, tenantClient)
-	if err != nil {
-		log.Error(err, "Failed to check if user exists")
-		return "", err
-	}
+	// check if the user already exists.
+	exists, userID := userExists(ctx, username, tenantClient)
 	if exists {
 		log.V(1).Info(fmt.Sprintf("User %s already exists, validating membership", username))
-		ensureGroupMembership(ctx, username, groupID, tenantClient)
+		if err := ensureGroupMembership(ctx, username, groupID, tenantClient); err != nil {
+			log.Error(err, "Failed to ensure group membership for existing user")
+			return "", err
+		}
 		return userID, nil
 	}
 
-	// create the user
-	userID, err = createUser(ctx, username, groupID, tenantClient)
+	// create the user.
+	userID, err := createUser(ctx, username, groupID, tenantClient)
 	if err != nil {
 		log.Error(err, "Failed to create user")
 		return "", err
@@ -71,21 +86,21 @@ func ensureGroupMembership(ctx context.Context, username string, groupID string,
 	log := log.FromContext(ctx).WithValues("func", "ensureGroupMembership")
 	log.V(1).Info(fmt.Sprintf("Ensuring user %s is member of group with id %s", username, groupID))
 
-	// get user by name
+	// get user by name.
 	user, err := tenantClient.Users.GetByName(ctx, username)
 	if err != nil {
 		log.Error(err, "Failed to get user by name")
 		return err
 	}
 
-	// get group by id
+	// get group by id.
 	group, err := tenantClient.Groups.GetById(ctx, groupID)
 	if err != nil {
 		log.Error(err, "Failed to get group by id")
 		return err
 	}
 
-	// check if the user is already a member of the group
+	// check if the user is already a member of the group.
 	for _, gid := range user.MemberOf {
 		if gid == *group.Id {
 			log.V(1).Info(fmt.Sprintf("User %s is already member of group %s", username, group.DisplayName))
@@ -93,7 +108,7 @@ func ensureGroupMembership(ctx context.Context, username string, groupID string,
 		}
 	}
 
-	// add group to the memberof list
+	// add group to the memberof list.
 	user.MemberOf = append(user.MemberOf, *group.Id)
 	_, err = tenantClient.Users.Update(ctx, user)
 	if err != nil {
@@ -121,7 +136,7 @@ func createGroup(ctx context.Context, groupName string, policies *models.TenantG
 	log := log.FromContext(ctx).WithValues("func", "CreateBucketAdminGroup")
 	log.V(1).Info(fmt.Sprintf("Creating group %s", groupName))
 
-	// groupname can't be longer than 32 characters
+	// groupname can't be longer than 32 characters.
 	if len(groupName) > 32 {
 		log.V(1).Info(fmt.Sprintf("Group name %s is longer than 32 characters, truncating", groupName))
 		groupName = groupName[:32]
@@ -143,18 +158,18 @@ func createGroup(ctx context.Context, groupName string, policies *models.TenantG
 	return *createdGroup.Id, nil
 }
 
-func groupExists(ctx context.Context, groupName string, tenantClient *TenantClient) (bool, string, error) {
+func groupExists(ctx context.Context, groupName string, tenantClient *TenantClient) (bool, string) {
 	log := log.FromContext(ctx).WithValues("func", "groupExists")
 	log.V(1).Info(fmt.Sprintf("Checking if group %s exists", groupName))
 
 	group, err := tenantClient.Groups.GetByName(ctx, groupName)
 	if err == nil {
 		log.V(1).Info(fmt.Sprintf("Group %s exists", groupName))
-		return true, *group.Id, nil
+		return true, *group.Id
 	}
 
 	log.V(1).Info(fmt.Sprintf("Group %s does not exist", groupName))
-	return false, "", nil
+	return false, ""
 }
 
 // createGroupIfNotExists checks if a group with the given name exists, and creates it if it does not.
@@ -162,19 +177,15 @@ func groupExists(ctx context.Context, groupName string, tenantClient *TenantClie
 func createGroupIfNotExists(ctx context.Context, groupName string, policies *models.TenantGroupPolicies, tenantClient *TenantClient) (string, error) {
 	log := log.FromContext(ctx).WithValues("func", "createGroupIfNotExists")
 
-	// check if the group already exists
-	exists, groupID, err := groupExists(ctx, groupName, tenantClient)
-	if err != nil {
-		log.Error(err, "Failed to check if group exists")
-		return "", err
-	}
+	// check if the group already exists.
+	exists, groupID := groupExists(ctx, groupName, tenantClient)
 	if exists {
 		log.V(1).Info(fmt.Sprintf("Group %s already exists, skipping creation", groupName))
 		return groupID, nil
 	}
 
-	// create the group
-	groupID, err = createGroup(ctx, groupName, policies, tenantClient)
+	// create the group.
+	groupID, err := createGroup(ctx, groupName, policies, tenantClient)
 	if err != nil {
 		log.Error(err, "Failed to create group")
 		return "", err

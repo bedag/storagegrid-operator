@@ -1,3 +1,19 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package kube
 
 import (
@@ -15,7 +31,7 @@ import (
 )
 
 // FetchCredentialsFromSecret fetches a Secret and returns the credentials as strings.
-// assumes that the keys are always "username" and "password"
+// assumes that the keys are always "username" and "password".
 func FetchCredentialsFromSecret(ctx context.Context, k8sClient client.Client, namespace string, secretName string) (username string, password string, err error) {
 	var secret corev1.Secret
 	err = k8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: secretName}, &secret)
@@ -40,7 +56,7 @@ func FetchKeyPairFromSecret(ctx context.Context, k8sClient client.Client, namesp
 	return accessKeyId, secretAccessKey, nil
 }
 
-// creates a secret with keys "username" and "password" in the specified namespace
+// creates a secret with keys "username" and "password" in the specified namespace.
 func CreateCredentialSecret(ctx context.Context, k8sClient client.Client, namespace string, secretName string, username string, password string, owner metav1.Object) error {
 	data := map[string][]byte{
 		"username": []byte(username),
@@ -50,7 +66,7 @@ func CreateCredentialSecret(ctx context.Context, k8sClient client.Client, namesp
 	return createSecret(ctx, k8sClient, secretName, namespace, data, owner)
 }
 
-// creates a secret with keys "accessKeyId" and "secretAccessKey" in the specified namespace
+// creates a secret with keys "accessKeyId" and "secretAccessKey" in the specified namespace.
 func CreateKeyPairSecret(ctx context.Context, k8sClient client.Client, namespace string, secretName string, accessKeyId string, secretAccessKey string, owner metav1.Object) error {
 	data := map[string][]byte{
 		"accessKeyId":     []byte(accessKeyId),
@@ -78,7 +94,7 @@ func createSecret(ctx context.Context, k8sClient client.Client, secretName strin
 		Namespace: desired.Namespace,
 	}, existing)
 
-	// Doesn't exist → create new secret
+	// Doesn't exist → create new secret.
 	if apierrors.IsNotFound(err) {
 		if err := controllerutil.SetControllerReference(owner, desired, k8sClient.Scheme()); err != nil {
 			return err
@@ -88,11 +104,11 @@ func createSecret(ctx context.Context, k8sClient client.Client, secretName strin
 		}
 		return nil
 	} else if err != nil {
-		// Any other error
+		// Any other error.
 		return err
 	}
 
-	// Check ownership before updating
+	// Check ownership before updating.
 	if !metav1.IsControlledBy(existing, owner) {
 		return fmt.Errorf(
 			"secret %s already exists and cannot be owned by %s/%s",
@@ -100,7 +116,7 @@ func createSecret(ctx context.Context, k8sClient client.Client, secretName strin
 		)
 	}
 
-	// Update existing if necessary
+	// Update existing if necessary.
 	if !reflect.DeepEqual(existing.Data, desired.Data) {
 		existing.Data = desired.Data
 		if err := k8sClient.Update(ctx, existing); err != nil {

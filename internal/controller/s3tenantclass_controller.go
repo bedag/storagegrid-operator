@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ import (
 	"git.mgmtbi.ch/cloud/storagegrid-operator/pkg/kube"
 )
 
-// S3TenantClassReconciler reconciles a S3TenantClass object
+// S3TenantClassReconciler reconciles a S3TenantClass object.
 type S3TenantClassReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -52,7 +52,7 @@ type s3TenantClassReconcileContext struct {
 }
 
 const (
-	// this is important to ensure that all linked tenants are deleted before the storageGrid is deleted
+	// this is important to ensure that all linked tenants are deleted before the storageGrid is deleted.
 	s3tenantClassFinalizer = "s3tenantclass.s3.bedag.ch/finalizer"
 )
 
@@ -63,14 +63,14 @@ const (
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=storagegrids,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
+// Reconcile is part of the main kubernetes reconciliation loop which aims to.
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the S3TenantClass object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
+// TODO(user): Modify the Reconcile function to compare the state specified by.
+// the S3TenantClass object against the actual cluster state, and then.
+// perform operations to make the cluster state reflect the state specified by.
 // the user.
 //
-// For more details, check Reconcile and its Result here:
+// For more details, check Reconcile and its Result here:.
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.4/pkg/reconcile
 
 func (r *S3TenantClassReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -85,7 +85,7 @@ func (r *S3TenantClassReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 	log.V(1).Info(fmt.Sprintf("Reconciling S3TenantClass %s", tenantClass.Name))
 
-	// create a new context for the reconciliation
+	// create a new context for the reconciliation.
 	rctx := &s3TenantClassReconcileContext{
 		S3TenantClass: tenantClass,
 		StorageGrid:   &s3v1alpha1.StorageGrid{},
@@ -95,22 +95,22 @@ func (r *S3TenantClassReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	err = r.doReconcile(ctx, rctx)
 
-	// use conditions to derive the readiness state
+	// use conditions to derive the readiness state.
 	r.deriveReadiness(ctx, rctx.S3TenantClass)
 
-	// update the annotations if they were updated
-	// needs to be done before the status is updated because we lose the annotations otherwise
+	// update the annotations if they were updated.
+	// needs to be done before the status is updated because we lose the annotations otherwise.
 	if rctx.ObjectUpdated {
-		// creating a deep copy of the status to avoid modifying the original object
+		// creating a deep copy of the status to avoid modifying the original object.
 		statusCopy := tenantClass.DeepCopy()
 
 		log.V(1).Info("Annotations were updated, updating the object")
 		if updateErr := r.Update(ctx, tenantClass); updateErr != nil {
 			log.Error(updateErr, "Failed to update annotations")
 			if err != nil {
-				err = fmt.Errorf("reconciliation failed: %w, failed to update annotations: %s", err, updateErr)
+				err = fmt.Errorf("reconciliation failed: %w, failed to update annotations: %w", err, updateErr)
 			} else {
-				err = fmt.Errorf("failed to update annotations: %s", updateErr)
+				err = fmt.Errorf("failed to update annotations: %w", updateErr)
 			}
 		} else {
 			log.V(1).Info("Annotations updated successfully")
@@ -122,10 +122,10 @@ func (r *S3TenantClassReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if updateErr := r.Status().Update(ctx, rctx.S3TenantClass); updateErr != nil {
 		log.Error(updateErr, "Failed to update status, requeuing")
 		if err == nil {
-			// no error occured during reconciliation, but status update failed
+			// no error occurred during reconciliation, but status update failed.
 			rctx.DoRequeue = true // requeue to ensure status is updated
 		}
-		// if an error already occured during reconciliation, we just return that error
+		// if an error already occurred during reconciliation, we just return that error.
 	}
 
 	return ctrl.Result{Requeue: rctx.DoRequeue}, err
@@ -134,7 +134,7 @@ func (r *S3TenantClassReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 func (r *S3TenantClassReconciler) doReconcile(ctx context.Context, rctx *s3TenantClassReconcileContext) (err error) {
 	log := log.FromContext(ctx)
 
-	// examine DeletionTimestamp to determine if object is under deletion
+	// examine DeletionTimestamp to determine if object is under deletion.
 	err = r.reconcileFinalizerAndDlelete(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.S3TenantClass, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "FinalizerError", fmt.Sprintf("Failed to reconcile delete or finalizer: %v", err))
@@ -145,20 +145,20 @@ func (r *S3TenantClassReconciler) doReconcile(ctx context.Context, rctx *s3Tenan
 		return nil
 	}
 
-	// get the storageGrid
+	// get the storageGrid.
 	if err := r.Get(ctx, types.NamespacedName{Name: rctx.S3TenantClass.Spec.StorageGridRef.Name}, rctx.StorageGrid); err != nil {
 		log.Error(err, fmt.Sprintf("Failed to retrieve StorageGrid from API %s", rctx.S3TenantClass.Spec.StorageGridRef.Name))
 		r.setCondition(rctx.S3TenantClass, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "StorageGridNotFound", fmt.Sprintf("Failed to retrieve StorageGrid %s from API: %v", rctx.S3TenantClass.Spec.StorageGridRef.Name, err))
 		return err
 	}
 
-	// ensure owner reference is set to the storageGrid
+	// ensure owner reference is set to the storageGrid.
 	if err := ctrl.SetControllerReference(rctx.StorageGrid, rctx.S3TenantClass, r.Scheme); err != nil {
 		r.setCondition(rctx.S3TenantClass, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "OwnerReferenceError", fmt.Sprintf("Failed to set owner reference for S3TenantClass to StorageGrid: %s", err.Error()))
 		return err
 	}
 
-	// check if the grid is operative
+	// check if the grid is operative.
 	err = r.reconcileGridReadiness(ctx, rctx.StorageGrid)
 	if err != nil {
 		r.setCondition(rctx.S3TenantClass, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionFalse, "StorageGridNotReady", fmt.Sprintf("StorageGrid %s not ready", rctx.StorageGrid.Name))
@@ -174,7 +174,7 @@ func (r *S3TenantClassReconciler) doReconcile(ctx context.Context, rctx *s3Tenan
 	}
 	r.setCondition(rctx.S3TenantClass, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionTrue, "StorageGridReady", fmt.Sprintf("StorageGrid %s is ready", rctx.StorageGrid.Name))
 
-	// cache the details from the tenantclass within the grid client
+	// cache the details from the tenantclass within the grid client.
 	err = r.fetchFromBackend(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.S3TenantClass, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "FetchGatewayFailed", fmt.Sprintf("Failed to fetch gateway %s: %v", rctx.S3TenantClass.Spec.BackingID, err))
@@ -183,14 +183,14 @@ func (r *S3TenantClassReconciler) doReconcile(ctx context.Context, rctx *s3Tenan
 
 	r.reconcileTenantClassStatus(ctx, rctx)
 
-	// Find all tenants referencing this TenantClass
+	// Find all tenants referencing this TenantClass.
 	err = r.reconcileLinkedTenants(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.S3TenantClass, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "LinkedTenantsError", fmt.Sprintf("Failed to reconcile linked tenants: %v", err))
 		return err
 	}
 
-	// mark reconciliation as successful
+	// mark reconciliation as successful.
 	r.setCondition(rctx.S3TenantClass, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "ReconcileSucceeded", "Reconciliation completed successfully")
 
 	return nil
@@ -199,58 +199,58 @@ func (r *S3TenantClassReconciler) doReconcile(ctx context.Context, rctx *s3Tenan
 func (r *S3TenantClassReconciler) deriveReadiness(ctx context.Context, tenantClass *s3v1alpha1.S3TenantClass) {
 	log := log.FromContext(ctx)
 
-	// all of these conditions need to be be in state true for this method to return true
+	// all of these conditions need to be be in state true for this method to return true.
 	reconciliation := false
 	backendReady := false
 
-	// message that will show on the ready condition
+	// message that will show on the ready condition.
 	message := ""
 
-	// get the reconciliation condition of the current generation
+	// get the reconciliation condition of the current generation.
 	reconcileCondition := meta.FindStatusCondition(tenantClass.Status.Conditions, s3v1alpha1.ConditionTypeReconcileSucceeded)
 	if reconcileCondition != nil {
-		// check if the condition is from the current generation
+		// check if the condition is from the current generation.
 		if reconcileCondition.ObservedGeneration == tenantClass.GetGeneration() {
-			// if the condition is true, we can assume the reconciliation was successful
+			// if the condition is true, we can assume the reconciliation was successful.
 			if reconcileCondition.Status == metav1.ConditionTrue {
 				log.V(1).Info("Reconciliation succeeded")
-				message = message + "Reconciliation succeeded"
+				message += "Reconciliation succeeded"
 
-				// set the reconciliation state to true
+				// set the reconciliation state to true.
 				reconciliation = true
 			} else {
 				log.V(1).Info("Reconciliation failed somewhere, overall ready state is false")
-				message = message + "Reconciliation failed"
+				message += "Reconciliation failed"
 			}
 		} else {
 			log.V(1).Info("Reconciliation condition is not from the current generation, overall ready state is false")
-			message = message + "Reconciliation condition is not from the current generation"
+			message += "Reconciliation condition is not from the current generation"
 		}
 	} else {
 		log.V(1).Info("Reconciliation condition not found, overall ready state is false")
-		message = message + "Reconciliation condition not found"
+		message += "Reconciliation condition not found"
 	}
 
-	// check whether the backing resource is ready
+	// check whether the backing resource is ready.
 	backendCondition := meta.FindStatusCondition(tenantClass.Status.Conditions, s3v1alpha1.ContitionTypeBackingResourceReady)
-	// we can directly translate the state of the condition to our variable
+	// we can directly translate the state of the condition to our variable.
 	if backendCondition != nil {
 		if backendCondition.ObservedGeneration == tenantClass.GetGeneration() {
 			if backendCondition.Status == metav1.ConditionTrue {
 				log.V(1).Info("Backing resource is ready")
-				message = message + ", Backing resource is ready"
+				message += ", Backing resource is ready"
 				backendReady = true
 			} else {
 				log.V(1).Info("Backing resource is not ready")
-				message = message + ", Backing resource is not ready"
+				message += ", Backing resource is not ready"
 			}
 		} else {
 			log.V(1).Info("Backing resource condition is not from the current generation, overall ready state is false")
-			message = message + ", Backing resource condition is not from the current generation"
+			message += ", Backing resource condition is not from the current generation"
 		}
 	} else {
 		log.V(1).Info("Backing resource condition not found, overall ready state is false")
-		message = message + ", Backing resource condition not found"
+		message += ", Backing resource condition not found"
 	}
 
 	if reconciliation && backendReady {
@@ -267,9 +267,9 @@ func (r *S3TenantClassReconciler) reconcileFinalizerAndDlelete(ctx context.Conte
 
 	log.V(1).Info(fmt.Sprintf("Reconciling finalizer for S3TenantClass %s", rctx.S3TenantClass.Name))
 
-	// Check if the object is being deleted
+	// Check if the object is being deleted.
 	if rctx.S3TenantClass.DeletionTimestamp.IsZero() {
-		// if the object is not being deleted, add our finalizer if it is not already present
+		// if the object is not being deleted, add our finalizer if it is not already present.
 		if !controllerutil.ContainsFinalizer(rctx.S3TenantClass, s3tenantClassFinalizer) {
 			controllerutil.AddFinalizer(rctx.S3TenantClass, s3tenantClassFinalizer)
 			log.V(1).Info("Adding finalizer to S3TenantClass", "finalizer", s3tenantClassFinalizer)
@@ -278,9 +278,9 @@ func (r *S3TenantClassReconciler) reconcileFinalizerAndDlelete(ctx context.Conte
 			return nil
 		}
 	} else {
-		// the object is being deleted
+		// the object is being deleted.
 		if controllerutil.ContainsFinalizer(rctx.S3TenantClass, s3tenantClassFinalizer) {
-			// our finalizer is present, so lets handle any external dependency
+			// our finalizer is present, so lets handle any external dependency.
 			if err := r.finalize(ctx, rctx.S3TenantClass); err != nil {
 				log.Error(err, "Failed to finalize s3TenantClass")
 				return err
@@ -302,7 +302,7 @@ func (r *S3TenantClassReconciler) reconcileFinalizerAndDlelete(ctx context.Conte
 func (r *S3TenantClassReconciler) reconcileGridReadiness(ctx context.Context, sg *s3v1alpha1.StorageGrid) error {
 	log := log.FromContext(ctx)
 
-	// TODO: this should change to using status.Conditions, status.Ready is the human readable version of the conditions
+	// TODO: this should change to using status.Conditions, status.Ready is the human readable version of the conditions.
 	if !sg.Status.Ready {
 		log.Error(fmt.Errorf("StorageGrid is not ready"), fmt.Sprintf("StorageGrid %s not ready", sg.Name))
 		return fmt.Errorf("grid %s is not operative", sg.Name)
@@ -357,7 +357,7 @@ func (r *S3TenantClassReconciler) reconcileTenantClassStatus(ctx context.Context
 	log.V(1).Info(fmt.Sprintf("Reconcile S3TenantClass %s status", rctx.S3TenantClass.Name))
 	if rctx.S3TenantClass.Status.LastUpdated.IsZero() || rctx.S3TenantClass.Status.LastUpdated.Add(refreshInterval.Duration).Before(metav1.Now().Time) {
 		log.V(1).Info(fmt.Sprintf("Refreshing S3TenantClass %s status", rctx.S3TenantClass.Name))
-		// update status fields
+		// update status fields.
 		rctx.S3TenantClass.Status.DisplayName = grid.GetDisplayname(rctx.Gateway)
 		rctx.S3TenantClass.Status.Port = grid.GetPort(rctx.Gateway)
 		rctx.S3TenantClass.Status.Secure = grid.IsTLSEnabled(rctx.Gateway)
@@ -367,7 +367,7 @@ func (r *S3TenantClassReconciler) reconcileTenantClassStatus(ctx context.Context
 		rctx.S3TenantClass.Status.S3VIPs = grid.GetVIPs(rctx.Gateway)
 		rctx.S3TenantClass.Status.UntrustedNetworksDropped = grid.DropUntrustedNetworks(rctx.Gateway)
 
-		// set last updated
+		// set last updated.
 		rctx.S3TenantClass.Status.LastUpdated = metav1.Now()
 	} else {
 		log.V(1).Info(fmt.Sprintf("Skipping S3TenantClass %s status refresh, last updated at %s", rctx.S3TenantClass.Name, rctx.S3TenantClass.Status.LastUpdated.String()))
@@ -379,14 +379,14 @@ func (r *S3TenantClassReconciler) reconcileTenantClassStatus(ctx context.Context
 func (r *S3TenantClassReconciler) reconcileLinkedTenants(ctx context.Context, rctx *s3TenantClassReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// List all tenants that reference this TenantClass
+	// List all tenants that reference this TenantClass.
 	tenants := &s3v1alpha1.S3TenantAccountList{}
 	opts := []client.ListOption{
 		client.MatchingFields{"status.s3ApiEndpoint.s3TenantClassName": rctx.S3TenantClass.Name},
 	}
 	err := r.List(ctx, tenants, opts...)
 	if err != nil {
-		// if err is about unable to list its good
+		// if err is about unable to list its good.
 		if client.IgnoreNotFound(err) != nil {
 			log.Error(err, "Failed to list tenants")
 			return nil
@@ -395,23 +395,23 @@ func (r *S3TenantClassReconciler) reconcileLinkedTenants(ctx context.Context, rc
 		log.Info("No tenant registered with this TenantClass")
 	}
 
-	// We're assuming that all tenants exist
+	// We're assuming that all tenants exist.
 	tenantNew := map[string]bool{}
-	for _, tenant := range tenants.Items {
-		tenantNew[tenant.Status.TenantID] = true
+	for i := range tenants.Items {
+		tenantNew[tenants.Items[i].Status.TenantID] = true
 	}
 
-	// iteratote over all known tenants to check if any tenant was removed
+	// iteratote over all known tenants to check if any tenant was removed.
 	for _, tenantID := range rctx.S3TenantClass.Status.S3TenantIDs {
-		// this checks if the tenant was already discovered and added on a previous reconciliation
+		// this checks if the tenant was already discovered and added on a previous reconciliation.
 		_, ok := tenantNew[tenantID]
 		if ok {
 			tenantNew[tenantID] = false
 			continue
 		}
 
-		// This means the tenant is no longer on the cluster - meaning it needs to be removed from the allowlist
-		// only execute if the tenantClass is enforcing the allowlist
+		// This means the tenant is no longer on the cluster - meaning it needs to be removed from the allowlist.
+		// only execute if the tenantClass is enforcing the allowlist.
 		log.V(1).Info(fmt.Sprintf("Tenant %s is no longer in the cluster, removing from allowlist", tenantID))
 		if rctx.S3TenantClass.Spec.Enforce {
 			err = grid.RemoveTenantFromAllowlist(ctx, tenantID, rctx.Gateway, rctx.GridClient)
@@ -425,9 +425,9 @@ func (r *S3TenantClassReconciler) reconcileLinkedTenants(ctx context.Context, rc
 		}
 	}
 
-	// create empty list of tenants to add to status
+	// create empty list of tenants to add to status.
 	tenantList := []string{}
-	// make sure all tenants are in the allowlist
+	// make sure all tenants are in the allowlist.
 	for tenantID := range tenantNew {
 		if rctx.S3TenantClass.Spec.Enforce {
 			err = grid.AddTenantToAllowlist(ctx, tenantID, rctx.Gateway, rctx.GridClient)
@@ -458,37 +458,37 @@ func (r *S3TenantClassReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func (r *S3TenantClassReconciler) mapTenantToTenantClass(ctx context.Context, obj client.Object) []reconcile.Request {
 	tenant, ok := obj.(*s3v1alpha1.S3TenantAccount)
-	// don't reconcile if the object is not a tenant
+	// don't reconcile if the object is not a tenant.
 	if !ok {
 		return nil
 	}
 
-	// Handle delete events (Tenant is being deleted)
+	// Handle delete events (Tenant is being deleted).
 	if !tenant.DeletionTimestamp.IsZero() && tenant.Status.S3ApiEndpoint.S3TenantClassName != "" {
 		return []reconcile.Request{
 			{NamespacedName: client.ObjectKey{Name: tenant.Status.S3ApiEndpoint.S3TenantClassName}},
 		}
 	}
 
-	// Handle create/update events
+	// Handle create/update events.
 	if tenant.Status.S3ApiEndpoint.S3TenantClassName != "" {
 		return []reconcile.Request{
 			{NamespacedName: client.ObjectKey{Name: tenant.Status.S3ApiEndpoint.S3TenantClassName}},
 		}
 	}
 
-	// no reason to reconcile
+	// no reason to reconcile.
 	return nil
 }
 
 func (r *S3TenantClassReconciler) finalize(ctx context.Context, tenantClass *s3v1alpha1.S3TenantClass) error {
-	// Add your finalization logic here
+	// Add your finalization logic here.
 	log := log.FromContext(ctx)
 	log.V(1).Info(fmt.Sprintf("Finalizing s3TenantClass %s", tenantClass.Status.DisplayName))
 
-	// TenantClass can't be removed as long as there are still tenants using it
-	// Therefore, we need to check if there are still tenants using this TenantClass
-	// this is already checked by a validationWebhook but we need to make sure anyway
+	// TenantClass can't be removed as long as there are still tenants using it.
+	// Therefore, we need to check if there are still tenants using this TenantClass.
+	// this is already checked by a validationWebhook but we need to make sure anyway.
 
 	tenantList := &s3v1alpha1.S3TenantList{}
 	err := r.List(ctx, tenantList, client.MatchingFields{"Status.S3ApiEndpoint.S3TenantClassName": tenantClass.Name})
@@ -504,7 +504,7 @@ func (r *S3TenantClassReconciler) finalize(ctx context.Context, tenantClass *s3v
 
 	if len(tenantList.Items) > 0 {
 		log.V(1).Info(fmt.Sprintf("Can't delete s3TenantClass %s because there are still tenants using it", tenantClass.Status.DisplayName))
-		return fmt.Errorf("Can't delete s3TenantClass %s because there are still tenants using it", tenantClass.Status.DisplayName)
+		return fmt.Errorf("can't delete s3TenantClass %s because there are still tenants using it", tenantClass.Status.DisplayName)
 	}
 
 	return nil

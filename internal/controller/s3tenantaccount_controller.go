@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ import (
 	"git.mgmtbi.ch/cloud/storagegrid-operator/pkg/kube"
 )
 
-// S3TenantAccountReconciler reconciles a S3TenantAccount object
+// S3TenantAccountReconciler reconciles a S3TenantAccount object.
 type S3TenantAccountReconciler struct {
 	client.Client
 	Scheme            *runtime.Scheme
@@ -47,30 +47,30 @@ type S3TenantAccountReconciler struct {
 }
 
 type accountReconcileContext struct {
-	// currently reconciled S3TenantAccount
+	// currently reconciled S3TenantAccount.
 	Account *s3v1alpha1.S3TenantAccount
-	// s3tenant binding the account
+	// s3tenant binding the account.
 	S3Tenant *s3v1alpha1.S3Tenant
-	// Storagegrid reference
+	// Storagegrid reference.
 	SG *s3v1alpha1.StorageGrid
-	// tracking if annotations were update to send the update request after the status was updated
-	// this is used to avoid sending multiple updates in the same reconciliation loop
+	// tracking if annotations were update to send the update request after the status was updated.
+	// this is used to avoid sending multiple updates in the same reconciliation loop.
 	ObjectUpdated bool
-	// track if we need to requeue the reconciliation loop
+	// track if we need to requeue the reconciliation loop.
 	DoRequeue bool
-	// requeAfter is used to requeue the reconciliation loop after a certain time
+	// requeAfter is used to requeue the reconciliation loop after a certain time.
 	RequeAfter metav1.Duration
-	// keep the backend tenant and usage to avoid multiple calls to the backend
-	// while making sure they are consistent within one reconciliation loop
+	// keep the backend tenant and usage to avoid multiple calls to the backend.
+	// while making sure they are consistent within one reconciliation loop.
 	BackendTenant      *grid.Tenant
 	BackendTenantUsage *grid.TenantUsage
-	// clients need to be unique per reconciliation loop
+	// clients need to be unique per reconciliation loop.
 	TenantClient *grid.TenantClient
 	GridClient   *grid.GridClient
 }
 
-// conditionCheck is a struct to hold the condition checks for the account
-// will be used when deriving the phase of the account
+// conditionCheck is a struct to hold the condition checks for the account.
+// will be used when deriving the phase of the account.
 type conditionCheck struct {
 	conditionType string
 	successMsg    string
@@ -84,14 +84,14 @@ type conditionCheck struct {
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenants,verbs=get;list;watch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
+// Reconcile is part of the main kubernetes reconciliation loop which aims to.
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the S3TenantAccount object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
+// TODO(user): Modify the Reconcile function to compare the state specified by.
+// the S3TenantAccount object against the actual cluster state, and then.
+// perform operations to make the cluster state reflect the state specified by.
 // the user.
 //
-// For more details, check Reconcile and its Result here:
+// For more details, check Reconcile and its Result here:.
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 
 func (r *S3TenantAccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -101,7 +101,7 @@ func (r *S3TenantAccountReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	log.V(1).Info(fmt.Sprintf("Reconciliation loop started for S3TenantAccount %s", req.Name))
 
-	// Get the object to reconcile on
+	// Get the object to reconcile on.
 	if err := r.Get(ctx, req.NamespacedName, account); err != nil {
 		log.Error(err, "Failed to retrieve resource")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -119,22 +119,22 @@ func (r *S3TenantAccountReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 
 	err := r.doReconcile(ctx, rctx)
 
-	// use conditions to derive the readiness state
+	// use conditions to derive the readiness state.
 	r.derivePhase(ctx, rctx)
 
-	// update the annotations if they were updated
-	// needs to be done before the status is updated because we lose the annotations otherwise
+	// update the annotations if they were updated.
+	// needs to be done before the status is updated because we lose the annotations otherwise.
 	if rctx.ObjectUpdated {
-		// creating a deep copy of the status to avoid modifying the original object
+		// creating a deep copy of the status to avoid modifying the original object.
 		statusCopy := account.DeepCopy()
 
 		log.V(1).Info("Annotations were updated, updating the object")
 		if updateErr := r.Update(ctx, account); updateErr != nil {
 			log.Error(updateErr, "Failed to update annotations")
 			if err != nil {
-				err = fmt.Errorf("reconciliation failed: %w, failed to update annotations: %s", err, updateErr)
+				err = fmt.Errorf("reconciliation failed: %w, failed to update annotations: %w", err, updateErr)
 			} else {
-				err = fmt.Errorf("failed to update annotations: %s", updateErr)
+				err = fmt.Errorf("failed to update annotations: %w", updateErr)
 			}
 		} else {
 			log.V(1).Info("Annotations updated successfully")
@@ -143,14 +143,14 @@ func (r *S3TenantAccountReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		account.Status = statusCopy.Status // restore the status from the copy
 	}
 
-	// update the status of the account if it was updated during reconciliation
+	// update the status of the account if it was updated during reconciliation.
 	if updateErr := r.Status().Update(ctx, rctx.Account); updateErr != nil {
 		log.Error(updateErr, "Failed to update status, requeuing")
 		if err == nil {
-			// no error occured during reconciliation, but status update failed
+			// no error occurred during reconciliation, but status update failed.
 			rctx.DoRequeue = true // we need to requeue to ensure the status is updated
 		}
-		// if an error already occured during reconciliation, we just return that error
+		// if an error already occurred during reconciliation, we just return that error.
 	}
 
 	if rctx.RequeAfter.Duration > 0 {
@@ -159,43 +159,41 @@ func (r *S3TenantAccountReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	}
 
 	return ctrl.Result{Requeue: rctx.DoRequeue}, err
-
 }
 
 func (r *S3TenantAccountReconciler) doReconcile(ctx context.Context, rctx *accountReconcileContext) (err error) {
-
-	// Get the StorageGrid reference from the S3Tenant
+	// Get the StorageGrid reference from the S3Tenant.
 	err = r.reconcileGridReference(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "GridReferenceReconcileFailed", fmt.Sprintf("Failed to reconcile StorageGrid reference: %s", err.Error()))
 		return err
 	}
 
-	// make sure the most recent deletionpolicy is set
+	// make sure the most recent deletionpolicy is set.
 	err = r.reconcileDeletionPolicy(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "DeletionPolicyReconcileFailed", fmt.Sprintf("Failed to reconcile deletion policy: %s", err.Error()))
-		// we should return on error here because the deletion policy is crucial for the deletion process
+		// we should return on error here because the deletion policy is crucial for the deletion process.
 		return err
 	}
 
-	// get the tenant binding for this account
+	// get the tenant binding for this account.
 	err = r.reconcileS3TenantReference(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "S3TenantReferenceReconcileFailed", fmt.Sprintf("Failed to reconcile S3Tenant reference: %s", err.Error()))
 	}
 
-	// Ensure owner reference is set
-	if ctrl.SetControllerReference(rctx.SG, rctx.Account, r.Scheme); err != nil {
+	// Ensure owner reference is set.
+	if err := ctrl.SetControllerReference(rctx.SG, rctx.Account, r.Scheme); err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "OwnerReferenceSetFailed", fmt.Sprintf("Failed to set owner reference for S3TenantAccount to backing StorageGrid: %s", err.Error()))
 	}
 
-	// do some trivial reconciliation tasks
+	// do some trivial reconciliation tasks.
 	r.reconcileGridEndpoint(ctx, rctx)
 	r.reconcileSecretRefs(ctx, rctx)
 	r.reconcileTenantName(ctx, rctx)
 
-	// make sure the backing grid is ready before proceeding
+	// make sure the backing grid is ready before proceeding.
 	err = r.reconcileGridReadiness(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionFalse, "GridReadinessCheckFailed", fmt.Sprintf("StorageGrid %s not ready", rctx.SG.Name))
@@ -203,7 +201,7 @@ func (r *S3TenantAccountReconciler) doReconcile(ctx context.Context, rctx *accou
 		return err
 	}
 
-	// initialize the grid client
+	// initialize the grid client.
 	err = r.initGridClient(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionFalse, "GridClientInitFailed", fmt.Sprintf("Failed to initialize grid client: %s", err.Error()))
@@ -212,7 +210,7 @@ func (r *S3TenantAccountReconciler) doReconcile(ctx context.Context, rctx *accou
 	}
 	r.setCondition(rctx.Account, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionTrue, "StorageGridReadyAndAccessible", fmt.Sprintf("StorageGrid %s is ready", rctx.SG.Name))
 
-	// examine DeletionTimestamp to determine if object is under deletion
+	// examine DeletionTimestamp to determine if object is under deletion.
 	err = r.reconcileFinalizerAndDlelete(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "FinalizingFailed", fmt.Sprintf("Failed to reconcile delete or finalizer %s", err.Error()))
@@ -229,17 +227,17 @@ func (r *S3TenantAccountReconciler) doReconcile(ctx context.Context, rctx *accou
 		return err
 	}
 
-	// make sure proper tenantclass is set before creation
-	// update the tenantlass for network access
+	// make sure proper tenantclass is set before creation.
+	// update the tenantlass for network access.
 	err = r.reconcileS3TenantClass(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantClassReconcileFailed", fmt.Sprintf("Failed to reconcile S3TenantClass: %s", err.Error()))
 		return err
 	}
 
-	// check for the resourcecreated condition
-	// the condition will only be set if the tenant was created successfully
-	// or if the annotation to recreate the tenant was set
+	// check for the resourcecreated condition.
+	// the condition will only be set if the tenant was created successfully.
+	// or if the annotation to recreate the tenant was set.
 	err = r.reconcileRecreateAnnotation(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "RecreateAnnotationReconcileFailed", fmt.Sprintf("Failed on reconciling recreate annotation: %s", err.Error()))
@@ -253,13 +251,13 @@ func (r *S3TenantAccountReconciler) doReconcile(ctx context.Context, rctx *accou
 			return err
 		}
 
-		// update status and condition already
+		// update status and condition already.
 
 		rctx.DoRequeue = true // we need to requeue to ensure the status is updated
 		return nil
 	}
 
-	// initialize tenant client and fetch the tenant from the backend
+	// initialize tenant client and fetch the tenant from the backend.
 	err = r.initTenantClient(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantClientInitFailed", fmt.Sprintf("Failed to initialize tenant client due to %s", err.Error()))
@@ -276,53 +274,53 @@ func (r *S3TenantAccountReconciler) doReconcile(ctx context.Context, rctx *accou
 
 	err = r.reconcileTenantDescription(ctx, rctx)
 	if err != nil {
-		// no need to stop reconciliation here, just set the condition
+		// no need to stop reconciliation here, just set the condition.
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantDescriptionReconcileFailed", fmt.Sprintf("Failed to reconcile tenant description: %s", err.Error()))
 	}
 
 	err = r.reconcileTenantNameUpdate(ctx, rctx)
 	if err != nil {
-		// no need to stop reconciliation here, just set the condition
+		// no need to stop reconciliation here, just set the condition.
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantNameUpdateFailed", fmt.Sprintf("Failed to update tenant name: %s", err.Error()))
 	}
 
-	// make sure the regions are up to date
+	// make sure the regions are up to date.
 	r.reconcileRegions(ctx, rctx)
 
-	// check usage and quota configuration
+	// check usage and quota configuration.
 	err = r.reconcileStorageQuota(ctx, rctx)
 	if err != nil {
-		// no need to stop reconciliation here, just set the condition
+		// no need to stop reconciliation here, just set the condition.
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "StorageQuotaReconcileFailed", fmt.Sprintf("Failed to reconcile storage quota: %s", err.Error()))
 	}
 
 	err = r.reconcileTenantUsage(ctx, rctx)
 	if err != nil {
-		// no need to stop reconciliation here, just set the condition
+		// no need to stop reconciliation here, just set the condition.
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantUsageReconcileFailed", fmt.Sprintf("Failed to reconcile tenant usage: %s", err.Error()))
 	}
 
 	r.evaluateQuotaConditions(ctx, rctx.Account)
 
-	// reconcile tenant admin credentials
+	// reconcile tenant admin credentials.
 	err = r.reconcileTenantAdminCredentials(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantAdminCredentialsReconcileFailed", fmt.Sprintf("Failed to reconcile tenant admin credentials: %s", err.Error()))
 	}
 
-	// reconcile s3 credentials and recreate if necessarry
+	// reconcile s3 credentials and recreate if necessary.
 	if err := r.reconcileS3Credentials(ctx, rctx); err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "S3CredentialUpdateFailed", fmt.Sprintf("Failed to reconcile S3 credentials: %s", err.Error()))
 	}
 
-	// reconciliation ran successfully
+	// reconciliation ran successfully.
 	r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "ReconcileSucceeded", "Reconciliation completed successfully")
 
 	return nil
 }
 
 func (r *S3TenantAccountReconciler) setCondition(account *s3v1alpha1.S3TenantAccount, condType string, status metav1.ConditionStatus, reason string, message string) {
-	// add or update with given condition
+	// add or update with given condition.
 	condition := metav1.Condition{
 		Type:               condType,
 		Status:             status,
@@ -337,7 +335,7 @@ func (r *S3TenantAccountReconciler) setCondition(account *s3v1alpha1.S3TenantAcc
 func (r *S3TenantAccountReconciler) reconcileDeletionPolicy(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileDeletionPolicy")
 
-	// if no deletion policy is set, we set it to the default from the storagegrid
+	// if no deletion policy is set, we set it to the default from the storagegrid.
 	var policy *s3v1alpha1.TenantDeletionPolicy
 	if rctx.Account.Spec.TenantDeletionPolicy != nil {
 		policy = rctx.Account.Spec.TenantDeletionPolicy
@@ -347,12 +345,12 @@ func (r *S3TenantAccountReconciler) reconcileDeletionPolicy(ctx context.Context,
 		log.V(1).Info("Using default deletion policy from StorageGrid", "policy", policy.Policy)
 	}
 
-	// Only update status if the policy is different or not set
+	// Only update status if the policy is different or not set.
 	if rctx.Account.Status.TenantDeletionPolicy == nil {
 		log.V(1).Info("Setting initial tenant deletion policy in status", "policy", policy.Policy)
 		rctx.Account.Status.TenantDeletionPolicy = policy.DeepCopy()
 	} else {
-		// Check if policies are different using deep comparison
+		// Check if policies are different using deep comparison.
 		if !reflect.DeepEqual(rctx.Account.Status.TenantDeletionPolicy, policy) {
 			log.V(1).Info("Updating tenant deletion policy in status",
 				"oldPolicy", rctx.Account.Status.TenantDeletionPolicy.Policy,
@@ -369,11 +367,11 @@ func (r *S3TenantAccountReconciler) reconcileDeletionPolicy(ctx context.Context,
 func (r *S3TenantAccountReconciler) reconcileS3TenantReference(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// get the S3Tenant reference from the account
+	// get the S3Tenant reference from the account.
 	if rctx.Account.Spec.S3TenantRef == nil {
 		log.V(1).Info("No S3Tenant reference found in account, was it deleted?")
 
-		// if the spec is missing it can be either:
+		// if the spec is missing it can be either:.
 		// 1. the S3Tenant was never created and the account is used in isolation
 		// 2. the referenced S3Tenant was deleted
 		if rctx.Account.Status.S3TenantRef == nil {
@@ -385,13 +383,13 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantReference(ctx context.Conte
 
 		// -> 2. the status is not nil, we can assume that the S3Tenant was deleted
 		log.V(1).Info(fmt.Sprintf("Found reference to S3Tenant %s in account status, trying to fetch it", rctx.Account.Status.S3TenantRef.Name))
-		// use the S3TenantRef from the status to fetch the S3Tenant
+		// use the S3TenantRef from the status to fetch the S3Tenant.
 		if err := r.Get(ctx, types.NamespacedName{Name: rctx.Account.Status.S3TenantRef.Name, Namespace: rctx.Account.Status.S3TenantRef.Namespace}, rctx.S3Tenant); err != nil {
-			// if we cannot find the s3tenant it was probably deleted
+			// if we cannot find the s3tenant it was probably deleted.
 			if client.IgnoreNotFound(err) == nil {
 				r.reconcileDeletedTenant(ctx, rctx)
 			} else {
-				// any other error is a real error, we cannot proceed
+				// any other error is a real error, we cannot proceed.
 				log.Error(err, fmt.Sprintf("Failed to retrieve S3Tenant %s from API", rctx.Account.Status.S3TenantRef.Name))
 				return err
 			}
@@ -402,23 +400,22 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantReference(ctx context.Conte
 
 	r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeBound, metav1.ConditionTrue, "S3TenantBound", fmt.Sprintf("Bound by S3 Tenant %s", rctx.Account.Spec.S3TenantRef.Name))
 
-	// if the S3TenantRef is set, we need to fetch the S3Tenant
+	// if the S3TenantRef is set, we need to fetch the S3Tenant.
 	if err := r.Get(ctx, types.NamespacedName{Name: rctx.Account.Spec.S3TenantRef.Name, Namespace: rctx.Account.Spec.S3TenantRef.Namespace}, rctx.S3Tenant); err != nil {
 		log.Error(err, fmt.Sprintf("Failed to retrieve S3Tenant %s from API", rctx.Account.Spec.S3TenantRef.Name))
 
-		// this means that the referenced s3tenant was probably deleted
+		// this means that the referenced s3tenant was probably deleted.
 		if client.IgnoreNotFound(err) == nil {
 			log.V(1).Info("Referenced S3Tenant not found, was it deleted?")
 			r.reconcileDeletedTenant(ctx, rctx)
 			return nil
 		} else {
-			// any other error is a real error, we cannot proceed
+			// any other error is a real error, we cannot proceed.
 			return err
 		}
-
 	}
 
-	// once fetched, we need to always update the S3TenantRef in the account status
+	// once fetched, we need to always update the S3TenantRef in the account status.
 	if rctx.Account.Status.S3TenantRef == nil || rctx.Account.Status.S3TenantRef.Name != rctx.S3Tenant.Name {
 		log.V(1).Info(fmt.Sprintf("Updating S3TenantRef in account status to %s", rctx.S3Tenant.Name))
 		rctx.Account.Status.S3TenantRef = &corev1.ObjectReference{
@@ -429,7 +426,7 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantReference(ctx context.Conte
 			APIVersion: rctx.S3Tenant.APIVersion,
 		}
 
-		// make sure no deletion timestamp is configured from any old bindings
+		// make sure no deletion timestamp is configured from any old bindings.
 		if rctx.Account.Status.DeletionTimestamp != nil {
 			log.V(1).Info("Clearing deletion timestamp from account, S3Tenant is bound")
 			rctx.Account.Status.DeletionTimestamp = nil
@@ -444,23 +441,22 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantReference(ctx context.Conte
 func (r *S3TenantAccountReconciler) reconcileDeletedTenant(ctx context.Context, rctx *accountReconcileContext) {
 	log := log.FromContext(ctx)
 
-	// if the S3Tenant was deleted, we need to check what policy was configured on the grid
-	if rctx.Account.Status.TenantDeletionPolicy.Policy == s3v1alpha1.TenantDeletionPolicyDelete {
+	// if the S3Tenant was deleted, we need to check what policy was configured on the grid.
+	switch rctx.Account.Status.TenantDeletionPolicy.Policy {
+	case s3v1alpha1.TenantDeletionPolicyDelete:
 		log.V(1).Info("Tenant deletion policy is set to delete, deleting the account")
-		// delete policy is set, we can delete the account on the backend
-		// set deletion timestamp to now, so the account is deleted immediately
+		// delete policy is set, we can delete the account on the backend.
+		// set deletion timestamp to now, so the account is deleted immediately.
 		rctx.Account.Status.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Time}
-
-	} else if rctx.Account.Status.TenantDeletionPolicy.Policy == s3v1alpha1.TenantDeletionPolicyRetain {
-		// retain policy is set, we need to set the S3TenantRef to nil on do nothing else
+	case s3v1alpha1.TenantDeletionPolicyRetain:
+		// retain policy is set, we need to set the S3TenantRef to nil on do nothing else.
 		log.V(1).Info("Tenant deletion policy is set to retain, setting S3TenantRef to nil and doing nothing")
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeRetained, metav1.ConditionTrue, "TenantRetained", "S3Tenant was deleted, but account is retained due to deletion policy")
 		rctx.Account.Status.S3TenantRef = nil
 		rctx.Account.Spec.S3TenantRef = nil // also set the spec to nil to avoid confusion
 		rctx.ObjectUpdated = true
-
-	} else if rctx.Account.Status.TenantDeletionPolicy.Policy == s3v1alpha1.TenantDeletionPolicyRetainThenDelete {
-		// retain then delete policy is set, we need to set the S3TenantRef to nil and delete the account
+	case s3v1alpha1.TenantDeletionPolicyRetainThenDelete:
+		// retain then delete policy is set, we need to set the S3TenantRef to nil and delete the account.
 		log.V(1).Info("Tenant deletion policy is set to retain then delete, setting S3TenantRef to nil aswell as setting the deletion timestamp on the account")
 
 		rctx.Account.Status.S3TenantRef = nil
@@ -468,7 +464,7 @@ func (r *S3TenantAccountReconciler) reconcileDeletedTenant(ctx context.Context, 
 		rctx.Account.Spec.S3TenantRef = nil // also set the spec to nil to avoid confusion
 		rctx.ObjectUpdated = true
 
-		// calculate the deletion timestamp based on the retention duration
+		// calculate the deletion timestamp based on the retention duration.
 		if retentionDuration != nil {
 			log.V(1).Info(fmt.Sprintf("Setting deletion timestamp to %s", retentionDuration.String()))
 			rctx.Account.Status.DeletionTimestamp = &metav1.Time{Time: metav1.Now().Add(retentionDuration.Duration)}
@@ -510,31 +506,28 @@ func (r *S3TenantAccountReconciler) reconcileGridReference(ctx context.Context, 
 func (r *S3TenantAccountReconciler) reconcilePolicyDeletionTimestamp(ctx context.Context, account *s3v1alpha1.S3TenantAccount) error {
 	log := log.FromContext(ctx)
 
-	// if the deletion timestamp is set, we need to check if the S3Tenant is still bound
+	// if the deletion timestamp is set, we need to check if the S3Tenant is still bound.
 	if !account.Status.DeletionTimestamp.IsZero() {
 		log.V(1).Info("Deletion timestamp is set, checking if S3Tenant is still bound")
 
-		// this should actually never happen, since we always reconcile the S3Tenant reference before this method is called
+		// this should actually never happen, since we always reconcile the S3Tenant reference before this method is called.
 		if account.Status.S3TenantRef != nil {
 			log.V(1).Info("S3Tenant is still bound, not deleting the account and removing deletion timestamp")
-			// if the S3Tenant is still bound, we do not delete the account
+			// if the S3Tenant is still bound, we do not delete the account.
 			account.Status.DeletionTimestamp = nil
 			return nil
 		}
 
-		// if the S3Tenant is not bound anymore, we can delete the account if the timestamp is reached
+		// if the S3Tenant is not bound anymore, we can delete the account if the timestamp is reached.
 		if account.Status.DeletionTimestamp.Time.Before(metav1.Now().Time) {
 			log.V(1).Info("Deletion timestamp is reached, deleting the account")
 			r.setCondition(account, s3v1alpha1.ConditionTypeDeletionTimestampReached, metav1.ConditionTrue, "DeletionTimestampReached", fmt.Sprintf("Deletion timestamp reached at %s, deleting account", account.Status.DeletionTimestamp.String()))
-			// update the deletion timestamp to nil, so we do not delete it again
+			// update the deletion timestamp to nil, so we do not delete it again.
 			account.Status.DeletionTimestamp = nil
 			account.Status.Phase = s3v1alpha1.PhaseDeleting
 			return r.deleteAccount(ctx, account)
-
 		}
-
 		log.V(1).Info("S3Tenant is not bound anymore, deleting the account")
-
 	}
 
 	return nil
@@ -543,24 +536,24 @@ func (r *S3TenantAccountReconciler) reconcilePolicyDeletionTimestamp(ctx context
 func (r *S3TenantAccountReconciler) derivePhase(ctx context.Context, rctx *accountReconcileContext) {
 	log := log.FromContext(ctx)
 
-	// all of these conditions need to be be in state true for this account to be considered ready
+	// all of these conditions need to be be in state true for this account to be considered ready.
 	reconciliation := false
 	backendReady := false
 	sufficientQuota := false
 
-	// If the account is ready and bound it will be in phase bound
+	// If the account is ready and bound it will be in phase bound.
 	bound := false
 
-	// any of these conditions being true means that the account was bound but the tenant was deleted
-	// These need to be checked seperately because they are only set when the tenant was deleted
+	// any of these conditions being true means that the account was bound but the tenant was deleted.
+	// These need to be checked separately because they are only set when the tenant was deleted.
 	retain := false
 	retainThenDelete := false
 	deletion := false
 
-	// message that will show on the ready condition
+	// message that will show on the ready condition.
 	message := ""
 
-	// define a struct to hold the condition checks
+	// define a struct to hold the condition checks.
 
 	readyChecks := []conditionCheck{
 		{
@@ -591,7 +584,7 @@ func (r *S3TenantAccountReconciler) derivePhase(ctx context.Context, rctx *accou
 
 	message += r.checkRecurringConditions(ctx, rctx.Account, &readyChecks)
 
-	// check for the retention conditions
+	// check for the retention conditions.
 	retentionChecks := []conditionCheck{
 		{
 			conditionType: s3v1alpha1.ConditionTypeRetained,
@@ -615,7 +608,7 @@ func (r *S3TenantAccountReconciler) derivePhase(ctx context.Context, rctx *accou
 
 	message += r.checkRetentionConditions(ctx, rctx.Account, &retentionChecks)
 
-	// workout if the account is ready
+	// workout if the account is ready.
 	if reconciliation && backendReady && sufficientQuota {
 		log.V(1).Info("Accunt is ready")
 		if bound {
@@ -632,14 +625,14 @@ func (r *S3TenantAccountReconciler) derivePhase(ctx context.Context, rctx *accou
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReady, metav1.ConditionFalse, "S3TenantAccountReady", message)
 	}
 
-	// The retention conditions override the phase of the account
+	// The retention conditions override the phase of the account.
 	if retain {
 		log.V(1).Info("S3Tenant is retained, setting phase to Retained")
 		rctx.Account.Status.Phase = s3v1alpha1.PhaseRetaining
 	} else if retainThenDelete {
 		log.V(1).Info("S3Tenant is retained then deleted, setting phase to RetainingThenDeleting")
 		rctx.Account.Status.Phase = s3v1alpha1.PhaseRetainThenDelete
-		// on retain then delete we have to make sure it is requeued when the deletion timestamp is reached for deletion
+		// on retain then delete we have to make sure it is requeued when the deletion timestamp is reached for deletion.
 		rctx.RequeAfter = metav1.Duration{Duration: rctx.Account.Status.DeletionTimestamp.Time.Sub(metav1.Now().Time)}
 	} else if deletion {
 		log.V(1).Info("S3Tenant deletion timestamp reached, setting phase to Deleting")
@@ -654,7 +647,7 @@ func (r *S3TenantAccountReconciler) checkRecurringConditions(ctx context.Context
 
 	message := ""
 	for _, check := range *checks {
-		// find the condition in the account status
+		// find the condition in the account status.
 		condition := meta.FindStatusCondition(account.Status.Conditions, check.conditionType)
 
 		switch {
@@ -680,7 +673,7 @@ func (r *S3TenantAccountReconciler) checkRecurringConditions(ctx context.Context
 		}
 	}
 
-	// remove the last comma and space from the message
+	// remove the last comma and space from the message.
 	if len(message) > 2 {
 		message = message[:len(message)-2]
 	} else {
@@ -689,15 +682,15 @@ func (r *S3TenantAccountReconciler) checkRecurringConditions(ctx context.Context
 	return message
 }
 
-// retentionConditions are only set once when the linked tenant was deleted
-// thus the checking has to differ from the recurring conditions
-// Also the message only needs to be updated once the conditions exist
+// retentionConditions are only set once when the linked tenant was deleted.
+// thus the checking has to differ from the recurring conditions.
+// Also the message only needs to be updated once the conditions exist.
 func (r *S3TenantAccountReconciler) checkRetentionConditions(ctx context.Context, account *s3v1alpha1.S3TenantAccount, checks *[]conditionCheck) string {
 	log := log.FromContext(ctx)
 
 	message := ""
 	for _, check := range *checks {
-		// find the condition in the account status
+		// find the condition in the account status.
 		condition := meta.FindStatusCondition(account.Status.Conditions, check.conditionType)
 
 		switch {
@@ -706,7 +699,7 @@ func (r *S3TenantAccountReconciler) checkRetentionConditions(ctx context.Context
 
 		case condition.Status == metav1.ConditionTrue:
 			log.V(1).Info(check.successMsg)
-			message += fmt.Sprintf("%s", check.successMsg)
+			message += check.successMsg
 			*check.resultVar = true
 
 		default:
@@ -721,9 +714,9 @@ func (r *S3TenantAccountReconciler) checkRetentionConditions(ctx context.Context
 func (r *S3TenantAccountReconciler) reconcileFinalizerAndDlelete(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// check if the object is being deleted
+	// check if the object is being deleted.
 	if rctx.Account.DeletionTimestamp.IsZero() {
-		// if the object is not being deleted, add our finalizer if it is not already present
+		// if the object is not being deleted, add our finalizer if it is not already present.
 		if !controllerutil.ContainsFinalizer(rctx.Account, tenantFinalizer) {
 			controllerutil.AddFinalizer(rctx.Account, tenantFinalizer)
 			log.V(1).Info("Adding finalizer to S3Tenant")
@@ -732,10 +725,10 @@ func (r *S3TenantAccountReconciler) reconcileFinalizerAndDlelete(ctx context.Con
 			return nil
 		}
 	} else {
-		// the object is being deleted
+		// the object is being deleted.
 		log.V(1).Info("Object is being deleted")
 		if controllerutil.ContainsFinalizer(rctx.Account, tenantFinalizer) {
-			// our finalizer is present, so lets handle any external dependency
+			// our finalizer is present, so lets handle any external dependency.
 			if err := r.finalize(ctx, rctx); err != nil {
 				log.Error(err, "Failed to finalize tenant")
 				return err
@@ -749,7 +742,7 @@ func (r *S3TenantAccountReconciler) reconcileFinalizerAndDlelete(ctx context.Con
 			return nil
 		}
 
-		// no finalizer is present, so we can proceed with deletion
+		// no finalizer is present, so we can proceed with deletion.
 		log.V(1).Info("Finalizer not present, deletion can proceed without further action")
 		return nil
 	}
@@ -762,7 +755,7 @@ func (r *S3TenantAccountReconciler) reconcileTenantName(ctx context.Context, rct
 
 	prefix := ""
 	if rctx.SG.Spec.TenantPrefix == "Namespace" {
-		// if the tenant prefix is set to namespace, we use the namespace of the binding S3Tenant
+		// if the tenant prefix is set to namespace, we use the namespace of the binding S3Tenant.
 		if rctx.S3Tenant.Name == "" {
 			log.V(1).Info("S3Tenant is not set, cannot use namespace as prefix, leaving empty")
 		} else {
@@ -770,16 +763,16 @@ func (r *S3TenantAccountReconciler) reconcileTenantName(ctx context.Context, rct
 		}
 	}
 
-	// use resource name as default tenant name
+	// use resource name as default tenant name.
 	tenantName := rctx.Account.Name
-	// use spec name if set and if not use s3tenant name if available
+	// use spec name if set and if not use s3tenant name if available.
 	if rctx.S3Tenant.Name != "" {
 		tenantName = rctx.S3Tenant.Name
 	} else if rctx.Account.Spec.Name != "" {
 		tenantName = rctx.Account.Spec.Name
 	}
 
-	// combine prefix and name if prefix is set
+	// combine prefix and name if prefix is set.
 	tenantName = fmt.Sprintf("%s%s", prefix, tenantName)
 
 	if rctx.Account.Status.DesiredTenantBackendName != &tenantName {
@@ -791,13 +784,13 @@ func (r *S3TenantAccountReconciler) reconcileTenantName(ctx context.Context, rct
 func (r S3TenantAccountReconciler) reconcileTenantNameUpdate(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// if no name is yet observed on the backend the tenant is not created yet
-	// skipping update on the backend
+	// if no name is yet observed on the backend the tenant is not created yet.
+	// skipping update on the backend.
 	if *rctx.Account.Status.ObservedTenantBackendName == "" {
 		return nil
 	}
 
-	// if the observedName has a value we can compare it with the desired name
+	// if the observedName has a value we can compare it with the desired name.
 	if *rctx.Account.Status.DesiredTenantBackendName != *rctx.Account.Status.ObservedTenantBackendName {
 		log.V(1).Info("Tenant name does not match, updating from %s to %s", *rctx.Account.Status.ObservedTenantBackendName, *rctx.Account.Status.DesiredTenantBackendName)
 		err := grid.UpdateName(ctx, *rctx.Account.Status.DesiredTenantBackendName, rctx.BackendTenant, rctx.GridClient)
@@ -807,7 +800,7 @@ func (r S3TenantAccountReconciler) reconcileTenantNameUpdate(ctx context.Context
 		}
 	}
 
-	// update the status with the observed name
+	// update the status with the observed name.
 	rctx.Account.Status.ObservedTenantBackendName = rctx.Account.Status.DesiredTenantBackendName
 
 	return nil
@@ -822,21 +815,21 @@ func (r *S3TenantAccountReconciler) reconcileTenantDescription(ctx context.Conte
 		namespace = rctx.S3Tenant.Namespace
 	}
 
-	// combine default fields for the description
+	// combine default fields for the description.
 	description := map[string]string{
 		"kubernetes_namespace": namespace,
 		"user_description":     *rctx.Account.Spec.Description,
 		"owner":                *rctx.Account.Spec.Owner,
 	}
 
-	// add any additional metadata specified by the user
+	// add any additional metadata specified by the user.
 	if rctx.Account.Spec.AdditionalTenantMetadata != nil {
 		for key, value := range rctx.Account.Spec.AdditionalTenantMetadata {
 			description[key] = value
 		}
 	}
 
-	// convert the description to a string
+	// convert the description to a string.
 	descriptionStr := ""
 	for key, value := range description {
 		if descriptionStr == "" {
@@ -847,7 +840,7 @@ func (r *S3TenantAccountReconciler) reconcileTenantDescription(ctx context.Conte
 		descriptionStr = fmt.Sprintf("%s\n%s:%s ", descriptionStr, key, value)
 	}
 
-	// update description if changed
+	// update description if changed.
 	if &rctx.Account.Status.Description != &descriptionStr {
 		log.V(1).Info(fmt.Sprintf("Setting tenant description to %s", descriptionStr))
 		err := grid.UpdateDescription(ctx, descriptionStr, rctx.BackendTenant, rctx.GridClient)
@@ -879,7 +872,7 @@ func (r *S3TenantAccountReconciler) reconcileGridEndpoint(ctx context.Context, r
 func (r *S3TenantAccountReconciler) reconcileGridReadiness(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// TODO: this should change to using status.Conditions, status.Ready is the human readable version of the conditions
+	// TODO: this should change to using status.Conditions, status.Ready is the human readable version of the conditions.
 	if !rctx.SG.Status.Ready {
 		log.Error(fmt.Errorf("StorageGrid is not ready"), fmt.Sprintf("StorageGrid %s not ready", rctx.Account.Spec.StorageGridRef.Name))
 		return fmt.Errorf("StorageGrid %s is not ready", rctx.Account.Spec.StorageGridRef.Name)
@@ -914,14 +907,14 @@ func (r *S3TenantAccountReconciler) initGridClient(ctx context.Context, rctx *ac
 func (r *S3TenantAccountReconciler) initTenantClient(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// get credentials from the secret
+	// get credentials from the secret.
 	username, password, err := kube.FetchCredentialsFromSecret(ctx, r.Client, rctx.Account.Status.RootSecretRef.Namespace, rctx.Account.Status.RootSecretRef.Name)
 	if err != nil {
 		log.Error(err, "Failed to fetch credentials from root secret")
 		return err
 	}
 
-	// use initialize the tenant client
+	// use initialize the tenant client.
 	client, err := grid.InitTenantClient(username, password, rctx.Account.Status.GridEndpoint, rctx.Account.Status.TenantID)
 	if err != nil {
 		log.Error(err, "Failed to initialize tenant client")
@@ -939,10 +932,10 @@ func (r *S3TenantAccountReconciler) fetchTenant(ctx context.Context, rctx *accou
 	log.V(1).Info(fmt.Sprintf("Fetching tenant with id %s", rctx.Account.Status.TenantID))
 	tenant, err := grid.FetchTenant(ctx, rctx.Account.Status.TenantID, rctx.GridClient)
 	if err != nil {
-		// if this fails either storageGrid is not available or tenant does not exist on the backend
+		// if this fails either storageGrid is not available or tenant does not exist on the backend.
 		log.Error(err, "Failed to fetch tenant")
 
-		// if it's missing on the backend we need to set bucketCount and objectCount to 0 to allow tenant deletion
+		// if it's missing on the backend we need to set bucketCount and objectCount to 0 to allow tenant deletion.
 		if err.Error() == grid.ErrTenantNotFound {
 			log.Info("Tenant does not exist on the backend, setting bucketCount and objectCount to 0")
 			rctx.Account.Status.TenantUsage.BucketCount = 0
@@ -960,7 +953,7 @@ func (r *S3TenantAccountReconciler) fetchTenant(ctx context.Context, rctx *accou
 func (r *S3TenantAccountReconciler) reconcileRecreateAnnotation(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// check if annotations exist and exit if unset
+	// check if annotations exist and exit if unset.
 	if rctx.Account.Annotations == nil {
 		return nil
 	}
@@ -968,10 +961,10 @@ func (r *S3TenantAccountReconciler) reconcileRecreateAnnotation(ctx context.Cont
 	if _, ok := rctx.Account.Annotations[AnnotationRecreateTenant]; ok {
 		log.V(1).Info("Recreate tenant annotation found, recreating tenant")
 
-		// remove tenant created condition to allow re-creation
+		// remove tenant created condition to allow re-creation.
 		meta.RemoveStatusCondition(&rctx.Account.Status.Conditions, s3v1alpha1.ConditionTypeCreated)
 
-		// remove the annotation
+		// remove the annotation.
 		delete(rctx.Account.Annotations, AnnotationRecreateTenant)
 		log.V(1).Info("Successfully recreated credentials and removed annotation")
 
@@ -992,7 +985,7 @@ func (r *S3TenantAccountReconciler) reconcileCreate(ctx context.Context, rctx *a
 	}
 	r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeCreated, metav1.ConditionTrue, "TenantCreated", fmt.Sprintf("Created Tenant with id %s in backend", rctx.Account.Status.TenantID))
 
-	// store credentials in a secret
+	// store credentials in a secret.
 	err = kube.CreateCredentialSecret(ctx, r.Client, rctx.Account.Status.RootSecretRef.Namespace, rctx.Account.Status.RootSecretRef.Name, "root", password, rctx.Account)
 	if err != nil {
 		log.Error(err, "Failed to create secret")
@@ -1001,7 +994,7 @@ func (r *S3TenantAccountReconciler) reconcileCreate(ctx context.Context, rctx *a
 
 	log.Info(fmt.Sprintf("Tenant created successfully, ID: %s", tenantID))
 
-	// update status as needed
+	// update status as needed.
 	rctx.Account.Status.ObservedTenantBackendName = rctx.Account.Status.DesiredTenantBackendName
 	rctx.Account.Status.TenantID = tenantID
 	rctx.Account.Status.TenantManagerURL = fmt.Sprintf("%s?accountId=%s", rctx.SG.Spec.Endpoint, tenantID)
@@ -1032,7 +1025,7 @@ func (r *S3TenantAccountReconciler) reconcileRegions(ctx context.Context, rctx *
 		}
 	}
 
-	// propagate regions from grid to tenant if changed
+	// propagate regions from grid to tenant if changed.
 	if !slices.Equal(rctx.Account.Status.Regions, rctx.SG.Status.Regions) {
 		log.V(1).Info("Updating region list in tenant status")
 		rctx.Account.Status.Regions = rctx.SG.Status.Regions
@@ -1043,7 +1036,7 @@ func (r *S3TenantAccountReconciler) reconcileSecretRefs(ctx context.Context, rct
 	log := log.FromContext(ctx).WithValues("function", "reconcileSecretRefs", "account", rctx.Account.Name)
 	log.V(1).Info("Starting secret references reconciliation")
 
-	// Determine namespaces for different secret types
+	// Determine namespaces for different secret types.
 	userSecretNamespace := r.determineUserSecretNamespace(ctx, rctx)
 	platformSecretNamespace := r.determinePlatformSecretNamespace(ctx, rctx)
 	secretBaseName := r.determineSecretBaseName(ctx, rctx)
@@ -1053,7 +1046,7 @@ func (r *S3TenantAccountReconciler) reconcileSecretRefs(ctx context.Context, rct
 		"platformNamespace", platformSecretNamespace,
 		"baseName", secretBaseName)
 
-	// Update secret references in status
+	// Update secret references in status.
 	r.updateSecretRef(ctx, &rctx.Account.Status.RootSecretRef,
 		rctx.Account.Spec.RootSecretRef,
 		platformSecretNamespace,
@@ -1072,8 +1065,8 @@ func (r *S3TenantAccountReconciler) reconcileSecretRefs(ctx context.Context, rct
 	log.V(1).Info("Secret references reconciliation completed")
 }
 
-// determineUserSecretNamespace returns the namespace for user-facing secrets
-// Priority: S3Tenant namespace > spec.secretNamespace > operator namespace
+// determineUserSecretNamespace returns the namespace for user-facing secrets.
+// Priority: S3Tenant namespace > spec.secretNamespace > operator namespace.
 func (r *S3TenantAccountReconciler) determineUserSecretNamespace(ctx context.Context, rctx *accountReconcileContext) string {
 	log := log.FromContext(ctx).WithValues("function", "determineUserSecretNamespace")
 
@@ -1093,8 +1086,8 @@ func (r *S3TenantAccountReconciler) determineUserSecretNamespace(ctx context.Con
 	return r.OperatorNamespace
 }
 
-// determinePlatformSecretNamespace returns the namespace for platform team secrets
-// Priority: spec.secretNamespace > operator namespace
+// determinePlatformSecretNamespace returns the namespace for platform team secrets.
+// Priority: spec.secretNamespace > operator namespace.
 func (r *S3TenantAccountReconciler) determinePlatformSecretNamespace(ctx context.Context, rctx *accountReconcileContext) string {
 	log := log.FromContext(ctx).WithValues("function", "determinePlatformSecretNamespace")
 
@@ -1108,7 +1101,7 @@ func (r *S3TenantAccountReconciler) determinePlatformSecretNamespace(ctx context
 	return r.OperatorNamespace
 }
 
-// determineSecretBaseName returns the base name for secrets
+// determineSecretBaseName returns the base name for secrets.
 func (r *S3TenantAccountReconciler) determineSecretBaseName(ctx context.Context, rctx *accountReconcileContext) string {
 	log := log.FromContext(ctx).WithValues("function", "determineSecretBaseName")
 
@@ -1129,7 +1122,6 @@ func (r *S3TenantAccountReconciler) updateSecretRef(
 	specRef *corev1.ObjectReference,
 	namespace string,
 	defaultName string) {
-
 	log := log.FromContext(ctx).WithValues("function", "updateSecretRef")
 
 	var name string
@@ -1152,7 +1144,7 @@ func (r *S3TenantAccountReconciler) updateSecretRef(
 		Namespace: namespace,
 	}
 
-	// Only update if different
+	// Only update if different.
 	if *statusRef == nil {
 		log.Info("Setting initial secret reference",
 			"name", newRef.Name,
@@ -1175,16 +1167,16 @@ func (r *S3TenantAccountReconciler) updateSecretRef(
 func (r *S3TenantAccountReconciler) reconcileStorageQuota(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// check if there was an update to the quota
+	// check if there was an update to the quota.
 	if rctx.Account.Spec.StorageQuota.Value() != grid.GetConfiguredQuota(rctx.BackendTenant) {
 		log.V(1).Info("Quota was updated, updating tenant")
 
-		// update tenant
+		// update tenant.
 		err := grid.UpdateQuota(ctx, rctx.Account.Spec.StorageQuota.Value(), rctx.BackendTenant, rctx.GridClient)
 
 		if err != nil {
 			log.Error(err, "Failed to update tenant quota")
-			// revert to original value
+			// revert to original value.
 			return err
 		}
 	}
@@ -1198,7 +1190,7 @@ func (r *S3TenantAccountReconciler) reconcileTenantUsage(ctx context.Context, rc
 	log := log.FromContext(ctx)
 	log.Info(fmt.Sprintf("Updating tenant usage of %s", rctx.Account.Name))
 
-	// get tenant usage
+	// get tenant usage.
 	usage, err := grid.FetchTenantUsage(ctx, rctx.Account.Status.TenantID, rctx.GridClient)
 	if err != nil {
 		return err
@@ -1215,7 +1207,7 @@ func (r *S3TenantAccountReconciler) reconcileTenantUsage(ctx context.Context, rc
 
 func (r *S3TenantAccountReconciler) evaluateQuotaConditions(ctx context.Context, account *s3v1alpha1.S3TenantAccount) {
 	log := log.FromContext(ctx)
-	// check if quota was exceeded and mark tenant as ready or not
+	// check if quota was exceeded and mark tenant as ready or not.
 	if account.Status.Quota.Used.Value() > account.Status.Quota.Limit.Value() {
 		log.Info(fmt.Sprintf("Quota exceeded: %s/%s", account.Status.Quota.Used.String(), account.Status.Quota.Limit.String()))
 		r.setCondition(account, s3v1alpha1.ConditionTypeQuotaSufficient, metav1.ConditionFalse, "QuotaExceeded", fmt.Sprintf("Quota exceeded: used %s is more than configured limit %s", account.Status.Quota.Used.String(), account.Status.Quota.Limit.String()))
@@ -1227,23 +1219,23 @@ func (r *S3TenantAccountReconciler) evaluateQuotaConditions(ctx context.Context,
 func (r *S3TenantAccountReconciler) reconcileS3TenantClass(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// check if the S3TenantClass is set, if not set it to the default value
+	// check if the S3TenantClass is set, if not set it to the default value.
 	if rctx.Account.Status.S3ApiEndpoint.S3TenantClassName == "" {
-		// if unset we can just update the value
+		// if unset we can just update the value.
 		if rctx.Account.Spec.S3TenantClassName == "" {
-			// if the S3TenantClassName is not set in the spec, we can use the default class
+			// if the S3TenantClassName is not set in the spec, we can use the default class.
 			log.V(1).Info("S3TenantClassName is not set, using default class")
 			rctx.Account.Status.S3ApiEndpoint.S3TenantClassName = "default"
 		} else {
-			// if the S3TenantClassName is set in the spec, we can use that value
+			// if the S3TenantClassName is set in the spec, we can use that value.
 			log.V(1).Info(fmt.Sprintf("S3TenantClassName is set to %s", rctx.Account.Status.S3ApiEndpoint.S3TenantClassName))
 			rctx.Account.Status.S3ApiEndpoint.S3TenantClassName = rctx.Account.Spec.S3TenantClassName
 		}
 	}
 
-	// if the was changed we need to be a bit more careful
+	// if the was changed we need to be a bit more careful.
 	if rctx.Account.Status.S3ApiEndpoint.S3TenantClassName != rctx.Account.Spec.S3TenantClassName {
-		// first verify that the annotation is set to allow changing the tenant class name
+		// first verify that the annotation is set to allow changing the tenant class name.
 		if rctx.Account.Annotations == nil {
 			return fmt.Errorf("S3TenantClassName is set to %s, but annotation %s to allow change is not set, not updating", rctx.Account.Spec.S3TenantClassName, AnnotationAllowTenantClassNameChange)
 		}
@@ -1255,17 +1247,17 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantClass(ctx context.Context, 
 			return fmt.Errorf("S3TenantClassName is set to %s, but annotation %s to allow change is %s instead of true, not updating", rctx.Account.Spec.S3TenantClassName, AnnotationAllowTenantClassNameChange, val)
 		}
 
-		// if the annotation is set accordingly we can update the tenant class name
+		// if the annotation is set accordingly we can update the tenant class name.
 		log.V(1).Info(fmt.Sprintf("S3TenantClassName was updated from %s to %s", rctx.Account.Status.S3ApiEndpoint.S3TenantClassName, rctx.Account.Spec.S3TenantClassName))
 		rctx.Account.Status.S3ApiEndpoint.S3TenantClassName = rctx.Account.Spec.S3TenantClassName
 
-		// reprotect the S3TenantClassName by setting the annotation
+		// reprotect the S3TenantClassName by setting the annotation.
 		log.V(1).Info("Removing annotation to protect S3TenantClassName from further changes")
 		delete(rctx.Account.Annotations, AnnotationAllowTenantClassNameChange)
 		rctx.ObjectUpdated = true
 	}
 
-	// get s3 api endpoint from the tenantclass
+	// get s3 api endpoint from the tenantclass.
 	accountClass := &s3v1alpha1.S3TenantClass{}
 	if err := r.Get(ctx, types.NamespacedName{Name: rctx.Account.Status.S3ApiEndpoint.S3TenantClassName}, accountClass); err != nil {
 		log.Error(err, "Failed to retrieve S3TenantClass")
@@ -1286,7 +1278,7 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantClass(ctx context.Context, 
 func (r *S3TenantAccountReconciler) reconcileTenantAdminCredentials(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// check if the secret exists
+	// check if the secret exists.
 	_, _, err := kube.FetchCredentialsFromSecret(ctx, r.Client, rctx.Account.Status.AdminSecretRef.Namespace, rctx.Account.Status.AdminSecretRef.Name)
 	if err != nil {
 		log.Error(err, "Failed to fetch admin credentials from secret, creating new admin credentials")
@@ -1301,11 +1293,11 @@ func (r *S3TenantAccountReconciler) reconcileTenantAdminCredentials(ctx context.
 
 	log.V(1).Info("Admin credentials secret exists, checking if reset was requested")
 
-	// if the annotation is set to recreate the tenant keypairs a new keypair needs to be created
+	// if the annotation is set to recreate the tenant keypairs a new keypair needs to be created.
 	if rctx.Account.Annotations[AnnotationResetTenantAdminPassword] == "true" {
 		log.Info("Recreating tenant admin credentials due to annotation")
 
-		// trigger recreation of the S3 admin keypair
+		// trigger recreation of the S3 admin keypair.
 		err := r.createTenantAdminCredentials(ctx, rctx, true)
 		if err != nil {
 			log.Error(err, "Failed to reset tenant admin keypair")
@@ -1322,12 +1314,12 @@ func (r *S3TenantAccountReconciler) reconcileTenantAdminCredentials(ctx context.
 func (r *S3TenantAccountReconciler) createTenantAdminCredentials(ctx context.Context, rctx *accountReconcileContext, recreate bool) (err error) {
 	log := log.FromContext(ctx)
 
-	// initialize variables for access key ID, access key, and secret key
+	// initialize variables for access key ID, access key, and secret key.
 	username, password := "", ""
 
 	if recreate {
 		log.V(1).Info("Recreating admin password")
-		// recreate the admin password
+		// recreate the admin password.
 		username, password, err = grid.SetTenantAdminPassword(ctx, rctx.TenantClient)
 		if err != nil {
 			log.Error(err, "Failed to recreate S3 admin keypair")
@@ -1335,7 +1327,7 @@ func (r *S3TenantAccountReconciler) createTenantAdminCredentials(ctx context.Con
 		}
 	} else {
 		log.V(1).Info("Creating initial S3 admin keypair")
-		// create admin user
+		// create admin user.
 		username, password, err = grid.CreateTenantAdminUser(ctx, rctx.TenantClient)
 		if err != nil {
 			log.Error(err, "Failed to create s3 keys")
@@ -1343,7 +1335,7 @@ func (r *S3TenantAccountReconciler) createTenantAdminCredentials(ctx context.Con
 		}
 	}
 
-	// if tenantref is set use this as owner instead
+	// if tenantref is set use this as owner instead.
 	var owner metav1.Object
 	if rctx.Account.Spec.S3TenantRef != nil {
 		owner = rctx.S3Tenant
@@ -1363,7 +1355,7 @@ func (r *S3TenantAccountReconciler) createTenantAdminCredentials(ctx context.Con
 func (r *S3TenantAccountReconciler) reconcileS3Credentials(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// check if theres no admin access key ID set, then we need to recreate the keypair
+	// check if theres no admin access key ID set, then we need to recreate the keypair.
 	_, _, err := kube.FetchKeyPairFromSecret(ctx, r.Client, rctx.Account.Status.S3AdminKeysSecretRef.Namespace, rctx.Account.Status.S3AdminKeysSecretRef.Name)
 	if err != nil {
 		log.Error(err, "Failed to fetch s3 keypair from secret, creating new s3 admin keypair")
@@ -1376,12 +1368,12 @@ func (r *S3TenantAccountReconciler) reconcileS3Credentials(ctx context.Context, 
 		return nil
 	}
 
-	// if the annotation is set to recreate the tenant keypairs a new keypair needs to be created
+	// if the annotation is set to recreate the tenant keypairs a new keypair needs to be created.
 	if rctx.Account.Annotations != nil {
 		if rctx.Account.Annotations[AnnotationRecreateTenantKeypairs] == "true" {
 			log.Info("Recreating S3 admin keypair due to annotation")
 
-			// trigger recreation of the S3 admin keypair
+			// trigger recreation of the S3 admin keypair.
 			err := r.createS3AdminKeypair(ctx, rctx, true)
 			if err != nil {
 				log.Error(err, "Failed to recreate S3 admin keypair")
@@ -1399,12 +1391,12 @@ func (r *S3TenantAccountReconciler) reconcileS3Credentials(ctx context.Context, 
 func (r *S3TenantAccountReconciler) createS3AdminKeypair(ctx context.Context, rctx *accountReconcileContext, recreate bool) (err error) {
 	log := log.FromContext(ctx)
 
-	// initialize variables for access key ID, access key, and secret key
+	// initialize variables for access key ID, access key, and secret key.
 	accessKeyId, accessKey, secretKey := "", "", ""
 
 	if recreate {
 		log.V(1).Info("Recreating S3 admin keypair")
-		// recreate the S3 admin keypair with existing access key ID
+		// recreate the S3 admin keypair with existing access key ID.
 		accessKeyId, accessKey, secretKey, err = grid.RecreateAdminS3Credentials(ctx, rctx.Account.Status.S3AdminAccessKeyId, rctx.TenantClient)
 		if err != nil {
 			log.Error(err, "Failed to recreate S3 admin keypair")
@@ -1412,7 +1404,7 @@ func (r *S3TenantAccountReconciler) createS3AdminKeypair(ctx context.Context, rc
 		}
 	} else {
 		log.V(1).Info("Creating initial S3 admin keypair")
-		// create s3 keys
+		// create s3 keys.
 		accessKeyId, accessKey, secretKey, err = grid.CreateAdminS3Credentials(ctx, rctx.TenantClient)
 		if err != nil {
 			log.Error(err, "Failed to create s3 keys")
@@ -1420,14 +1412,14 @@ func (r *S3TenantAccountReconciler) createS3AdminKeypair(ctx context.Context, rc
 		}
 	}
 
-	// if tenantref is set use this as owner instead
+	// if tenantref is set use this as owner instead.
 	var owner metav1.Object
 	if rctx.Account.Spec.S3TenantRef != nil {
 		owner = rctx.S3Tenant
 	} else {
 		owner = rctx.Account
 	}
-	// store s3 keys in a secret
+	// store s3 keys in a secret.
 	err = kube.CreateKeyPairSecret(ctx, r.Client, rctx.Account.Status.S3AdminKeysSecretRef.Namespace, rctx.Account.Status.S3AdminKeysSecretRef.Name, accessKey, secretKey, owner)
 	if err != nil {
 		log.Error(err, "Failed to create secret")
@@ -1439,30 +1431,30 @@ func (r *S3TenantAccountReconciler) createS3AdminKeypair(ctx context.Context, rc
 	return nil
 }
 
-// finalize handles any cleanup logic when the S3Tenant is being deleted
+// finalize handles any cleanup logic when the S3Tenant is being deleted.
 func (r *S3TenantAccountReconciler) finalize(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 	log.Info(fmt.Sprintf("Finalizing S3Tenant %s", rctx.Account.Name))
 
-	// delete requests within the backend take some time
-	// we always need to check if the tenant still exists on the backend
-	// while this is already checked using the webhook we still want to be sure
+	// delete requests within the backend take some time.
+	// we always need to check if the tenant still exists on the backend.
+	// while this is already checked using the webhook we still want to be sure.
 	stillExists := true
 	if err := r.fetchTenant(ctx, rctx); err != nil {
 		log.Error(err, "Failed to fetch tenant")
 		stillExists = false
 	}
 
-	// lucky case the tenant does not exist on the backend anymore
+	// lucky case the tenant does not exist on the backend anymore.
 	if !stillExists {
 		log.V(1).Info(fmt.Sprintf("Tenant %s does not exist on the backend, finalization can proceed without further action", rctx.Account.Name))
 		return nil
 	}
 
-	// if the tenant still exists we need to start the deletion process on the backend and reque
+	// if the tenant still exists we need to start the deletion process on the backend and reque.
 	log.V(1).Info(fmt.Sprintf("Tenant %s still exists on the backend, starting deletion process", rctx.Account.Name))
 
-	// send delete request to the grid
+	// send delete request to the grid.
 	if err := grid.DeleteTenant(ctx, rctx.Account.Status.TenantID, rctx.GridClient); err != nil {
 		log.Error(err, "Failed to delete tenant on the backend")
 		return fmt.Errorf("failed to delete tenant on the backend: %w", err)

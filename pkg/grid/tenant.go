@@ -1,3 +1,19 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package grid
 
 import (
@@ -77,9 +93,13 @@ func FetchTenant(ctx context.Context, tenantID string, gridClient *GridClient) (
 func CreateTenantAdminUser(ctx context.Context, tenantClient *TenantClient) (string, string, error) {
 	log := log.FromContext(ctx).WithValues("func", "CreateTenantAdminUser")
 
-	// make sure the group doesn't already exist
+	// make sure the group doesn't already exist.
 	log.V(1).Info("Creating tenant admin group")
 	groupID, err := createGroupIfNotExists(ctx, adminGroupName, generateAdminGroupPolicy(ctx, "admin-policy"), tenantClient)
+	if err != nil {
+		log.Error(err, "Failed to create tenant admin group")
+		return "", "", err
+	}
 
 	log.V(1).Info("Creating tenant admin user and assigning to admin group")
 	_, err = createUserIfNotExists(ctx, adminUserName, groupID, tenantClient)
@@ -104,10 +124,10 @@ func SetTenantAdminPassword(ctx context.Context, tenantClient *TenantClient) (st
 	log := log.FromContext(ctx).WithValues("func", "SetTenantAdminPassword")
 	log.V(1).Info("Setting password for tenant admin user")
 
-	// generate a new password
+	// generate a new password.
 	newPassword := generatePassword(12, true, true, true)
 
-	// get userid by name
+	// get userid by name.
 	user, err := tenantClient.Users.GetByName(ctx, adminUserName)
 	if err != nil {
 		log.Error(err, "Failed to get tenant admin user ID")
@@ -130,10 +150,10 @@ func generateAdminGroupPolicy(ctx context.Context, policyName string) *models.Te
 
 	trueVal := true
 
-	// allow all s3 actions
+	// allow all s3 actions.
 	actions := []string{"s3:*"}
 
-	// on all resources
+	// on all resources.
 	resource := []string{"arn:aws:s3:::*"}
 
 	return &models.TenantGroupPolicies{
@@ -158,7 +178,7 @@ func generateAdminGroupPolicy(ctx context.Context, policyName string) *models.Te
 	}
 }
 
-// FetchTenantUsage should only ever be executed once per reconciliation
+// FetchTenantUsage should only ever be executed once per reconciliation.
 func FetchTenantUsage(ctx context.Context, tenantID string, gridClient *GridClient) (*TenantUsage, error) {
 	log := log.FromContext(ctx).WithValues("func", "FetchTenantUsage")
 	log.V(1).Info(fmt.Sprintf("Fetching tenant usage for tenant with id %s", tenantID))
@@ -173,7 +193,7 @@ func FetchTenantUsage(ctx context.Context, tenantID string, gridClient *GridClie
 	return tenantUsage, nil
 }
 
-// Get the different values from the tenant and tenantUsage structs
+// Get the different values from the tenant and tenantUsage structs.
 
 func GetTenantObjectCount(tenantUsage *TenantUsage) int64 {
 	count := *tenantUsage.ObjectCount
@@ -202,14 +222,14 @@ func GetConfiguredDescription(tenant *Tenant) string {
 	return *tenant.Description
 }
 
-// update func to reflect user updates in the backend
+// update func to reflect user updates in the backend.
 
-// helper method to update the tenant in the backend
+// helper method to update the tenant in the backend.
 func updateTenant(ctx context.Context, tenant *Tenant, gridClient *GridClient) error {
 	log := log.FromContext(ctx).WithValues("func", "updateTenant")
 	log.V(1).Info("Updating tenant")
 
-	tenant, err := gridClient.Tenant.Update(ctx, tenant)
+	_, err := gridClient.Tenant.Update(ctx, tenant)
 	if err != nil {
 		log.Error(err, "Failed to update tenant")
 		return err
@@ -223,10 +243,10 @@ func UpdateQuota(ctx context.Context, quota int64, tenant *Tenant, gridClient *G
 	log := log.FromContext(ctx).WithValues("func", "UpdateQuota")
 	log.V(1).Info(fmt.Sprintf("Updating quota to %d", quota))
 
-	// only allow an increase in quota
-	// if quota < *tenant.Policy.QuotaObjectBytes {
-	// 	log.V(1).Info(fmt.printf("Quota can only be increased, %s is less than the current quota %s, failing", strconv.FormatInt(quota, 10), strconv.FormatInt(*tenant.Policy.QuotaObjectBytes, 10)))
-	// 	return fmt.Errorf("quota can only be increased, %s is less than the current quota %s", strconv.FormatInt(quota, 10), strconv.FormatInt(*tenant.Policy.QuotaObjectBytes, 10))
+	// only allow an increase in quota.
+	// if quota < *tenant.Policy.QuotaObjectBytes {.
+	// 	log.V(1).Info(fmt.printf("Quota can only be increased, %s is less than the current quota %s, failing", strconv.FormatInt(quota, 10), strconv.FormatInt(*tenant.Policy.QuotaObjectBytes, 10))).
+	// 	return fmt.Errorf("quota can only be increased, %s is less than the current quota %s", strconv.FormatInt(quota, 10), strconv.FormatInt(*tenant.Policy.QuotaObjectBytes, 10)).
 	// }
 
 	tenant.Policy.QuotaObjectBytes = &quota
@@ -249,13 +269,13 @@ func UpdateName(ctx context.Context, name string, tenant *Tenant, gridClient *Gr
 	return updateTenant(ctx, tenant, gridClient)
 }
 
-// delete tenant in the backend
+// delete tenant in the backend.
 func DeleteTenant(ctx context.Context, tenantId string, gridClient *GridClient) error {
 	log := log.FromContext(ctx).WithValues("func", "DeleteTenant")
 	log.V(1).Info(fmt.Sprintf("Deleting tenant with id %s", tenantId))
 
-	// check if the tenant still exists on the backend
-	// we need to do this, because otherwise the deletion will fail
+	// check if the tenant still exists on the backend.
+	// we need to do this, because otherwise the deletion will fail.
 	_, err := gridClient.Tenant.GetById(ctx, tenantId)
 	if err != nil {
 		log.Error(err, "Unable to fetch tenant, it might have been deleted already, removing from kubernetes")

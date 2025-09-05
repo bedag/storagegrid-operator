@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,13 +25,13 @@ var _ = Describe("S3Tenant Webhook", func() {
 	Context("When creating S3Tenant under Validating Webhook", func() {
 		It("Should deny if a required field is empty", func() {
 
-			// TODO(user): Add your logic here
+			// TODO(user): Add your logic here.
 
 		})
 
 		It("Should admit if all required fields are provided", func() {
 
-			// TODO(user): Add your logic here
+			// TODO(user): Add your logic here.
 
 		})
 	})

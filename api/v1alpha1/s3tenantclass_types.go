@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,86 +21,86 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
+// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!.
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// S3TenantClassSpec defines the desired state of S3TenantClass
+// S3TenantClassSpec defines the desired state of S3TenantClass.
 type S3TenantClassSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster.
+	// Important: Run "make" to regenerate code after modifying this file.
 
-	// The backing ID on the StorageGrid
-	// Need to point to an existing gateway in the StorageGrid
+	// The backing ID on the StorageGrid.
+	// Need to point to an existing gateway in the StorageGrid.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="storageGridRef is immutable"
 	BackingID string `json:"backingID,omitempty"`
 
-	// pathstyle access means the bucketname is part of the path
+	// pathstyle access means the bucketname is part of the path.
 	// +kubebuilder:default=false
 	// +optional
 	UsePathStyleAccess bool `json:"usePathStyleAccess,omitempty"`
 
-	// StorageGrid Reference for the TenantClass
+	// StorageGrid Reference for the TenantClass.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="storageGridRef is immutable"
 	StorageGridRef corev1.LocalObjectReference `json:"storageGridRef,omitempty"`
 
-	// Enforce make sure that only the tenants in this class can
-	// use the backing gateway in the StorageGrid
+	// Enforce make sure that only the tenants in this class can.
+	// use the backing gateway in the StorageGrid.
 	// +kubebuilder:default=false
 	// +optional
 	Enforce bool `json:"enforce,omitempty"`
 
-	// Frequency to check for changes in the StorageGrid in minutes
+	// Frequency to check for changes in the StorageGrid in minutes.
 	// +kubebuilder:default="60m"
 	// +optional
 	RefreshInterval *metav1.Duration `json:"refreshInterval,omitempty"`
 }
 
-// S3TenantClassStatus defines the observed state of S3TenantClass
+// S3TenantClassStatus defines the observed state of S3TenantClass.
 type S3TenantClassStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster.
+	// Important: Run "make" to regenerate code after modifying this file.
 
-	// The displayname of the S3TenantClass
+	// The displayname of the S3TenantClass.
 	// +optional
 	DisplayName string `json:"displayName,omitempty"`
 
-	// Port for the S3TenantClass
+	// Port for the S3TenantClass.
 	// +optional
 	Port int32 `json:"port,omitempty"`
 
-	// Secure defines whether TLS is enabled on the endpoint or not
+	// Secure defines whether TLS is enabled on the endpoint or not.
 	// +optional
 	Secure bool `json:"secure,omitempty"`
 
-	// Define whether ipv4 access is enabled
+	// Define whether ipv4 access is enabled.
 	// +kubebuilder:default=true
 	// +optional
 	IPv4AccessEnabled bool `json:"ipv4AccessEnabled,omitempty"`
 
-	// Define whether ipv6 access is enabled
+	// Define whether ipv6 access is enabled.
 	// +kubebuilder:default=false
 	// +optional
 	IPv6AccessEnabled bool `json:"ipv6AccessEnabled,omitempty"`
 
-	// drop requests on untrusted client networks
+	// drop requests on untrusted client networks.
 	// +kubebuilder:default=false
 	// +optional
 	UntrustedNetworksDropped bool `json:"untrustedNetworksDropped,omitempty"`
 
-	// track a list of tenants that use this class
-	// needed to update the tenantclass when a tenant is created or deleted
+	// track a list of tenants that use this class.
+	// needed to update the tenantclass when a tenant is created or deleted.
 	S3TenantIDs []string `json:"tenants,omitempty"`
 
-	// S3 Endpoint
+	// S3 Endpoint.
 	S3Endpoints []string `json:"s3Endpoints,omitempty"`
 
-	// S3 VIP
+	// S3 VIP.
 	S3VIPs []string `json:"s3VIPs,omitempty"`
 
-	// Track S3TenantClass conditions
+	// Track S3TenantClass conditions.
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 
-	// Track the last time the S3TenantClass was updated
+	// Track the last time the S3TenantClass was updated.
 	LastUpdated metav1.Time `json:"lastUpdated,omitempty"`
 }
 
@@ -112,7 +112,7 @@ type S3TenantClassStatus struct {
 // +kubebuilder:printcolumn:JSONPath=`.metadata.creationTimestamp`,name=`AGE`,type=date
 // +kubebuilder:resource:scope=Cluster,shortName={"s3class"}
 
-// S3TenantClass is the Schema for the s3tenantclasses API
+// S3TenantClass is the Schema for the s3tenantclasses API.
 type S3TenantClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -123,7 +123,7 @@ type S3TenantClass struct {
 
 // +kubebuilder:object:root=true
 
-// S3TenantClassList contains a list of S3TenantClass
+// S3TenantClassList contains a list of S3TenantClass.
 type S3TenantClassList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

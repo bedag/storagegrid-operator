@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ var _ = Describe("controller", Ordered, func() {
 			var controllerPodName string
 			var err error
 
-			// projectimage stores the name of the image used in the example
+			// projectimage stores the name of the image used in the example.
 			var projectimage = "example.com/storagegrid-operator:v0.0.1"
 
 			By("building the manager(Operator) image")
@@ -83,7 +83,7 @@ var _ = Describe("controller", Ordered, func() {
 
 			By("validating that the controller-manager pod is running as expected")
 			verifyControllerUp := func() error {
-				// Get pod name
+				// Get pod name.
 
 				cmd = exec.Command("kubectl", "get",
 					"pods", "-l", "control-plane=controller-manager",
@@ -103,7 +103,7 @@ var _ = Describe("controller", Ordered, func() {
 				controllerPodName = podNames[0]
 				ExpectWithOffset(2, controllerPodName).Should(ContainSubstring("controller-manager"))
 
-				// Validate pod status
+				// Validate pod status.
 				cmd = exec.Command("kubectl", "get",
 					"pods", controllerPodName, "-o", "jsonpath={.status.phase}",
 					"-n", namespace,

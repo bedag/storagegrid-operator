@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ import (
 	"git.mgmtbi.ch/cloud/storagegrid-operator/pkg/kube"
 )
 
-// StorageGridReconciler reconciles a StorageGrid object
+// StorageGridReconciler reconciles a StorageGrid object.
 type StorageGridReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -50,13 +50,8 @@ type sgReconcileContext struct {
 }
 
 const (
-	// this is important to ensure that all linked tenants are deleted before the storageGrid is deleted
+	// this is important to ensure that all linked tenants are deleted before the storageGrid is deleted.
 	sgFinalizer = "storagegrid.s3.bedag.ch/finalizer"
-)
-
-var (
-	// usage struct to hold the usage information
-	usage = s3v1alpha1.StorageGridUsage{}
 )
 
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=storagegrids,verbs=get;list;watch;create;update;patch;delete
@@ -65,14 +60,14 @@ var (
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenants,verbs=get;list;watch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
+// Reconcile is part of the main kubernetes reconciliation loop which aims to.
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the StorageGrid object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
+// TODO(user): Modify the Reconcile function to compare the state specified by.
+// the StorageGrid object against the actual cluster state, and then.
+// perform operations to make the cluster state reflect the state specified by.
 // the user.
 //
-// For more details, check Reconcile and its Result here:
+// For more details, check Reconcile and its Result here:.
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.4/pkg/reconcile
 func (r *StorageGridReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
@@ -87,7 +82,7 @@ func (r *StorageGridReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	log.V(1).Info("Successfully retrieved resource in question")
 
-	// initialize reconcile context
+	// initialize reconcile context.
 	rctx := &sgReconcileContext{
 		SG:            sg,
 		DoReque:       false,
@@ -96,22 +91,22 @@ func (r *StorageGridReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	err := r.doReconcile(ctx, rctx)
 
-	// use conditions to derive the readiness state
+	// use conditions to derive the readiness state.
 	r.deriveReadiness(ctx, rctx.SG)
 
-	// in any other case we just update the status
+	// in any other case we just update the status.
 	if updateErr := r.Status().Update(ctx, sg); updateErr != nil {
 		log.Error(updateErr, "Failed to update status, requeuing")
 		if err == nil {
-			// no error occured during reconciliation, but status update failed
+			// no error occurred during reconciliation, but status update failed.
 			rctx.DoReque = true // requeue to ensure status is updated
 		}
-		// if an error already occured during reconciliation, we just return that error
+		// if an error already occurred during reconciliation, we just return that error.
 	}
 
 	return ctrl.Result{Requeue: rctx.DoReque}, err
-
 }
+
 func (r *StorageGridReconciler) doReconcile(ctx context.Context, rctx *sgReconcileContext) (err error) {
 	log := log.FromContext(ctx)
 
@@ -127,21 +122,21 @@ func (r *StorageGridReconciler) doReconcile(ctx context.Context, rctx *sgReconci
 
 	r.reconcileDeletionPolicy(ctx, rctx.SG)
 
-	// fetch credentials and initialize grid client
+	// fetch credentials and initialize grid client.
 	err = r.initGridClient(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "GridClientInitError", fmt.Sprintf("Failed to initialize grid client: %v", err))
 		return err
 	}
 
-	// make sure regions are fetched and set
+	// make sure regions are fetched and set.
 	err = r.reconcileRegions(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "RegionUpdateError", fmt.Sprintf("Failed to fetch regions: %v", err))
 		return err
 	}
 
-	// checking if the grid is reachable and healthy
+	// checking if the grid is reachable and healthy.
 	err = r.reconcileGridHealth(ctx, rctx)
 	if err != nil {
 		log.Error(err, "Failed to check grid health")
@@ -151,7 +146,7 @@ func (r *StorageGridReconciler) doReconcile(ctx context.Context, rctx *sgReconci
 	}
 	r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeReachable, metav1.ConditionTrue, "GridReachable", "Grid is reachable and healthy")
 
-	// set the condition to true, as we successfully reconciled the storageGrid
+	// set the condition to true, as we successfully reconciled the storageGrid.
 	r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "ReconcileSucceeded", "StorageGrid reconciled successfully")
 
 	return nil
@@ -160,58 +155,58 @@ func (r *StorageGridReconciler) doReconcile(ctx context.Context, rctx *sgReconci
 func (r *StorageGridReconciler) deriveReadiness(ctx context.Context, sg *s3v1alpha1.StorageGrid) {
 	log := log.FromContext(ctx)
 
-	// all of these conditions need to be be in state true for this method to return true
+	// all of these conditions need to be be in state true for this method to return true.
 	reconciliation := false
 	reachable := false
 
-	// message that will show on the ready condition
+	// message that will show on the ready condition.
 	message := ""
 
-	// get the reconciliation condition of the current generation
+	// get the reconciliation condition of the current generation.
 	reconcileCondition := meta.FindStatusCondition(sg.Status.Conditions, s3v1alpha1.ConditionTypeReconcileSucceeded)
 	if reconcileCondition != nil {
-		// check if the condition is from the current generation
+		// check if the condition is from the current generation.
 		if reconcileCondition.ObservedGeneration == sg.GetGeneration() {
-			// if the condition is true, we can assume the reconciliation was successful
+			// if the condition is true, we can assume the reconciliation was successful.
 			if reconcileCondition.Status == metav1.ConditionTrue {
 				log.V(1).Info("Reconciliation succeeded")
-				message = message + "Reconciliation succeeded"
+				message += "Reconciliation succeeded"
 
-				// set the reconciliation state to true
+				// set the reconciliation state to true.
 				reconciliation = true
 			} else {
 				log.V(1).Info("Reconciliation failed somewhere, overall ready state is false")
-				message = message + "Reconciliation failed"
+				message += "Reconciliation failed"
 			}
 		} else {
 			log.V(1).Info("Reconciliation condition is not from the current generation, overall ready state is false")
-			message = message + "Reconciliation condition is not from the current generation"
+			message += "Reconciliation condition is not from the current generation"
 		}
 	} else {
 		log.V(1).Info("Reconciliation condition not found, overall ready state is false")
-		message = message + "Reconciliation condition not found"
+		message += "Reconciliation condition not found"
 	}
 
-	// check whether the backing resource is ready
+	// check whether the backing resource is ready.
 	reachableCondition := meta.FindStatusCondition(sg.Status.Conditions, s3v1alpha1.ConditionTypeReachable)
-	// we can directly translate the state of the condition to our variable
+	// we can directly translate the state of the condition to our variable.
 	if reachableCondition != nil {
 		if reachableCondition.ObservedGeneration == sg.GetGeneration() {
 			if reachableCondition.Status == metav1.ConditionTrue {
 				log.V(1).Info("Grid is reachable and healthy")
-				message = message + ", Grid is reachable and healthy"
+				message += ", Grid is reachable and healthy"
 				reachable = true
 			} else {
 				log.V(1).Info("Grid is not reachable or healthy, overall ready state is false")
-				message = message + ", Grid is not reachable or healthy"
+				message += ", Grid is not reachable or healthy"
 			}
 		} else {
 			log.V(1).Info("Reachable resource condition is not from the current generation, overall ready state is false")
-			message = message + ", Reachable resource condition is not from the current generation"
+			message += ", Reachable resource condition is not from the current generation"
 		}
 	} else {
 		log.V(1).Info("Reachable resource condition not found, overall ready state is false")
-		message = message + ", Reachable resource condition not found"
+		message += ", Reachable resource condition not found"
 	}
 
 	if reconciliation && reachable {
@@ -226,12 +221,12 @@ func (r *StorageGridReconciler) deriveReadiness(ctx context.Context, sg *s3v1alp
 }
 
 func (r *StorageGridReconciler) finalize(ctx context.Context, sg *s3v1alpha1.StorageGrid) error {
-	// Add your finalization logic here
-	// For example, you might want to delete external resources associated with the StorageGrid
+	// Add your finalization logic here.
+	// For example, you might want to delete external resources associated with the StorageGrid.
 	log := log.FromContext(ctx)
 	log.Info("Finalizing storageGrid", "name", sg.Name)
 
-	// currently no finalization logic is needed, but we keep this for future use
+	// currently no finalization logic is needed, but we keep this for future use.
 
 	return nil
 }
@@ -239,9 +234,9 @@ func (r *StorageGridReconciler) finalize(ctx context.Context, sg *s3v1alpha1.Sto
 func (r *StorageGridReconciler) reconcileFinalizerAndDlelete(ctx context.Context, rctx *sgReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// examine DeletionTimestamp to determine if object is under deletion
+	// examine DeletionTimestamp to determine if object is under deletion.
 	if rctx.SG.DeletionTimestamp.IsZero() {
-		// if the object is not being deleted, add our finalizer if it is not already present
+		// if the object is not being deleted, add our finalizer if it is not already present.
 		if !controllerutil.ContainsFinalizer(rctx.SG, sgFinalizer) {
 			controllerutil.AddFinalizer(rctx.SG, sgFinalizer)
 			log.V(1).Info("Adding finalizer to storageGrid")
@@ -250,10 +245,10 @@ func (r *StorageGridReconciler) reconcileFinalizerAndDlelete(ctx context.Context
 			return nil
 		}
 	} else {
-		// the object is being deleted
+		// the object is being deleted.
 		log.V(1).Info("StorageGrid is being deleted, checking for finalizer")
 		if controllerutil.ContainsFinalizer(rctx.SG, sgFinalizer) {
-			// our finalizer is present, so lets handle any external dependency
+			// our finalizer is present, so lets handle any external dependency.
 			if err := r.finalize(ctx, rctx.SG); err != nil {
 				log.Error(err, "Failed to finalize storageGrid")
 				return err
@@ -266,7 +261,7 @@ func (r *StorageGridReconciler) reconcileFinalizerAndDlelete(ctx context.Context
 			rctx.ObjectUpdated = true
 			return nil
 		}
-		// Stop reconciliation as the item is being deleted
+		// Stop reconciliation as the item is being deleted.
 
 		log.V(1).Info("StorageGrid is being deleted, no finalizer present")
 		return nil
@@ -275,23 +270,23 @@ func (r *StorageGridReconciler) reconcileFinalizerAndDlelete(ctx context.Context
 	return nil
 }
 
-// being really careful and verbose here, we want to ensure that the status is updated correctly
-// could lead to accidental deletion of tenants if not handled properly
+// being really careful and verbose here, we want to ensure that the status is updated correctly.
+// could lead to accidental deletion of tenants if not handled properly.
 func (r *StorageGridReconciler) reconcileDeletionPolicy(ctx context.Context, sg *s3v1alpha1.StorageGrid) {
 	log := log.FromContext(ctx)
 
-	// make sure tenant deletion policy is set
-	// default to 7d if not set
+	// make sure tenant deletion policy is set.
+	// default to 7d if not set.
 	duration, err := time.ParseDuration(s3v1alpha1.DefaultRetentionDuration)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("Failed to parse default retention duration string %s, using 7d", s3v1alpha1.DefaultRetentionDuration))
 		duration = 7 * 24 * time.Hour // default to 7 days
 	}
 
-	// if tenant deletion policy is not set, set it to the default retention duration
+	// if tenant deletion policy is not set, set it to the default retention duration.
 	DefaultTenantDeletionPolicy := sg.Spec.DefaultTenantDeletionPolicy
 	if DefaultTenantDeletionPolicy != nil {
-		// if retention duration is not set, set it to the default retention duration
+		// if retention duration is not set, set it to the default retention duration.
 		if DefaultTenantDeletionPolicy.RetentionDuration == nil {
 			log.V(1).Info(fmt.Sprintf("Retention duration not set, using default retention duration of %s", duration.String()))
 			DefaultTenantDeletionPolicy.RetentionDuration = &metav1.Duration{Duration: duration}
@@ -299,14 +294,14 @@ func (r *StorageGridReconciler) reconcileDeletionPolicy(ctx context.Context, sg 
 			log.V(1).Info(fmt.Sprintf("Using retention duration of %s", DefaultTenantDeletionPolicy.RetentionDuration.Duration.String()))
 		}
 
-		// if policy is not set, set it to the default policy
+		// if policy is not set, set it to the default policy.
 		if DefaultTenantDeletionPolicy.Policy == "" {
 			log.V(1).Info(fmt.Sprintf("Deletion policy not set, using default policy %s", s3v1alpha1.DefaultTenantDeletionProcedure))
 			DefaultTenantDeletionPolicy.Policy = s3v1alpha1.DefaultTenantDeletionProcedure
 		}
 	}
 
-	// copy changed tenant deletion policy fields to the status
+	// copy changed tenant deletion policy fields to the status.
 	if sg.Status.DefaultTenantDeletionPolicy == nil {
 		sg.Status.DefaultTenantDeletionPolicy = &s3v1alpha1.TenantDeletionPolicy{}
 	}
@@ -332,7 +327,7 @@ func (r *StorageGridReconciler) initGridClient(ctx context.Context, rctx *sgReco
 		return err
 	}
 
-	// initialize client for grid
+	// initialize client for grid.
 	log.V(1).Info("Initializing grid client if not initialized")
 	client, err := grid.InitGridClient(username, password, rctx.SG.Spec.Endpoint)
 	if err != nil {
@@ -362,15 +357,15 @@ func (r *StorageGridReconciler) reconcileRegions(ctx context.Context, rctx *sgRe
 		rctx.SG.Status.Regions = *regions
 	}
 
-	// make sure a default region is set
+	// make sure a default region is set.
 	defaultRegion := rctx.SG.Status.Regions[0]
 	if rctx.SG.Spec.DefaultBucketRegion != "" {
-		// use first region from slice
+		// use first region from slice.
 		defaultRegion = rctx.SG.Spec.DefaultBucketRegion
 	} else {
-		// check if the specified region is valid
+		// check if the specified region is valid.
 		if !slices.Contains(rctx.SG.Status.Regions, rctx.SG.Spec.DefaultBucketRegion) {
-			log.Error(fmt.Errorf("specified region %s does not exist.", rctx.SG.Spec.DefaultBucketRegion), "Region does not exist")
+			log.Error(fmt.Errorf("specified region %s does not exist", rctx.SG.Spec.DefaultBucketRegion), "Region does not exist")
 		} else {
 			defaultRegion = rctx.SG.Spec.DefaultBucketRegion
 		}
@@ -401,7 +396,7 @@ func (r *StorageGridReconciler) reconcileGridHealth(ctx context.Context, rctx *s
 		reasons, err := grid.GetOperativeReason(ctx, rctx.GridClient)
 		if err != nil {
 			log.Error(err, "Failed to get reason for grid health issues")
-			return fmt.Errorf("failed to get reason for grid health issues: %v", err)
+			return fmt.Errorf("failed to get reason for grid health issues: %w", err)
 		}
 
 		if len(reasons) > 0 {
@@ -417,7 +412,7 @@ func (r *StorageGridReconciler) reconcileGridHealth(ctx context.Context, rctx *s
 }
 
 func (r *StorageGridReconciler) setCondition(sg *s3v1alpha1.StorageGrid, condType string, status metav1.ConditionStatus, reason string, message string) {
-	// add or update with given condition
+	// add or update with given condition.
 	condition := metav1.Condition{
 		Type:               condType,
 		Status:             status,

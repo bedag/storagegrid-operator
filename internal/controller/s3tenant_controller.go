@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,27 +38,27 @@ import (
 	s3v1alpha1 "git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1"
 )
 
-// S3TenantReconciler reconciles a S3Tenant object
+// S3TenantReconciler reconciles a S3Tenant object.
 type S3TenantReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
 
 type tenantReconcileContext struct {
-	// context for the reconciliation loop
+	// context for the reconciliation loop.
 	S3Tenant *s3v1alpha1.S3Tenant
-	// storing the account reference here to make it available in the whole reconciliation loop
+	// storing the account reference here to make it available in the whole reconciliation loop.
 	Account *s3v1alpha1.S3TenantAccount
-	// tracking if annotations were update to send the update request after the status was updated
-	// this is used to avoid sending multiple updates in the same reconciliation loop
+	// tracking if annotations were update to send the update request after the status was updated.
+	// this is used to avoid sending multiple updates in the same reconciliation loop.
 	ObjectUpdated bool
-	// track if we need to requeue the reconciliation loop
+	// track if we need to requeue the reconciliation loop.
 	DoRequeue bool
 }
 
 const (
 	tenantFinalizer           = "kubernetes.io/foregroundDeletion"
-	errorAccountNotPhaseBound = "Backing S3TenantAccount is not in phase Bound"
+	errorAccountNotPhaseBound = "backing S3TenantAccount is not in phase Bound"
 )
 
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenants,verbs=get;list;watch;create;update;patch;delete
@@ -66,21 +66,21 @@ const (
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenants/finalizers,verbs=update
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenantaccounts,verbs=get;list;watch;create;update;patch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
+// Reconcile is part of the main kubernetes reconciliation loop which aims to.
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the S3Tenant object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
+// TODO(user): Modify the Reconcile function to compare the state specified by.
+// the S3Tenant object against the actual cluster state, and then.
+// perform operations to make the cluster state reflect the state specified by.
 // the user.
 //
-// For more details, check Reconcile and its Result here:
+// For more details, check Reconcile and its Result here:.
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.4/pkg/reconcile
 func (r *S3TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
 	log.V(1).Info(fmt.Sprintf("Reconciliation loop started for s3Tenant %s", req.Name))
 
-	// Get the object to reconcile on
+	// Get the object to reconcile on.
 	s3Tenant := &s3v1alpha1.S3Tenant{}
 	if err := r.Get(ctx, req.NamespacedName, s3Tenant); err != nil {
 		log.Error(err, "Failed to retrieve resource")
@@ -88,7 +88,7 @@ func (r *S3TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	log.V(1).Info("Successfully retrieved resource in question")
 
-	// initialize the reconcile context
+	// initialize the reconcile context.
 	rctx := &tenantReconcileContext{
 		S3Tenant:      s3Tenant,
 		Account:       &s3v1alpha1.S3TenantAccount{},
@@ -98,22 +98,22 @@ func (r *S3TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	err := r.doReconcile(ctx, rctx)
 
-	// use conditions to derive the readiness state
+	// use conditions to derive the readiness state.
 	r.deriveReadiness(ctx, rctx.S3Tenant)
 
-	// update the annotations if they were updated
-	// needs to be done before the status is updated because we lose the annotations otherwise
+	// update the annotations if they were updated.
+	// needs to be done before the status is updated because we lose the annotations otherwise.
 	if rctx.ObjectUpdated {
-		// creating a deep copy of the status to avoid modifying the original object
+		// creating a deep copy of the status to avoid modifying the original object.
 		statusCopy := rctx.S3Tenant.DeepCopy()
 
 		log.V(1).Info("Annotations were updated, updating the object")
 		if updateErr := r.Update(ctx, rctx.S3Tenant); updateErr != nil {
 			log.Error(updateErr, "Failed to update annotations")
 			if err != nil {
-				err = fmt.Errorf("reconciliation failed: %w, failed to update annotations: %s", err, updateErr)
+				err = fmt.Errorf("reconciliation failed: %w, failed to update annotations: %w", err, updateErr)
 			} else {
-				err = fmt.Errorf("failed to update annotations: %s", updateErr)
+				err = fmt.Errorf("failed to update annotations: %w", updateErr)
 			}
 		} else {
 			log.V(1).Info("Annotations updated successfully")
@@ -122,22 +122,21 @@ func (r *S3TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		rctx.S3Tenant.Status = statusCopy.Status // restore the status from the copy
 	}
 
-	// Due to condition tracking status always needs to be updated
+	// Due to condition tracking status always needs to be updated.
 	if updateErr := r.Status().Update(ctx, rctx.S3Tenant); updateErr != nil {
 		log.Error(updateErr, "Failed to update status, requeuing")
 		if err == nil {
-			// no error occured during reconciliation, but status update failed
+			// no error occurred during reconciliation, but status update failed.
 			rctx.DoRequeue = true // requeue to ensure status is updated
 		}
-		// if an error already occured during reconciliation, we just return that error
+		// if an error already occurred during reconciliation, we just return that error.
 	}
 
 	return ctrl.Result{Requeue: rctx.DoRequeue}, err
 }
 
 func (r *S3TenantReconciler) doReconcile(ctx context.Context, rctx *tenantReconcileContext) (err error) {
-
-	// ensure the backing account exists or create it if necessary
+	// ensure the backing account exists or create it if necessary.
 	err = r.reconcileTenantAccountReference(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantAccountError", fmt.Sprintf("Failed to reconcile tenant account: %s", err.Error()))
@@ -154,7 +153,7 @@ func (r *S3TenantReconciler) doReconcile(ctx context.Context, rctx *tenantReconc
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "OwnerReferenceError", fmt.Sprintf("Failed to set owner reference: %s", err.Error()))
 	}
 
-	// examine DeletionTimestamp to determine if object is under deletion
+	// examine DeletionTimestamp to determine if object is under deletion.
 	err = r.reconcileFinalizerAndDlelete(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "ReconcileFailed", fmt.Sprintf("Failed to reconcile delete or finalizer %s", err.Error()))
@@ -165,7 +164,7 @@ func (r *S3TenantReconciler) doReconcile(ctx context.Context, rctx *tenantReconc
 		return nil
 	}
 
-	// update the tenantAccountSpec if needed
+	// update the tenantAccountSpec if needed.
 	err = r.reconcileTenantAccountSpec(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantAccountSpecUpdateFailed", fmt.Sprintf("Failed to reconcile tenant account spec: %s", err.Error()))
@@ -179,41 +178,40 @@ func (r *S3TenantReconciler) doReconcile(ctx context.Context, rctx *tenantReconc
 	}
 	r.setCondition(rctx.S3Tenant, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionTrue, "TenantAccountReady", fmt.Sprintf("S3Tenant Account %s is ready for storage operations", rctx.Account.Name))
 
-	// certain annotations need to be set on the tenantAccount
+	// certain annotations need to be set on the tenantAccount.
 	err = r.reconcileTenantAnnotations(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantAccountAnnotationUpdateFailed", fmt.Sprintf("Failed to reconcile tenant account annotations: %s", err.Error()))
 	}
 
-	// ensure the owner reference is set correctly
-	if ctrl.SetControllerReference(rctx.Account, rctx.S3Tenant, r.Scheme); err != nil {
+	// ensure the owner reference is set correctly.
+	if err := ctrl.SetControllerReference(rctx.Account, rctx.S3Tenant, r.Scheme); err != nil {
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "OwnerReferenceSetFailed", fmt.Sprintf("Failed to set owner reference for S3Tenant to backing S3TenantAccount: %s", err.Error()))
 	}
 
-	// copy the status from the account to the tenant
+	// copy the status from the account to the tenant.
 	err = r.reconcileTenantAccountStatus(ctx, rctx)
 	if err != nil && err.Error() == errorAccountNotPhaseBound {
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypePending, metav1.ConditionTrue, "TenantAccountNotPhaseBound", fmt.Sprintf("S3TenantAccount %s is still in state %s", rctx.Account.Name, rctx.Account.Status.Phase))
-
 	} else if err != nil {
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantAccountStatusSyncFailed", fmt.Sprintf("Failed to sync tenant account status: %s", err.Error()))
 	}
 	r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypePending, metav1.ConditionFalse, "TenantAccountReady", fmt.Sprintf("S3TenantAccount %s is ready", rctx.Account.Name))
 
-	// get all the buckets linked to this tenant
+	// get all the buckets linked to this tenant.
 	err = r.reconcileLinkedBuckets(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "ReconcileFailed", fmt.Sprintf("Failed to reconcile linked buckets: %s", err.Error()))
 	}
 
-	// reconciliation ran successfully
+	// reconciliation ran successfully.
 	r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "ReconcileSucceeded", "Reconciliation completed successfully")
 
 	return nil
 }
 
 func (r *S3TenantReconciler) setCondition(s3Tenant *s3v1alpha1.S3Tenant, condType string, status metav1.ConditionStatus, reason string, message string) {
-	// add or update with given condition
+	// add or update with given condition.
 	condition := metav1.Condition{
 		Type:               condType,
 		Status:             status,
@@ -228,68 +226,68 @@ func (r *S3TenantReconciler) setCondition(s3Tenant *s3v1alpha1.S3Tenant, condTyp
 func (r *S3TenantReconciler) deriveReadiness(ctx context.Context, s3Tenant *s3v1alpha1.S3Tenant) {
 	log := log.FromContext(ctx)
 
-	// all of these conditions need to be be in state true for this method to return true
+	// all of these conditions need to be be in state true for this method to return true.
 	reconciliation := false
 	backendReady := false
 	backendPending := false
 
-	// message that will show on the ready condition
+	// message that will show on the ready condition.
 	message := ""
 
-	// get the reconciliation condition of the current generation
+	// get the reconciliation condition of the current generation.
 	reconcileCondition := meta.FindStatusCondition(s3Tenant.Status.Conditions, s3v1alpha1.ConditionTypeReconcileSucceeded)
 	if reconcileCondition != nil {
-		// check if the condition is from the current generation
+		// check if the condition is from the current generation.
 		if reconcileCondition.ObservedGeneration == s3Tenant.GetGeneration() {
-			// if the condition is true, we can assume the reconciliation was successful
+			// if the condition is true, we can assume the reconciliation was successful.
 			if reconcileCondition.Status == metav1.ConditionTrue {
 				log.V(1).Info("Reconciliation succeeded")
-				message = message + "Reconciliation succeeded"
+				message += "Reconciliation succeeded"
 
-				// set the reconciliation state to true
+				// set the reconciliation state to true.
 				reconciliation = true
 			} else {
 				log.V(1).Info("Reconciliation failed somewhere, overall ready state is false")
-				message = message + "Reconciliation failed"
+				message += "Reconciliation failed"
 			}
 		} else {
 			log.V(1).Info("Reconciliation condition is not from the current generation, overall ready state is false")
-			message = message + "Reconciliation condition is not from the current generation"
+			message += "Reconciliation condition is not from the current generation"
 		}
 	} else {
 		log.V(1).Info("Reconciliation condition not found, overall ready state is false")
-		message = message + "Reconciliation condition not found"
+		message += "Reconciliation condition not found"
 	}
 
-	// check whether the backing resource is ready
+	// check whether the backing resource is ready.
 	backendCondition := meta.FindStatusCondition(s3Tenant.Status.Conditions, s3v1alpha1.ContitionTypeBackingResourceReady)
-	// we can directly translate the state of the condition to our variable
+	// we can directly translate the state of the condition to our variable.
 	if backendCondition != nil {
 		if backendCondition.ObservedGeneration == s3Tenant.GetGeneration() {
 			if backendCondition.Status == metav1.ConditionTrue {
 				log.V(1).Info("Backing resource is ready")
-				message = message + ", Backing resource is ready"
+				message += ", Backing resource is ready"
 				backendReady = true
 			} else {
 				log.V(1).Info("Backing resource is not ready")
-				message = message + ", Backing resource is not ready"
+				message += ", Backing resource is not ready"
 			}
 		} else {
 			log.V(1).Info("Backing resource condition is not from the current generation, overall ready state is false")
-			message = message + ", Backing resource condition is not from the current generation"
+			message += ", Backing resource condition is not from the current generation"
 		}
 	} else {
 		log.V(1).Info("Backing resource condition not found, overall ready state is false")
-		message = message + ", Backing resource condition not found"
+		message += ", Backing resource condition not found"
 	}
 
-	// check whether the pending condition is set
+	// check whether the pending condition is set.
 	pendingCondition := meta.FindStatusCondition(s3Tenant.Status.Conditions, s3v1alpha1.ConditionTypePending)
 	if pendingCondition != nil {
 		if pendingCondition.ObservedGeneration == s3Tenant.GetGeneration() {
 			if pendingCondition.Status == metav1.ConditionTrue {
 				log.V(1).Info("Backing resource is pending")
-				message = message + ", Backing resource is pending"
+				message += ", Backing resource is pending"
 				backendPending = true
 			} else {
 				log.V(1).Info("Backing resource is not pending")
@@ -297,7 +295,7 @@ func (r *S3TenantReconciler) deriveReadiness(ctx context.Context, s3Tenant *s3v1
 			}
 		} else {
 			log.V(1).Info("Pending condition is not from the current generation, will be ignored")
-			message = message + ", Pending condition is not from the current generation. We're assuming it's ready"
+			message += ", Pending condition is not from the current generation. We're assuming it's ready"
 		}
 	} else {
 		log.V(1).Info("Pending condition not found, backend should be ready")
@@ -322,11 +320,11 @@ func (r *S3TenantReconciler) deriveReadiness(ctx context.Context, s3Tenant *s3v1
 func (r *S3TenantReconciler) reconcileTenantAccountReference(ctx context.Context, rctx *tenantReconcileContext) (err error) {
 	log := log.FromContext(ctx)
 
-	// check if the tenant account already exists
+	// check if the tenant account already exists.
 	accountName := fmt.Sprintf("s3tenant-%s", rctx.S3Tenant.UID)
 
 	if err := r.Get(ctx, types.NamespacedName{Name: accountName}, rctx.Account); err != nil {
-		// if the account was not found we're assuming it needs to be created
+		// if the account was not found we're assuming it needs to be created.
 		if client.IgnoreNotFound(err) == nil {
 			log.V(1).Info(fmt.Sprintf("S3TenantAccount %s not found, creating it", accountName))
 			account := r.generateTenantAccount(rctx.S3Tenant, accountName)
@@ -344,7 +342,7 @@ func (r *S3TenantReconciler) reconcileTenantAccountReference(ctx context.Context
 		}
 	} else {
 		log.V(1).Info(fmt.Sprintf("S3TenantAccount %s exists", accountName))
-		// if the account exists, we need to update the reference in the tenant
+		// if the account exists, we need to update the reference in the tenant.
 		reference := &corev1.ObjectReference{
 			Name:       rctx.Account.Name,
 			Kind:       rctx.Account.Kind,
@@ -365,7 +363,7 @@ func (r *S3TenantReconciler) generateTenantAccount(s3Tenant *s3v1alpha1.S3Tenant
 	return &s3v1alpha1.S3TenantAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: accountName,
-			// make sure annotation is added to allow class change
+			// make sure annotation is added to allow class change.
 			Annotations: map[string]string{
 				AnnotationAllowTenantClassNameChange: "true",
 			},
@@ -386,9 +384,9 @@ func (r *S3TenantReconciler) generateTenantAccount(s3Tenant *s3v1alpha1.S3Tenant
 func (r *S3TenantReconciler) reconcileFinalizerAndDlelete(ctx context.Context, rctx *tenantReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// check if the object is being deleted
+	// check if the object is being deleted.
 	if rctx.S3Tenant.DeletionTimestamp.IsZero() {
-		// if the object is not being deleted, add our finalizer if it is not already present
+		// if the object is not being deleted, add our finalizer if it is not already present.
 		if !controllerutil.ContainsFinalizer(rctx.S3Tenant, tenantFinalizer) {
 			controllerutil.AddFinalizer(rctx.S3Tenant, tenantFinalizer)
 			log.V(1).Info("Adding finalizer to S3Tenant")
@@ -399,7 +397,7 @@ func (r *S3TenantReconciler) reconcileFinalizerAndDlelete(ctx context.Context, r
 	} else {
 		log.V(1).Info("Object is being deleted")
 		if controllerutil.ContainsFinalizer(rctx.S3Tenant, tenantFinalizer) {
-			// our finalizer is present, so lets handle any external dependency
+			// our finalizer is present, so lets handle any external dependency.
 			if err := r.finalize(ctx, rctx); err != nil {
 				log.Error(err, "Failed to finalize tenant")
 				return err
@@ -413,7 +411,7 @@ func (r *S3TenantReconciler) reconcileFinalizerAndDlelete(ctx context.Context, r
 			return nil
 		}
 
-		// no finalizer is present, so we can proceed with deletion
+		// no finalizer is present, so we can proceed with deletion.
 		log.V(1).Info("Finalizer not present, deletion can proceed without further action")
 		return nil
 	}
@@ -424,18 +422,18 @@ func (r *S3TenantReconciler) reconcileFinalizerAndDlelete(ctx context.Context, r
 func (r *S3TenantReconciler) reconcileTenantAccountSpec(ctx context.Context, rctx *tenantReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// we basically just want to do a deepEqual check for the common tenant spec
+	// we basically just want to do a deepEqual check for the common tenant spec.
 	if !equality.Semantic.DeepEqual(rctx.S3Tenant.Spec.CommonTenantSpec, rctx.Account.Spec.CommonTenantSpec) {
 		log.V(1).Info("S3Tenant spec changed, updating S3TenantAccount spec")
 		rctx.Account.Spec.CommonTenantSpec = rctx.S3Tenant.Spec.CommonTenantSpec
 
-		// we need to update the account spec
+		// we need to update the account spec.
 		if err := r.Update(ctx, rctx.Account); err != nil {
 			log.Error(err, "Failed to update S3TenantAccount spec")
 			return fmt.Errorf("failed to update S3TenantAccount spec: %w", err)
 		}
 
-		// if the spec was updated, we need to requeue the reconciliation loop
+		// if the spec was updated, we need to requeue the reconciliation loop.
 		log.V(1).Info("S3TenantAccount spec updated, requeuing reconciliation loop")
 		rctx.DoRequeue = true
 	} else {
@@ -448,13 +446,13 @@ func (r *S3TenantReconciler) reconcileTenantAccountSpec(ctx context.Context, rct
 func (r *S3TenantReconciler) reconcileTenantAccountStatus(ctx context.Context, rctx *tenantReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// if the account is not ready, we cannot update the status
+	// if the account is not ready, we cannot update the status.
 	if rctx.Account.Status.Phase != s3v1alpha1.PhaseBound {
 		log.V(1).Info("S3TenantAccount is not bound, skipping status update")
 		return errors.New(errorAccountNotPhaseBound)
 	}
 
-	// copy the common tenant fields from the account to the tenant
+	// copy the common tenant fields from the account to the tenant.
 	if !equality.Semantic.DeepEqual(rctx.S3Tenant.Status.CommonTenantStatus, rctx.Account.Status.CommonTenantStatus) {
 		log.V(1).Info("S3TenantAccount status changed, updating S3Tenant status")
 		rctx.S3Tenant.Status.CommonTenantStatus = rctx.Account.Status.CommonTenantStatus
@@ -468,7 +466,7 @@ func (r *S3TenantReconciler) reconcileTenantAccountStatus(ctx context.Context, r
 func (r *S3TenantReconciler) reconcileLinkedBuckets(ctx context.Context, rctx *tenantReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// fetch all buckets linked to this tenant
+	// fetch all buckets linked to this tenant.
 	buckets := &s3v1alpha1.S3BucketList{}
 	opts := []client.ListOption{
 		client.MatchingFields{"spec.s3TenantRef.name": rctx.S3Tenant.Name},
@@ -483,8 +481,8 @@ func (r *S3TenantReconciler) reconcileLinkedBuckets(ctx context.Context, rctx *t
 	}
 
 	lbs := []string{}
-	for _, bucket := range buckets.Items {
-		lbs = append(lbs, bucket.Name)
+	for i := range buckets.Items {
+		lbs = append(lbs, buckets.Items[i].Name)
 	}
 
 	if equality.Semantic.DeepEqual(rctx.S3Tenant.Status.LinkedBuckets, lbs) {
@@ -497,23 +495,23 @@ func (r *S3TenantReconciler) reconcileLinkedBuckets(ctx context.Context, rctx *t
 	return nil
 }
 
-// finalize handles any cleanup logic when the S3Tenant is being deleted
+// finalize handles any cleanup logic when the S3Tenant is being deleted.
 func (r *S3TenantReconciler) finalize(ctx context.Context, rctx *tenantReconcileContext) error {
-	// Add your finalization logic here
+	// Add your finalization logic here.
 	log := log.FromContext(ctx)
 	log.Info(fmt.Sprintf("Finalizing S3Tenant %s", rctx.S3Tenant.Name))
 
-	// fetch most current usage to make sure we can delete the tenant
+	// fetch most current usage to make sure we can delete the tenant.
 	if err := r.reconcileLinkedBuckets(ctx, rctx); err != nil {
 		log.Error(err, "Failed to update tenant usage")
 	}
 
-	// if tenant still has buckets, abort deletion
+	// if tenant still has buckets, abort deletion.
 	if rctx.S3Tenant.Status.TenantUsage.BucketCount > 0 {
 		return fmt.Errorf("cannot delete tenant with buckets")
 	}
 
-	// make sure the tenantref is removed from the account
+	// make sure the tenantref is removed from the account.
 	rctx.Account.Spec.S3TenantRef = nil
 	if err := r.Update(ctx, rctx.Account); err != nil {
 		log.Error(err, "Failed to remove S3TenantRef from S3TenantAccount")
@@ -531,45 +529,43 @@ func (r *S3TenantReconciler) reconcileTenantAnnotations(ctx context.Context, rct
 		return nil
 	}
 
-	// we need to ensure certain annotations are set on the account
-	// filter away all annotations that start with the tenant prefix
+	// we need to ensure certain annotations are set on the account.
+	// filter away all annotations that start with the tenant prefix.
 	updatedAnnotations := map[string]string{}
 	for key, value := range rctx.S3Tenant.Annotations {
 		if strings.HasPrefix(key, TenantPrefix) {
 			updatedAnnotations[key] = value
 
-			// remove annotations from tenant
+			// remove annotations from tenant.
 			delete(rctx.S3Tenant.Annotations, key)
 			rctx.ObjectUpdated = true
 		}
 	}
 
-	// if the updated annotations are empty, we can skip the rest
+	// if the updated annotations are empty, we can skip the rest.
 	if len(updatedAnnotations) == 0 {
 		log.V(1).Info("No tenant annotations found on S3Tenant, skipping annotation")
 		return nil
 	}
 
-	// make sure the account has an annotations map
+	// make sure the account has an annotations map.
 	if rctx.Account.Annotations == nil {
 		rctx.Account.Annotations = map[string]string{}
 	}
 
-	// add any missing annotations to the account
+	// add any missing annotations to the account.
 	accountUpdateRequired := false
 	for key, value := range updatedAnnotations {
-		// if the annotation is not set by the tenant, we keep it
+		// if the annotation is not set by the tenant, we keep it.
 		if val, exists := rctx.Account.Annotations[key]; !exists {
 			log.V(1).Info("Updating annotation on S3TenantAccount", "key", key, "value", value)
 			rctx.Account.Annotations[key] = value
 			accountUpdateRequired = true
-		} else {
-			// if the annotation is set by the tenant, we check if it is the same
-			if val != value {
-				log.V(1).Info("Overriding annotation on S3TenantAccount", "key", key, "oldValue", value, "newValue", val)
-				rctx.Account.Annotations[key] = val
-				accountUpdateRequired = true
-			}
+		} else if val != value {
+			// if the annotation is set by the tenant, we check if it is the same.
+			log.V(1).Info("Overriding annotation on S3TenantAccount", "key", key, "oldValue", value, "newValue", val)
+			rctx.Account.Annotations[key] = val
+			accountUpdateRequired = true
 		}
 	}
 
@@ -610,7 +606,7 @@ func (r *S3TenantReconciler) mapAccountToTenant(ctx context.Context, obj client.
 
 	account, ok := obj.(*s3v1alpha1.S3TenantAccount)
 	if !ok {
-		// should actually never happen as this method is only called for S3TenantAccount objects
+		// should actually never happen as this method is only called for S3TenantAccount objects.
 		log.Error(fmt.Errorf("object is not a S3TenantAccount"), "Failed to map S3TenantAccount to S3Tenant")
 		return nil
 	}

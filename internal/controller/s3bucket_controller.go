@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ import (
 	"git.mgmtbi.ch/cloud/storagegrid-operator/pkg/s3"
 )
 
-// S3BucketReconciler reconciles a S3Bucket object
+// S3BucketReconciler reconciles a S3Bucket object.
 type S3BucketReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -47,17 +47,17 @@ const (
 	s3BucketFinalizer = "bucket.s3.bedag.ch/finalizer"
 )
 
-// bucketReconcileContext holds all the context needed for bucket reconciliation
+// bucketReconcileContext holds all the context needed for bucket reconciliation.
 type bucketReconcileContext struct {
 	Bucket        *s3v1alpha1.S3Bucket
 	S3Tenant      *s3v1alpha1.S3Tenant
 	ObjectUpdated bool
 	DoRequeue     bool
-	// keep the backend bucketUsage to avoid multiple calls to the backend
-	// while making sure they are consistent within one reconciliation loop
+	// keep the backend bucketUsage to avoid multiple calls to the backend.
+	// while making sure they are consistent within one reconciliation loop.
 	BucketUsage *grid.BucketUsage
 
-	// clients need to be unique per reconciliation loop
+	// clients need to be unique per reconciliation loop.
 	TenantClient *grid.TenantClient
 	S3Client     *s3.S3Client
 }
@@ -69,12 +69,12 @@ type bucketReconcileContext struct {
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 
-// Reconcile is part of the main kubernetes reconciliation loop
+// Reconcile is part of the main kubernetes reconciliation loop.
 func (r *S3BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx).WithValues("s3bucket", req.NamespacedName)
 	log.V(1).Info("Starting reconciliation")
 
-	// Initialize reconcile context
+	// Initialize reconcile context.
 	rctx := &bucketReconcileContext{
 		Bucket:        &s3v1alpha1.S3Bucket{},
 		S3Tenant:      &s3v1alpha1.S3Tenant{},
@@ -82,7 +82,7 @@ func (r *S3BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		DoRequeue:     false,
 	}
 
-	// Fetch the S3Bucket instance
+	// Fetch the S3Bucket instance.
 	if err := r.Get(ctx, req.NamespacedName, rctx.Bucket); err != nil {
 		log.Error(err, "Failed to get S3Bucket")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -90,22 +90,22 @@ func (r *S3BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	log.V(1).Info("Successfully retrieved S3Bucket", "name", rctx.Bucket.Name)
 
-	// Perform the main reconciliation
+	// Perform the main reconciliation.
 	err := r.doReconcile(ctx, rctx)
 
-	// update the annotations if they were updated
-	// needs to be done before the status is updated because we lose the annotations otherwise
+	// update the annotations if they were updated.
+	// needs to be done before the status is updated because we lose the annotations otherwise.
 	if rctx.ObjectUpdated {
-		// creating a deep copy of the status to avoid modifying the original object
+		// creating a deep copy of the status to avoid modifying the original object.
 		statusCopy := rctx.Bucket.DeepCopy()
 
 		log.V(1).Info("Annotations were updated, updating the object")
 		if updateErr := r.Update(ctx, rctx.Bucket); updateErr != nil {
 			log.Error(updateErr, "Failed to update annotations")
 			if err != nil {
-				err = fmt.Errorf("reconciliation failed: %w, failed to update annotations: %s", err, updateErr)
+				err = fmt.Errorf("reconciliation failed: %w, failed to update annotations: %w", err, updateErr)
 			} else {
-				err = fmt.Errorf("failed to update annotations: %s", updateErr)
+				err = fmt.Errorf("failed to update annotations: %w", updateErr)
 			}
 		} else {
 			log.V(1).Info("Annotations updated successfully")
@@ -114,14 +114,14 @@ func (r *S3BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		rctx.Bucket.Status = statusCopy.Status // restore the status from the copy
 	}
 
-	// update the status of the account if it was updated during reconciliation
+	// update the status of the account if it was updated during reconciliation.
 	if updateErr := r.Status().Update(ctx, rctx.Bucket); updateErr != nil {
 		log.Error(updateErr, "Failed to update status, requeuing")
 		if err == nil {
-			// no error occured during reconciliation, but status update failed
+			// no error occurred during reconciliation, but status update failed.
 			rctx.DoRequeue = true // we need to requeue to ensure the status is updated
 		}
-		// if an error already occured during reconciliation, we just return that error
+		// if an error already occurred during reconciliation, we just return that error.
 	}
 
 	log.V(1).Info("Reconciliation completed successfully")
@@ -131,7 +131,7 @@ func (r *S3BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "doReconcile")
 
-	// Fetch and validate S3Tenant
+	// Fetch and validate S3Tenant.
 	if err := r.reconcileS3TenantReference(ctx, rctx); err != nil {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantNotFound", err.Error())
 		r.setCondition(rctx.Bucket, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionFalse, "TenantNotFound", err.Error())
@@ -140,14 +140,14 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 
 	r.reconcileSecretRefs(ctx, rctx)
 
-	// Validate tenant readiness
+	// Validate tenant readiness.
 	if err := r.reconcileTenantReadiness(ctx, rctx); err != nil {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantNotReady", err.Error())
 		r.setCondition(rctx.Bucket, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionFalse, "TenantNotReady", err.Error())
 		return err
 	}
 
-	// Initialize tenant client
+	// Initialize tenant client.
 	if err := r.reconcileTenantClient(ctx, rctx); err != nil {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantClientInitFailed", err.Error())
 		r.setCondition(rctx.Bucket, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionFalse, "TenantClientInitFailed", err.Error())
@@ -155,7 +155,7 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 	}
 	r.setCondition(rctx.Bucket, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionTrue, "TenantReady", "Tenant is ready for bucket operations")
 
-	// Handle finalizer and deletion
+	// Handle finalizer and deletion.
 	if err := r.reconcileFinalizerAndDelete(ctx, rctx); err != nil {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "FinalizerError", err.Error())
 		return err
@@ -164,32 +164,32 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 		return nil
 	}
 
-	// Reconcile bucket creation
+	// Reconcile bucket creation.
 	if err := r.reconcileBucketCreation(ctx, rctx); err != nil {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketCreationFailed", err.Error())
 		return err
 	}
 	if rctx.DoRequeue {
-		// Bucket was just created or updated, requeue for further processing
+		// Bucket was just created or updated, requeue for further processing.
 		return nil
 	}
 
-	// Create admin user and group for bucket
+	// Create admin user and group for bucket.
 	if err := r.reconcileBucketAdmin(ctx, rctx); err != nil {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketAdminReconcileFailed", err.Error())
 		return err
 	}
 
-	// Create S3 credentials for user
+	// Create S3 credentials for user.
 	if err := r.reconcileBucketS3Credentials(ctx, rctx); err != nil {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketS3CredentialsReconcileFailed", err.Error())
 		return err
 	}
 
-	// Reconcile bucket usage
+	// Reconcile bucket usage.
 	if err := r.reconcileBucketUsage(ctx, rctx); err != nil {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketUsageReconcileFailed", err.Error())
-		// Don't fail reconciliation for usage errors, just log
+		// Don't fail reconciliation for usage errors, just log.
 	}
 
 	if err := r.initS3Client(ctx, rctx); err != nil {
@@ -197,14 +197,14 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 		return err
 	}
 
-	// Reconcile bucket policy
+	// Reconcile bucket policy.
 	if err := r.reconcileBucketPolicy(ctx, rctx); err != nil {
 		log.Error(err, "Failed to reconcile bucket policy")
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketPolicyReconcileFailed", err.Error())
-		// Don't return error, continue with other reconciliation
+		// Don't return error, continue with other reconciliation.
 	}
 
-	// Set final ready condition
+	// Set final ready condition.
 	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReady, metav1.ConditionTrue, "BucketReady", "Bucket is created and ready to use")
 
 	return nil
@@ -214,12 +214,12 @@ func (r *S3BucketReconciler) reconcileSecretRefs(ctx context.Context, rctx *buck
 	log := log.FromContext(ctx).WithValues("function", "reconcileSecretRefs")
 	log.V(1).Info("Starting secret references reconciliation")
 
-	// if already specified we can just return as this is only set once
+	// if already specified we can just return as this is only set once.
 	if rctx.Bucket.Status.S3AdminKeysSecretRef != nil && rctx.Bucket.Status.S3AdminKeysSecretRef.Name != "" {
 		return
 	}
 
-	// secret name is generated as <S3 Tenant>-<Bucket>-s3-admin-keypair
+	// secret name is generated as <S3 Tenant>-<Bucket>-s3-admin-keypair.
 	rctx.Bucket.Status.S3AdminKeysSecretRef = &corev1.LocalObjectReference{
 		Name: fmt.Sprintf("s3bucket-%s-%s-s3-admin-keypair", rctx.S3Tenant.Name, rctx.Bucket.Name),
 	}
@@ -231,7 +231,7 @@ func (r *S3BucketReconciler) reconcileFinalizerAndDelete(ctx context.Context, rc
 	log := log.FromContext(ctx).WithValues("function", "reconcileFinalizerAndDelete")
 
 	if rctx.Bucket.DeletionTimestamp.IsZero() {
-		// Object is not being deleted, ensure finalizer is present
+		// Object is not being deleted, ensure finalizer is present.
 		if !controllerutil.ContainsFinalizer(rctx.Bucket, s3BucketFinalizer) {
 			log.V(1).Info("Adding finalizer to S3Bucket")
 			controllerutil.AddFinalizer(rctx.Bucket, s3BucketFinalizer)
@@ -240,7 +240,7 @@ func (r *S3BucketReconciler) reconcileFinalizerAndDelete(ctx context.Context, rc
 			return nil
 		}
 	} else {
-		// Object is being deleted
+		// Object is being deleted.
 		log.V(1).Info("S3Bucket is being deleted")
 		if controllerutil.ContainsFinalizer(rctx.Bucket, s3BucketFinalizer) {
 			log.V(1).Info("Finalizing S3Bucket")
@@ -267,7 +267,7 @@ func (r *S3BucketReconciler) reconcileS3TenantReference(ctx context.Context, rct
 
 	rctx.S3Tenant = &s3v1alpha1.S3Tenant{}
 
-	// Determine namespace to look up tenant
+	// Determine namespace to look up tenant.
 	tenantNamespace := rctx.Bucket.Spec.S3TenantRef.Namespace
 	if tenantNamespace == "" {
 		tenantNamespace = rctx.Bucket.Namespace
@@ -309,7 +309,7 @@ func (r *S3BucketReconciler) reconcileTenantReadiness(ctx context.Context, rctx 
 func (r *S3BucketReconciler) reconcileTenantClient(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileTenantClient")
 
-	// Fetch tenant admin credentials
+	// Fetch tenant admin credentials.
 	username, password, err := kube.FetchCredentialsFromSecret(
 		ctx,
 		r.Client,
@@ -322,7 +322,7 @@ func (r *S3BucketReconciler) reconcileTenantClient(ctx context.Context, rctx *bu
 
 	log.V(1).Info("Successfully fetched tenant credentials")
 
-	// Initialize tenant client
+	// Initialize tenant client.
 	client, err := grid.InitTenantClient(username, password, rctx.S3Tenant.Status.GridEndpoint, rctx.S3Tenant.Status.TenantID)
 	if err != nil {
 		return fmt.Errorf("failed to initialize tenant client: %w", err)
@@ -337,7 +337,7 @@ func (r *S3BucketReconciler) reconcileTenantClient(ctx context.Context, rctx *bu
 func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileBucketCreation")
 
-	// Check if bucket already exists
+	// Check if bucket already exists.
 	exists, err := grid.BucketExists(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient)
 	if err != nil {
 		return fmt.Errorf("failed to check bucket existence: %w", err)
@@ -346,7 +346,7 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 	if exists {
 		log.V(1).Info("Bucket already exists", "bucketName", rctx.Bucket.Status.BucketName)
 
-		// Update S3 API endpoint from tenant
+		// Update S3 API endpoint from tenant.
 		rctx.Bucket.Status.S3ApiEndpoint = rctx.S3Tenant.Status.S3ApiEndpoint
 
 		return nil
@@ -354,17 +354,17 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 
 	log.V(1).Info("Bucket does not exist, creating it")
 
-	// Validate and set region
+	// Validate and set region.
 	if err := r.reconcileRegion(ctx, rctx); err != nil {
 		return err
 	}
 
-	// Generate unique bucket name if not set
+	// Generate unique bucket name if not set.
 	if err := r.reconcileBucketName(ctx, rctx.Bucket); err != nil {
 		return err
 	}
 
-	// Create bucket
+	// Create bucket.
 	err = grid.CreateBucket(ctx, rctx.Bucket.Status.BucketName, rctx.Bucket.Spec.Region, *rctx.Bucket.Spec.RetentionInDays, rctx.TenantClient)
 	if err != nil {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionFalse, "BucketCreateReconcileFailed", err.Error())
@@ -393,7 +393,7 @@ func (r *S3BucketReconciler) reconcileRegion(ctx context.Context, rctx *bucketRe
 	} else {
 		rctx.Bucket.Status.Region = rctx.Bucket.Spec.Region
 
-		// Validate specified region exists in tenant
+		// Validate specified region exists in tenant.
 		if !slices.Contains(rctx.S3Tenant.Status.Regions, rctx.Bucket.Status.Region) {
 			return fmt.Errorf("specified region %s does not exist in tenant", rctx.Bucket.Spec.Region)
 		}
@@ -406,7 +406,7 @@ func (r *S3BucketReconciler) reconcileRegion(ctx context.Context, rctx *bucketRe
 func (r *S3BucketReconciler) reconcileBucketAdmin(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileBucketAdminUser")
 
-	// we're using the bucket UID as unique identifier for the admin user
+	// we're using the bucket UID as unique identifier for the admin user.
 	err := grid.CreateBucketAdminIfNotExists(ctx, rctx.Bucket.Status.BucketName, r.getBucketIdentifier(rctx.Bucket), rctx.TenantClient)
 	if err != nil {
 		return fmt.Errorf("failed to create admin user: %w", err)
@@ -431,16 +431,16 @@ func (r *S3BucketReconciler) reconcileBucketS3Credentials(ctx context.Context, r
 		return nil
 	}
 
-	// Check if credential recreation annotation is present
-	// check if annotations exist and exit if unset
+	// Check if credential recreation annotation is present.
+	// check if annotations exist and exit if unset.
 	if rctx.Bucket.Annotations != nil {
-		// if annotation is not set to "true", we start recreation
+		// if annotation is not set to "true", we start recreation.
 		if rctx.Bucket.Annotations[AnnotationRecreateBucketKeypairs] == "true" {
 			err := r.createS3AdminKeypair(ctx, rctx, true)
 			if err != nil {
 				return fmt.Errorf("failed to recreate S3 admin keypair: %w", err)
 			}
-			// Remove annotation
+			// Remove annotation.
 			delete(rctx.Bucket.Annotations, AnnotationRecreateBucketKeypairs)
 			rctx.ObjectUpdated = true
 			return nil
@@ -453,12 +453,12 @@ func (r *S3BucketReconciler) reconcileBucketS3Credentials(ctx context.Context, r
 func (r *S3BucketReconciler) createS3AdminKeypair(ctx context.Context, rctx *bucketReconcileContext, recreate bool) (err error) {
 	log := log.FromContext(ctx)
 
-	// initialize variables for access key ID, access key, and secret key
+	// initialize variables for access key ID, access key, and secret key.
 	accessKeyId, accessKey, secretKey := "", "", ""
 
 	if recreate {
 		log.V(1).Info("Recreating S3 keypair")
-		// recreate the S3 admin keypair with existing access key ID
+		// recreate the S3 admin keypair with existing access key ID.
 		accessKeyId, accessKey, secretKey, err = grid.RecreateS3Credentials(ctx, rctx.Bucket.Status.BucketName, r.getBucketIdentifier(rctx.Bucket), rctx.Bucket.Status.AccessKeyId, rctx.TenantClient)
 		if err != nil {
 			log.Error(err, "Failed to recreate S3 admin keypair")
@@ -466,7 +466,7 @@ func (r *S3BucketReconciler) createS3AdminKeypair(ctx context.Context, rctx *buc
 		}
 	} else {
 		log.V(1).Info("Creating initial S3 keypair")
-		// create s3 keys
+		// create s3 keys.
 		accessKeyId, accessKey, secretKey, err = grid.CreateS3Credentials(ctx, rctx.Bucket.Status.BucketName, r.getBucketIdentifier(rctx.Bucket), rctx.TenantClient)
 		if err != nil {
 			log.Error(err, "Failed to create s3 keys")
@@ -474,8 +474,8 @@ func (r *S3BucketReconciler) createS3AdminKeypair(ctx context.Context, rctx *buc
 		}
 	}
 
-	// store s3 keys in a secret
-	// Update secret with new credentials
+	// store s3 keys in a secret.
+	// Update secret with new credentials.
 	err = kube.CreateKeyPairSecret(ctx, r.Client, rctx.Bucket.Namespace, rctx.Bucket.Status.S3AdminKeysSecretRef.Name, accessKey, secretKey, rctx.Bucket)
 	if err != nil {
 		return fmt.Errorf("failed to update credential secret: %w", err)
@@ -489,7 +489,7 @@ func (r *S3BucketReconciler) createS3AdminKeypair(ctx context.Context, rctx *buc
 func (r *S3BucketReconciler) reconcileBucketUsage(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileBucketUsage")
 
-	// Fetch bucket usage from API
+	// Fetch bucket usage from API.
 	usage, err := grid.FetchBucketUsage(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient)
 	if err != nil {
 		log.Error(err, "Failed to fetch bucket usage")
@@ -498,7 +498,7 @@ func (r *S3BucketReconciler) reconcileBucketUsage(ctx context.Context, rctx *buc
 
 	rctx.BucketUsage = usage
 
-	// Update status with usage information
+	// Update status with usage information.
 	rctx.Bucket.Status.BucketUsage.ObjectCount = grid.GetBucketObjectCount(rctx.BucketUsage)
 	rctx.Bucket.Status.BucketUsage.Bytes = kube.ParseBytes(grid.GetBucketUsedBytes(rctx.BucketUsage))
 
@@ -512,14 +512,14 @@ func (r *S3BucketReconciler) reconcileBucketUsage(ctx context.Context, rctx *buc
 func (r *S3BucketReconciler) initS3Client(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "initS3Client")
 
-	// Get S3 credentials for client initialization
+	// Get S3 credentials for client initialization.
 	accessKey, secretKey, err := kube.FetchCredentialsFromSecret(ctx, r.Client, rctx.Bucket.Namespace, rctx.Bucket.Status.S3AdminKeysSecretRef.Name)
 	if err != nil {
 		log.Error(err, "Failed to fetch S3 credentials")
 		return fmt.Errorf("failed to fetch S3 credentials: %w", err)
 	}
 
-	// Initialize S3 client
+	// Initialize S3 client.
 	endpoint := fmt.Sprintf("https://%s:%d", rctx.Bucket.Status.S3ApiEndpoint.S3Urls[0], rctx.Bucket.Status.S3ApiEndpoint.Port)
 	s3client, err := s3.InitS3Client(ctx, endpoint, accessKey, secretKey, rctx.Bucket.Status.Region, *rctx.Bucket.Status.S3ApiEndpoint.PathStyleAccess)
 	if err != nil {
@@ -534,7 +534,7 @@ func (r *S3BucketReconciler) initS3Client(ctx context.Context, rctx *bucketRecon
 }
 
 func (r *S3BucketReconciler) reconcileBucketPolicy(ctx context.Context, rctx *bucketReconcileContext) error {
-	// Handle policy reconciliation
+	// Handle policy reconciliation.
 	if rctx.Bucket.Spec.BucketPolicyJson != "" {
 		return r.reconcileBucketPolicyApply(ctx, rctx)
 	} else {
@@ -545,13 +545,13 @@ func (r *S3BucketReconciler) reconcileBucketPolicy(ctx context.Context, rctx *bu
 func (r *S3BucketReconciler) reconcileBucketPolicyApply(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileBucketPolicyApply")
 
-	// Get current policy from S3 API
+	// Get current policy from S3 API.
 	currentPolicy, err := s3.GetPolicy(ctx, rctx.Bucket.Status.BucketName, rctx.S3Client)
 	if err != nil {
 		return fmt.Errorf("failed to get current policy: %w", err)
 	}
 
-	// Apply policy if it differs
+	// Apply policy if it differs.
 	if rctx.Bucket.Spec.BucketPolicyJson != currentPolicy {
 		log.V(1).Info("Applying bucket policy")
 		err = s3.ApplyPolicy(ctx, rctx.Bucket.Status.BucketName, rctx.Bucket.Spec.BucketPolicyJson, rctx.S3Client)
@@ -572,7 +572,7 @@ func (r *S3BucketReconciler) reconcileBucketPolicyApply(ctx context.Context, rct
 func (r *S3BucketReconciler) reconcileBucketPolicyRemove(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileBucketPolicyRemove")
 
-	// Remove policy if one was previously applied
+	// Remove policy if one was previously applied.
 	if rctx.Bucket.Status.LastAppliedPolicy != "" {
 		log.V(1).Info("Removing bucket policy")
 		err := s3.DeletePolicy(ctx, rctx.Bucket.Status.BucketName, rctx.S3Client)
@@ -592,29 +592,32 @@ func (r *S3BucketReconciler) finalize(ctx context.Context, rctx *bucketReconcile
 	log := log.FromContext(ctx).WithValues("function", "finalize")
 	log.V(1).Info("Finalizing S3Bucket")
 
-	r.reconcileBucketUsage(ctx, rctx)
+	if err := r.reconcileBucketUsage(ctx, rctx); err != nil {
+		log.Error(err, "Failed to reconcile bucket usage during finalization")
+		// Continue with finalization even if usage reconciliation fails.
+	}
 
-	// if bucket still has objects, we cannot delete it
+	// if bucket still has objects, we cannot delete it.
 	if rctx.Bucket.Status.BucketUsage.ObjectCount > 0 {
 		err := fmt.Errorf("bucket %s still has %d objects, cannot delete. Delete objects first or drain bucket using the drain-bucket-force annotation", rctx.Bucket.Status.BucketName, rctx.Bucket.Status.BucketUsage.ObjectCount)
 		log.Error(err, "Bucket not empty, cannot finalize")
 		return err
 	}
 
-	// If no AccessKeyId, the bucket was never fully created
+	// If no AccessKeyId, the bucket was never fully created.
 	if rctx.Bucket.Status.AccessKeyId == "" {
 		log.V(1).Info("Bucket was never fully created, nothing to clean up")
 		return nil
 	}
 
-	// Delete group and user from tenant
+	// Delete group and user from tenant.
 	if err := grid.DeleteBucketAdmin(ctx, r.getBucketIdentifier(rctx.Bucket), rctx.TenantClient); err != nil {
 		log.Error(err, "Failed to delete bucket admin user and group")
 		return fmt.Errorf("failed to delete bucket admin user and group %w", err)
 	}
 
-	// Delete bucket from tenant
-	// TODO: test if we need to drain the bucket first
+	// Delete bucket from tenant.
+	// TODO: test if we need to drain the bucket first.
 	if rctx.Bucket.Status.BucketName != "" {
 		if err := grid.DeleteBucket(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient); err != nil {
 			log.Error(err, "Failed to delete bucket", "bucketName", rctx.Bucket.Status.BucketName)
@@ -639,20 +642,20 @@ func (r *S3BucketReconciler) setCondition(bucket *s3v1alpha1.S3Bucket, condType 
 	meta.SetStatusCondition(&bucket.Status.Conditions, condition)
 }
 
-// bucket name needs to be unique across the entire storagegrid
-// we're adding the first 8 digits of the bucket uid as an identifier
-// format: bucketname-bucketuid
+// bucket name needs to be unique across the entire storagegrid.
+// we're adding the first 8 digits of the bucket uid as an identifier.
+// format: bucketname-bucketuid.
 func (r *S3BucketReconciler) reconcileBucketName(ctx context.Context, s3Bucket *s3v1alpha1.S3Bucket) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileBucketName")
 	log.V(1).Info("Reconciling bucket name for uniqueness")
 
 	if s3Bucket.Status.BucketName != "" {
 		log.V(1).Info("Bucket name already set, skipping generation", "bucketName", s3Bucket.Status.BucketName)
-		// Bucket name already set, nothing to do
+		// Bucket name already set, nothing to do.
 		return nil
 	}
 
-	// Generate unique bucket name: bucketname-namespace-clusterid
+	// Generate unique bucket name: bucketname-namespace-clusterid.
 	s3Bucket.Status.BucketName = fmt.Sprintf("%s-%s", s3Bucket.Name, r.getBucketIdentifier(s3Bucket))
 	log.V(1).Info("Generated unique bucket name", "bucketName", s3Bucket.Status.BucketName)
 
@@ -663,7 +666,7 @@ func (r *S3BucketReconciler) getBucketIdentifier(s3Bucket *s3v1alpha1.S3Bucket) 
 	return string(s3Bucket.UID)[0:8]
 }
 
-// SetupWithManager sets up the controller with the Manager
+// SetupWithManager sets up the controller with the Manager.
 func (r *S3BucketReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&s3v1alpha1.S3Bucket{}, builder.WithPredicates(

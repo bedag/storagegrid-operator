@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,15 +27,20 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
 // log is for logging in this package.
-var s3tenantlog = logf.Log.WithName("s3tenant-webhook")
+var s3tenantlog = log.Log.WithName("s3tenant-webhook")
 
-// SetupWebhookWithManager will setup the manager to manage the webhooks
+type S3TenantValidator struct {
+	// +kubebuilder:object:generate=false
+	k8sClient client.Client `json:"-"`
+	// Scheme    *runtime.Scheme `json:"-"`.
+}
+
+// SetupWebhookWithManager will setup the manager to manage the webhooks.
 func (r *S3TenantValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	r.k8sClient = mgr.GetClient()
 
@@ -46,20 +51,20 @@ func (r *S3TenantValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
+// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!.
 
 // +kubebuilder:webhook:path=/mutate-s3-bedag-ch-v1alpha1-s3tenant,mutating=true,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=s3tenants,verbs=create;update,versions=v1alpha1,name=ms3tenant.kb.io,admissionReviewVersions=v1
 
 type S3TenantDefaulter struct{}
 
-// Default implements webhook.Defaulter so a webhook will be registered for the type
+// Default implements webhook.Defaulter so a webhook will be registered for the type.
 func (r *S3TenantDefaulter) Default(ctx context.Context, obj runtime.Object) error {
 	s3tenant := obj.(*s3v1alpha1.S3Tenant)
 	s3tenantlog.Info("running defaulter", "name", s3tenant.Name)
 
-	// default tenantname if not set
+	// default tenantname if not set.
 	if s3tenant.Spec.Name == "" {
-		// use the metadata.name as tenant name
+		// use the metadata.name as tenant name.
 		s3tenant.Spec.Name = s3tenant.Name
 	}
 
@@ -75,24 +80,18 @@ func (r *S3TenantDefaulter) Default(ctx context.Context, obj runtime.Object) err
 
 var _ webhook.CustomValidator = &S3TenantValidator{}
 
-type S3TenantValidator struct {
-	// +kubebuilder:object:generate=false
-	k8sClient client.Client `json:"-"`
-	// Scheme    *runtime.Scheme `json:"-"`
-}
-
-// ValidateCreate implements webhook.Validator so a webhook will be registered for the type
+// ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	s3tenant := obj.(*s3v1alpha1.S3Tenant)
 	s3tenantlog.Info("validate create", "name", s3tenant.Name)
 
-	// Check if the TenantClass exists
+	// Check if the TenantClass exists.
 	exists, err := r.tenantClassExists(ctx, s3tenant.Spec.S3TenantClassName)
 	if err != nil {
 		return nil, err
 	}
 
-	// block creation if the TenantClass does not exist
+	// block creation if the TenantClass does not exist.
 	if !exists {
 		return nil, fmt.Errorf("TenantClass %s does not exist", s3tenant.Spec.S3TenantClassName)
 	}
@@ -101,7 +100,7 @@ func (r *S3TenantValidator) ValidateCreate(ctx context.Context, obj runtime.Obje
 	return nil, nil
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
+// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantValidator) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (admission.Warnings, error) {
 	s3tenant := newObj.(*s3v1alpha1.S3Tenant)
 	s3tenantlog.Info("validate update", "name", s3tenant.Name)
@@ -110,12 +109,12 @@ func (r *S3TenantValidator) ValidateUpdate(ctx context.Context, oldObj runtime.O
 	return nil, nil
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type
+// ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	s3tenant := obj.(*s3v1alpha1.S3Tenant)
 	s3tenantlog.Info("validate delete", "name", s3tenant.Name)
 
-	// deletion is blocked until the allow-delete annotation is added
+	// deletion is blocked until the allow-delete annotation is added.
 	if _, ok := s3tenant.Annotations[controller.AnnotationAllowTenantDeletion]; ok {
 		return nil, nil
 	}
@@ -124,7 +123,7 @@ func (r *S3TenantValidator) ValidateDelete(ctx context.Context, obj runtime.Obje
 }
 
 func (r *S3TenantValidator) tenantClassExists(ctx context.Context, tenantClassName string) (bool, error) {
-	// Check if the TenantClass exists
+	// Check if the TenantClass exists.
 	tenantClass := &s3v1alpha1.S3TenantClass{}
 
 	log := log.FromContext(ctx).WithValues("func", "tenantClassExists")

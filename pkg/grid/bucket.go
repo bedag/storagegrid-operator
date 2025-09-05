@@ -1,3 +1,19 @@
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package grid
 
 import (
@@ -12,7 +28,7 @@ import (
 
 type BucketUsage = models.BucketStats
 
-// CreateBucket creates a new bucket with the specified name and region and returns admin credentials for s3 access
+// CreateBucket creates a new bucket with the specified name and region and returns admin credentials for s3 access.
 func CreateBucket(ctx context.Context, name string, region string, retentionInDays int32, tenantClient *TenantClient) (err error) {
 	log := log.FromContext(ctx).WithValues("func", "CreateBucket")
 	log.V(1).Info(fmt.Sprintf("Creating bucket: name=%s, region=%s, retentionInDays=%d", name, region, retentionInDays))
@@ -22,7 +38,7 @@ func CreateBucket(ctx context.Context, name string, region string, retentionInDa
 		Region: region,
 	}
 
-	// add retention settings if retentionInDays is configured
+	// add retention settings if retentionInDays is configured.
 	if retentionInDays > 0 {
 		enabled := true
 		bucket.S3ObjectLock = &models.BucketS3ObjectLockSettings{
@@ -32,10 +48,9 @@ func CreateBucket(ctx context.Context, name string, region string, retentionInDa
 				Days: retentionInDays,
 			},
 		}
-
 	}
 
-	// no need to keep the result
+	// no need to keep the result.
 	_, err = tenantClient.Bucket.Create(ctx, &bucket)
 	if err != nil {
 		log.Error(err, "Failed to create bucket")
@@ -52,14 +67,14 @@ func CreateBucketAdminIfNotExists(ctx context.Context, bucketName string, unique
 
 	bucketAdminUserName, bucketAdminGroupName := getBucketGroupAndAdminUserName(uniqueIdentifier)
 
-	// create group
+	// create group.
 	groupId, err := createBucketAdminGroup(ctx, bucketName, bucketAdminGroupName, tenantClient)
 	if err != nil {
 		log.Error(err, "Failed to create bucket admin group")
 		return err
 	}
 
-	// create user
+	// create user.
 	userId, err := createBucketAdminUser(ctx, bucketName, bucketAdminUserName, groupId, tenantClient)
 	if err != nil {
 		log.Error(err, "Failed to create bucket admin user")
@@ -88,17 +103,17 @@ func generateBucketAdminGroupPolicy(policyName string, bucketName string) *model
 	log := log.FromContext(context.Background()).WithValues("func", "generateBucketAdminGroupPolicy")
 	log.V(1).Info(fmt.Sprintf("Generating bucket admin group policy: policyName=%s, bucketName=%s", policyName, bucketName))
 
-	// allow all s3 actions
+	// allow all s3 actions.
 	actions := []string{"s3:*"}
-	// only on the bucket specified though
+	// only on the bucket specified though.
 	resource := []string{
 		fmt.Sprintf("arn:aws:s3:::%s/*", bucketName),
 		fmt.Sprintf("arn:aws:s3:::%s", bucketName),
 	}
 
 	return &models.TenantGroupPolicies{
-		// these are tenant level permissios
-		// left empty
+		// these are tenant level permissios.
+		// left empty.
 		Management: &models.TenantGroupManagementPolicy{},
 		S3: &models.S3Policy{
 			ID: &policyName,
@@ -163,18 +178,18 @@ func RecreateS3Credentials(ctx context.Context, bucketName string, identifier st
 		return "", "", "", err
 	}
 
-	// delete the existing s3 credentials
+	// delete the existing s3 credentials.
 	err = tenantClient.S3AccessKeys.DeleteForUser(ctx, *user.Id, accessKeyId)
 	if err != nil {
 		log.Error(err, "Failed to delete s3 access key")
 		return "", "", "", err
 	}
 
-	// create new s3 credentials
+	// create new s3 credentials.
 	return CreateS3Credentials(ctx, bucketName, identifier, tenantClient)
 }
 
-// the operator makes sure this is only called as admin, else it will just create s3 keypairs for the user calling it
+// the operator makes sure this is only called as admin, else it will just create s3 keypairs for the user calling it.
 func CreateAdminS3Credentials(ctx context.Context, tenantClient *TenantClient) (accesskeyId string, key string, secret string, err error) {
 	log := log.FromContext(ctx).WithValues("func", "CreateS3Credentials")
 	log.V(1).Info("Creating admin s3 credentials")
@@ -206,23 +221,23 @@ func RecreateAdminS3Credentials(ctx context.Context, accessKeyId string, tenantC
 		return "", "", "", err
 	}
 
-	// delete the existing s3 credentials
+	// delete the existing s3 credentials.
 	err = tenantClient.S3AccessKeys.DeleteForUser(ctx, *adminUser.Id, accessKeyId)
 	if err != nil {
 		log.Error(err, "Failed to delete s3 access key")
 		return "", "", "", err
 	}
 
-	// create new s3 credentials
+	// create new s3 credentials.
 	return CreateAdminS3Credentials(ctx, tenantClient)
 }
 
-// check the api if the bucket exists
+// check the api if the bucket exists.
 func BucketExists(ctx context.Context, bucketName string, tenantClient *TenantClient) (bool, error) {
 	log := log.FromContext(ctx).WithValues("func", "BucketExists")
 	log.V(1).Info(fmt.Sprintf("Checking if bucket %s exists", bucketName))
 
-	// if the bucket was not found an error is returned thus the bucket does not exist
+	// if the bucket was not found an error is returned thus the bucket does not exist.
 	_, err := tenantClient.Bucket.GetByName(ctx, bucketName)
 	if err != nil {
 		if strings.HasSuffix(err.Error(), "not found") {

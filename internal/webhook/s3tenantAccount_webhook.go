@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -35,11 +34,16 @@ import (
 )
 
 // log is for logging in this package.
-var s3tenantAccountlog = logf.Log.WithName("s3tenantAccount-webhook")
+var s3tenantAccountlog = log.Log.WithName("s3tenantAccount-webhook")
 
-// SetupWebhookWithManager will setup the manager to manage the webhooks
+type S3TenantAccountValidator struct {
+	// +kubebuilder:object:generate=false
+	k8sClient client.Client `json:"-"`
+	// Scheme    *runtime.Scheme `json:"-"`.
+}
+
+// SetupWebhookWithManager will setup the manager to manage the webhooks.
 func (r *S3TenantAccountValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
-
 	r.k8sClient = mgr.GetClient()
 
 	return ctrl.NewWebhookManagedBy(mgr).
@@ -49,7 +53,7 @@ func (r *S3TenantAccountValidator) SetupWebhookWithManager(mgr ctrl.Manager) err
 		Complete()
 }
 
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
+// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!.
 
 // TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
@@ -59,20 +63,14 @@ func (r *S3TenantAccountValidator) SetupWebhookWithManager(mgr ctrl.Manager) err
 
 var _ webhook.CustomValidator = &S3TenantAccountValidator{}
 
-type S3TenantAccountValidator struct {
-	// +kubebuilder:object:generate=false
-	k8sClient client.Client `json:"-"`
-	// Scheme    *runtime.Scheme `json:"-"`
-}
-
 type S3TenantAccountDefaulter struct{}
 
-// Default implements webhook.Defaulter so a webhook will be registered for the type
+// Default implements webhook.Defaulter so a webhook will be registered for the type.
 func (r *S3TenantAccountDefaulter) Default(ctx context.Context, obj runtime.Object) error {
 	s3tenantAccount := obj.(*s3v1alpha1.S3TenantAccount)
 	s3tenantAccountlog.Info("running defaulter", "name", s3tenantAccount.Name)
 
-	// make sure to initialy add the annotation to allow class change
+	// make sure to initially add the annotation to allow class change.
 	if s3tenantAccount.Annotations == nil {
 		s3tenantAccount.Annotations = map[string]string{}
 	}
@@ -81,18 +79,18 @@ func (r *S3TenantAccountDefaulter) Default(ctx context.Context, obj runtime.Obje
 	return nil
 }
 
-// ValidateCreate implements webhook.Validator so a webhook will be registered for the type
+// ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantAccountValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	s3tenantAccount := obj.(*s3v1alpha1.S3TenantAccount)
 	s3tenantAccountlog.Info("validate create", "name", s3tenantAccount.Name)
 
-	// Check if the TenantAccountClass exists
+	// Check if the TenantAccountClass exists.
 	exists, err := r.tenantClassExists(ctx, s3tenantAccount.Spec.S3TenantClassName)
 	if err != nil {
 		return nil, err
 	}
 
-	// block creation if the TenantAccountClass does not exist
+	// block creation if the TenantAccountClass does not exist.
 	if !exists {
 		return nil, fmt.Errorf("TenantAccountClass %s does not exist", s3tenantAccount.Spec.S3TenantClassName)
 	}
@@ -100,18 +98,18 @@ func (r *S3TenantAccountValidator) ValidateCreate(ctx context.Context, obj runti
 	return nil, nil
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
+// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantAccountValidator) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (admission.Warnings, error) {
 	s3tenantAccount := newObj.(*s3v1alpha1.S3TenantAccount)
 	s3tenantAccountlog.Info("validate update", "name", s3tenantAccount.Name)
 
-	// Check if the TenantAccountClass exists
+	// Check if the TenantAccountClass exists.
 	exists, err := r.tenantClassExists(ctx, s3tenantAccount.Spec.S3TenantClassName)
 	if err != nil {
 		return nil, err
 	}
 
-	// block creation if the TenantClass does not exist
+	// block creation if the TenantClass does not exist.
 	if !exists {
 		return nil, fmt.Errorf("TenantClass %s does not exist", s3tenantAccount.Spec.S3TenantClassName)
 	}
@@ -120,17 +118,17 @@ func (r *S3TenantAccountValidator) ValidateUpdate(ctx context.Context, oldObj ru
 	return nil, nil
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type
+// ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantAccountValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	s3tenantAccount := obj.(*s3v1alpha1.S3TenantAccount)
 	s3tenantAccountlog.Info("validate delete", "name", s3tenantAccount.Name)
 
-	// deletion is blocked until the allow-delete annotation is added
+	// deletion is blocked until the allow-delete annotation is added.
 	if _, ok := s3tenantAccount.Annotations[controller.AnnotationAllowTenantDeletion]; !ok {
 		return nil, fmt.Errorf("deletion of s3tenant %s is blocked until annotation %s is set, please add this first", s3tenantAccount.Name, controller.AnnotationAllowTenantDeletion)
 	}
 
-	// make sure no tenant is still bound to this account
+	// make sure no tenant is still bound to this account.
 	if s3tenantAccount.Status.S3TenantRef != nil {
 		return nil, fmt.Errorf("deletion of s3tenantaccount %s is blocked until all tenants are unbound, please remove the reference to tenant %s/%s first", s3tenantAccount.Name, s3tenantAccount.Status.S3TenantRef.Namespace, s3tenantAccount.Status.S3TenantRef.Name)
 	}
@@ -139,7 +137,7 @@ func (r *S3TenantAccountValidator) ValidateDelete(ctx context.Context, obj runti
 }
 
 func (r *S3TenantAccountValidator) tenantClassExists(ctx context.Context, tenantClassName string) (bool, error) {
-	// Check if the TenantClass exists
+	// Check if the TenantClass exists.
 	tenantClass := &s3v1alpha1.S3TenantClass{}
 
 	log := log.FromContext(ctx).WithValues("func", "tenantClassExists")

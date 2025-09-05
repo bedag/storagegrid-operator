@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,30 +21,30 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
+// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!.
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// S3TenantSpec defines the desired state of S3Tenant
+// S3TenantSpec defines the desired state of S3Tenant.
 type S3TenantSpec struct {
-	// embed the common tenant spec
+	// embed the common tenant spec.
 	CommonTenantSpec `json:",inline"`
 }
 
-// S3TenantStatus defines the observed state of S3Tenant
+// S3TenantStatus defines the observed state of S3Tenant.
 type S3TenantStatus struct {
-	// keep track of linked buckets in this tenant
-	// all buckets are within the same namespace as the tenant
+	// keep track of linked buckets in this tenant.
+	// all buckets are within the same namespace as the tenant.
 	// +optional
 	LinkedBuckets []string `json:"linkedBuckets,omitempty"`
 
-	// track a reference to the tenantAccount binding this tenant
+	// track a reference to the tenantAccount binding this tenant.
 	// +optional
 	S3TenantAccountRef *corev1.ObjectReference `json:"s3TenantAccountRef,omitempty"`
 
-	// embed common tenant status
+	// embed common tenant status.
 	CommonTenantStatus `json:",inline"`
 
-	// Track s3Tenant conditions
+	// Track s3Tenant conditions.
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 
@@ -58,7 +58,7 @@ type S3TenantStatus struct {
 // +kubebuilder:printcolumn:name="Capacity",type="string",JSONPath=".status.quota.limit",description="Configured capacity of the tenant"
 // +kubebuilder:printcolumn:JSONPath=`.metadata.creationTimestamp`,name=`AGE`,type=date
 
-// S3Tenant is the Schema for the s3tenants API
+// S3Tenant is the Schema for the s3tenants API.
 type S3Tenant struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -70,7 +70,7 @@ type S3Tenant struct {
 
 // +kubebuilder:object:root=true
 
-// S3TenantList contains a list of S3Tenant
+// S3TenantList contains a list of S3Tenant.
 type S3TenantList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`

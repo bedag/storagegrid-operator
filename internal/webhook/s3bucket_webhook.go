@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2025.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,19 +33,25 @@ import (
 // log is for logging in this package.
 var s3bucketlog = logf.Log.WithName("s3bucket-webhook")
 
-// SetupWebhookWithManager will setup the manager to manage the webhooks
+type S3BucketValidator struct {
+	// +kubebuilder:object:generate=false
+	k8sClient client.Client `json:"-"`
+	// Scheme    *runtime.Scheme `json:"-"`.
+}
+
+// SetupWebhookWithManager will setup the manager to manage the webhooks.
 func (r *S3BucketValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
-	// nonWatchClient, err := client.New(mgr.GetConfig(), client.Options{})
-	// if err != nil {
-	// 	return fmt.Errorf("failed to create non watch client: %v", err)
+	// nonWatchClient, err := client.New(mgr.GetConfig(), client.Options{}).
+	// if err != nil {.
+	// 	return fmt.Errorf("failed to create non watch client: %v", err).
 	// }
 
-	// validator := &S3BucketValidator{
-	// 	Client: nonWatchClient,
+	// validator := &S3BucketValidator{.
+	// 	Client: nonWatchClient,.
 	// }
 
 	r.k8sClient = mgr.GetClient()
-	// r.Scheme = mgr.GetScheme()
+	// r.Scheme = mgr.GetScheme().
 
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(&s3v1alpha1.S3Bucket{}).
@@ -53,7 +59,7 @@ func (r *S3BucketValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
+// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!.
 
 // TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
@@ -62,26 +68,17 @@ func (r *S3BucketValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 var _ webhook.CustomValidator = &S3BucketValidator{}
 
-type S3BucketValidator struct {
-	// +kubebuilder:object:generate=false
-	k8sClient client.Client `json:"-"`
-	// Scheme    *runtime.Scheme `json:"-"`
-}
-
-// ValidateCreate implements webhook.Validator so a webhook will be registered for the type
+// ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3BucketValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	s3bucket := obj.(*s3v1alpha1.S3Bucket)
 	s3bucketlog.Info("validate create", "name", s3bucket.Name)
 
-	s3Teant, err := r.getTenant(ctx, *s3bucket)
+	s3Teant, err := r.getTenant(ctx, s3bucket)
 	if err != nil {
 		return nil, err
 	}
 
-	allowed, err := r.isNamespaceAllowed(s3Teant, s3bucket.Namespace)
-	if err != nil {
-		return nil, err
-	}
+	allowed := r.isNamespaceAllowed(s3Teant, s3bucket.Namespace)
 
 	if !allowed {
 		return nil, fmt.Errorf("namespace %s is not allowed to create buckets in tenant %s", s3bucket.Namespace, s3Teant.Name)
@@ -91,20 +88,17 @@ func (r *S3BucketValidator) ValidateCreate(ctx context.Context, obj runtime.Obje
 	return nil, nil
 }
 
-// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
+// ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3BucketValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
 	s3bucket := newObj.(*s3v1alpha1.S3Bucket)
 	s3bucketlog.Info("validate update", "name", s3bucket.Name)
 
-	s3Teant, err := r.getTenant(ctx, *s3bucket)
+	s3Teant, err := r.getTenant(ctx, s3bucket)
 	if err != nil {
 		return nil, err
 	}
 
-	allowed, err := r.isNamespaceAllowed(s3Teant, s3bucket.Namespace)
-	if err != nil {
-		return nil, err
-	}
+	allowed := r.isNamespaceAllowed(s3Teant, s3bucket.Namespace)
 
 	if !allowed {
 		return nil, fmt.Errorf("namespace %s is not allowed to create buckets in tenant %s", s3bucket.Namespace, s3Teant.Name)
@@ -114,7 +108,7 @@ func (r *S3BucketValidator) ValidateUpdate(ctx context.Context, oldObj, newObj r
 	return nil, nil
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type
+// ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3BucketValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	s3bucket := obj.(*s3v1alpha1.S3Bucket)
 	s3bucketlog.Info("validate delete", "name", s3bucket.Name)
@@ -123,7 +117,7 @@ func (r *S3BucketValidator) ValidateDelete(ctx context.Context, obj runtime.Obje
 	return nil, nil
 }
 
-func (r *S3BucketValidator) getTenant(ctx context.Context, s3Bucket s3v1alpha1.S3Bucket) (*s3v1alpha1.S3Tenant, error) {
+func (r *S3BucketValidator) getTenant(ctx context.Context, s3Bucket *s3v1alpha1.S3Bucket) (*s3v1alpha1.S3Tenant, error) {
 	s3Tenant := &s3v1alpha1.S3Tenant{}
 
 	namespaceToLookup := s3Bucket.Spec.S3TenantRef.Namespace
@@ -140,20 +134,19 @@ func (r *S3BucketValidator) getTenant(ctx context.Context, s3Bucket s3v1alpha1.S
 	return s3Tenant, nil
 }
 
-func (r *S3BucketValidator) isNamespaceAllowed(s3tenant *s3v1alpha1.S3Tenant, bucketNamespace string) (bool, error) {
-
-	// if no allowed namespaces are specified ony the namespace of the tenant is allowed
+func (r *S3BucketValidator) isNamespaceAllowed(s3tenant *s3v1alpha1.S3Tenant, bucketNamespace string) bool {
+	// if no allowed namespaces are specified ony the namespace of the tenant is allowed.
 	if len(s3tenant.Spec.AllowedNamespaces) == 0 {
-		return s3tenant.Namespace == bucketNamespace, nil
+		return s3tenant.Namespace == bucketNamespace
 	}
 
 	for _, pattern := range s3tenant.Spec.AllowedNamespaces {
 		if matchesWildcard(bucketNamespace, pattern) {
-			return true, nil
+			return true
 		}
 	}
 
-	return false, nil
+	return false
 }
 
 func matchesWildcard(bucketNamespace string, pattern string) bool {

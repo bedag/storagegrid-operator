@@ -1,0 +1,85 @@
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment # too many false positives
+  gocyclo:
+    min-complexity: 15
+  misspell:
+    locale: US
+  lll:
+    line-length: 120
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+  funlen:
+    lines: 100
+    statements: 50
+  goimports:
+    local-prefixes: git.mgmtbi.ch/cloud/storagegrid-operator
+
+linters:
+  enable:
+    - bodyclose
+    - dogsled
+    - dupl
+    - errcheck
+    - exportloopref
+    - funlen
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gocyclo
+    - gofmt
+    - goimports
+    - gomnd
+    - goprintffuncname
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - nakedret
+    - noctx
+    - nolintlint
+    - staticcheck
+    - stylecheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - whitespace
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files.
+    - path: _test\.go
+      linters:
+        - gomnd
+        - funlen
+        - dupl
+    
+    # Exclude known linters from partially hard-to-fix problems
+    - path: zz_generated\.deepcopy\.go
+      linters:
+        - gomnd
+        - gocritic
+        - stylecheck
+    
+    # Exclude some staticcheck messages
+    - linters:
+        - staticcheck
+      text: "SA9003:"
+    
+    # Exclude some gocritic messages for controller-runtime patterns
+    - linters:
+        - gocritic
+      text: "unnecessaryDefer:"
+
+  max-issues-per-linter: 0
+  max-same-issues: 0

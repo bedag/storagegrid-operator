@@ -1,0 +1,45 @@
+name: Validate Workflows
+
+on:
+  push:
+    paths:
+      - '.github/workflows/**'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+
+jobs:
+  validate:
+    name: Validate GitHub Actions Workflows
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Validate workflow files
+      run: |
+        echo "Checking workflow syntax..."
+        for workflow in .github/workflows/*.yml .github/workflows/*.yaml; do
+          if [ -f "$workflow" ]; then
+            echo "Validating $workflow"
+            # Basic YAML syntax check
+            python3 -c "import yaml; yaml.safe_load(open('$workflow'))"
+            echo "✓ $workflow is valid YAML"
+          fi
+        done
+
+    - name: Check for common issues
+      run: |
+        echo "Checking for common workflow issues..."
+        
+        # Check for hardcoded secrets (excluding examples)
+        if grep -r "ghp_\|github_pat_" .github/workflows/ || true; then
+          echo "⚠️  Warning: Potential hardcoded tokens found"
+        fi
+        
+        # Check for uses of deprecated actions
+        if grep -r "actions/checkout@v[12]" .github/workflows/ || true; then
+          echo "⚠️  Warning: Deprecated checkout action version found"
+        fi
+        
+        echo "Validation complete!"

@@ -1,0 +1,69 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  e2e-test:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23.5'
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Set up Kind
+      uses: helm/kind-action@v1.8.0
+      with:
+        version: v0.20.0
+        kubectl_version: v1.30.0
+        cluster_name: kind
+
+    - name: Wait for cluster to be ready
+      run: |
+        kubectl cluster-info
+        kubectl wait --for=condition=Ready nodes --all --timeout=300s
+
+    - name: Generate manifests and code
+      run: |
+        make manifests
+        make generate
+
+    - name: Build manager binary
+      run: make build
+
+    - name: Build Docker image
+      run: |
+        docker build -t controller:latest .
+
+    - name: Load image into Kind
+      run: |
+        kind load docker-image controller:latest
+
+    - name: Install CRDs
+      run: make install
+
+    - name: Run E2E tests
+      run: make test-e2e
+
+    - name: Collect logs on failure
+      if: failure()
+      run: |
+        echo "=== Cluster Info ==="
+        kubectl cluster-info dump
+        echo "=== All Pod Logs ==="
+        kubectl logs --all-containers=true --prefix=true --previous=false -l app.kubernetes.io/name=storagegrid-operator || echo "No operator pods found"
+        echo "=== All Events ==="
+        kubectl get events --all-namespaces --sort-by='.lastTimestamp'

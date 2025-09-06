@@ -32,7 +32,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: StorageGrid is the Schema for the storagegrids API
+        description: StorageGrid is the Schema for the storagegrids API.
         properties:
           apiVersion:
             description: |-
@@ -52,17 +52,17 @@ spec:
           metadata:
             type: object
           spec:
-            description: StorageGridSpec defines the desired state of StorageGrid
+            description: StorageGridSpec defines the desired state of StorageGrid.
             properties:
               defaultBucketRegion:
                 description: Default region for buckets created in the StorageGrid,
-                  defaults to the first region in the list
+                  defaults to the first region in the list.
                 type: string
               defaultTenantDeletionPolicy:
                 default:
                   retentionDuration: 168h
                 description: |-
-                  DefaultDeletionPolicy specifies how associated resources (e.g., Tenants) should be handled
+                  DefaultDeletionPolicy specifies how associated resources (e.g., Tenants) should be handled.
                   when the Tenant resource is deleted.
                   A tenant will always be able to override this policy if specified in the Tenant resource.
                 properties:
@@ -84,15 +84,15 @@ spec:
                     description: |-
                       RetentionDuration specifies the duration to retain resources after deletion is requested.
                       Accepts values like "60m", "24h", etc., using the standard Kubernetes duration format.
-                      set this to 0 to disable retention
+                      set this to 0 to disable retention.
                       Defaults to "168h" (7 days).
                     type: string
                 type: object
               endpoint:
-                description: The endpoint of the StorageGrid
+                description: The endpoint of the StorageGrid.
                 type: string
               secretRef:
-                description: The secret containing the credentials for the StorageGrid
+                description: The secret containing the credentials for the StorageGrid.
                 properties:
                   apiVersion:
                     description: API version of the referent.
@@ -150,10 +150,10 @@ spec:
             - secretRef
             type: object
           status:
-            description: StorageGridStatus defines the observed state of StorageGrid
+            description: StorageGridStatus defines the observed state of StorageGrid.
             properties:
               conditions:
-                description: Track StorageGrid conditions
+                description: Track StorageGrid conditions.
                 items:
                   description: "Condition contains details for one aspect of the current
                     state of this API Resource.\n---\nThis struct is intended for
@@ -223,11 +223,11 @@ spec:
                   type: object
                 type: array
               defaultBucketRegion:
-                description: DefaultRegion for buckets created in the StorageGrid
+                description: DefaultRegion for buckets created in the StorageGrid.
                 type: string
               defaultTenantDeletionPolicy:
                 default: {}
-                description: Currently active tenant deletion policy
+                description: Currently active tenant deletion policy.
                 properties:
                   policy:
                     default: Retain
@@ -247,25 +247,25 @@ spec:
                     description: |-
                       RetentionDuration specifies the duration to retain resources after deletion is requested.
                       Accepts values like "60m", "24h", etc., using the standard Kubernetes duration format.
-                      set this to 0 to disable retention
+                      set this to 0 to disable retention.
                       Defaults to "168h" (7 days).
                     type: string
                 type: object
               ready:
                 default: false
-                description: Displays whether the StorageGrid is ready or not
+                description: Displays whether the StorageGrid is ready or not.
                 type: boolean
               regions:
-                description: list of available regions for tenants
+                description: list of available regions for tenants.
                 items:
                   type: string
                 type: array
               usage:
                 description: Usage of the StorageGrid summarizes the usage of all
-                  tenants
+                  tenants.
                 properties:
                   tenantCount:
-                    description: total tenants linked to the StorageGrid
+                    description: total tenants linked to the StorageGrid.
                     type: integer
                 type: object
             type: object

@@ -77,10 +77,10 @@ type CommonTenantSpec struct {
 
 	// SecretRef for the admin tenant user.
 	// secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentials.
-	// the secret must contain the following keys:.
-	//   data:.
-	//     username: <base64 encoded username>.
-	//     password: <base64 encoded password>.
+	// the secret must contain the following keys:
+	//   data:
+	//     username: <base64 encoded username>
+	//     password: <base64 encoded password>
 	// the admin user is used to manage the tenant and perform administrative tasks.
 	// +optional
 	// +kubebuilder:default:={}
@@ -88,10 +88,10 @@ type CommonTenantSpec struct {
 
 	// SecretRef for the admin s3 keys.
 	// secret will be created and overridden by the operator, defaults to <S3 Tenant>-s3-admin-keypair.
-	// the secret must contain the following keys:.
-	//   data:.
-	//     accessKeyId: <base64 encoded access key id>.
-	//     secretAccessKey: <base64 encoded secret access key>.
+	// the secret must contain the following keys:
+	//   data:
+	//     accessKeyId: <base64 encoded access key id>
+	//     secretAccessKey: <base64 encoded secret access key>
 	// this is the administrative keypair to manage buckets and objects in the tenant.
 	// +optional
 	// +kubebuilder:default:={}
@@ -99,8 +99,8 @@ type CommonTenantSpec struct {
 
 	// the storage quota for the S3 Tenant.
 	// should be specified using a quantity string (e.g., "512Mi", "1Gi").
-	// Example:.
-	//   storageQuota: "1Gi".
+	// Example:
+	//   storageQuota: "1Gi"
 	StorageQuota *resource.Quantity `json:"storageQuota,omitempty"`
 
 	// StorageGrid reference.
@@ -149,10 +149,10 @@ type CommonTenantStatus struct {
 
 	// SecretRef for the admin tenant user.
 	// secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentials.
-	// the secret must contain the following keys:.
-	//   data:.
-	//     username: <base64 encoded username>.
-	//     password: <base64 encoded password>.
+	// the secret must contain the following keys:
+	//   data:
+	//     username: <base64 encoded username>
+	//     password: <base64 encoded password>
 	// the admin user is used to manage the tenant and perform administrative tasks.
 	// +optional
 	// +kubebuilder:default:={}
@@ -165,10 +165,10 @@ type CommonTenantStatus struct {
 
 	// SecretRef for the admin s3 keys.
 	// secret will be created and overridden by the operator, defaults to <S3 Tenant>-s3-admin-keypair.
-	// the secret must contain the following keys:.
-	//   data:.
-	//     accessKeyId: <base64 encoded access key id>.
-	//     secretAccessKey: <base64 encoded secret access key>.
+	// the secret must contain the following keys:
+	//   data:
+	//     accessKeyId: <base64 encoded access key id>
+	//     secretAccessKey: <base64 encoded secret access key>
 	// this is the administrative keypair to manage buckets and objects in the tenant.
 	// +optional
 	S3AdminKeysSecretRef *corev1.ObjectReference `json:"s3AdminKeysSecretRef"`

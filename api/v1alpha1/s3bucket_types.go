@@ -70,10 +70,10 @@ type S3BucketStatus struct {
 
 	// SecretRef for the bucket-admin s3 keys.
 	// secret will be created and overridden by the operator, defaults to <S3 Tenant>-s3-admin-keypair.
-	// the secret must contain the following keys:.
-	//   data:.
-	//     accessKeyId: <base64 encoded access key id>.
-	//     secretAccessKey: <base64 encoded secret access key>.
+	// the secret must contain the following keys:
+	//   data:
+	//     accessKeyId: <base64 encoded access key id>
+	//     secretAccessKey: <base64 encoded secret access key>
 	// this is the administrative keypair to manage this buckets and it's objects.
 	// +optional
 	S3AdminKeysSecretRef *corev1.LocalObjectReference `json:"s3AdminKeysSecretRef"`

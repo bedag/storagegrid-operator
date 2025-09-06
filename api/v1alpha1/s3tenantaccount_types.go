@@ -38,10 +38,10 @@ type S3TenantAccountSpec struct {
 
 	// SecretRef for the root tenant user.
 	// secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentials.
-	// the secret must contain the following keys:.
-	//   data:.
-	//     username: <base64 encoded username>.
-	//     password: <base64 encoded password>.
+	// the secret must contain the following keys:
+	//   data:
+	//     username: <base64 encoded username>
+	//     password: <base64 encoded password>
 	// the root user is used to manage the tenant and perform administrative tasks.
 	// the root user is only for the platform team and should not be used by end users.
 	// +optional
@@ -113,10 +113,10 @@ type S3TenantAccountStatus struct {
 
 	// SecretRef for the root tenant user.
 	// secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentials.
-	// the secret must contain the following keys:.
-	//   data:.
-	//     username: <base64 encoded username>.
-	//     password: <base64 encoded password>.
+	// the secret must contain the following keys:
+	//   data:
+	//     username: <base64 encoded username>
+	//     password: <base64 encoded password>
 	// the root user is used to manage the tenant and perform administrative tasks.
 	// the root user is only for the platform team and should not be used by end users.
 	// +optional

@@ -14,6 +14,10 @@ DS_Store
 .tagmanifest
 deploy/charts/external-secrets/templates/crds/*.yaml
 
+# ignore local test out
+cover.out
+
+# ignore e2e test artifacts
 site/
 e2e/k8s/deploy
 e2e/suites/argocd/argocd.test

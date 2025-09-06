@@ -373,7 +373,7 @@ For issues and questions:
 
 - [ ] Add Events
 - [ ] Implement Annotations to drain buckets and tenants on request
-- [ ] Integrate proper e2e tests
+- [ ] Integrate proper e2e tests - currently unable to test against a real StorageGrid instance due to lack of grid docker license. 
 - [ ] Write proper metrics of CRs created and backend calls
 - [ ] Allow the import of existing grid accounts as S3TenantAccount resources
 - [ ] Allow the use of labels for `S3Tenant.spec.AllowedNamespaces` to allow more flexible tenant access control

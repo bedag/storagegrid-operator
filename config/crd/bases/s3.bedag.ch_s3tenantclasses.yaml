@@ -36,7 +36,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: S3TenantClass is the Schema for the s3tenantclasses API
+        description: S3TenantClass is the Schema for the s3tenantclasses API.
         properties:
           apiVersion:
             description: |-
@@ -56,12 +56,12 @@ spec:
           metadata:
             type: object
           spec:
-            description: S3TenantClassSpec defines the desired state of S3TenantClass
+            description: S3TenantClassSpec defines the desired state of S3TenantClass.
             properties:
               backingID:
                 description: |-
-                  The backing ID on the StorageGrid
-                  Need to point to an existing gateway in the StorageGrid
+                  The backing ID on the StorageGrid.
+                  Need to point to an existing gateway in the StorageGrid.
                 type: string
                 x-kubernetes-validations:
                 - message: storageGridRef is immutable
@@ -69,16 +69,16 @@ spec:
               enforce:
                 default: false
                 description: |-
-                  Enforce make sure that only the tenants in this class can
-                  use the backing gateway in the StorageGrid
+                  Enforce make sure that only the tenants in this class can.
+                  use the backing gateway in the StorageGrid.
                 type: boolean
               refreshInterval:
                 default: 60m
                 description: Frequency to check for changes in the StorageGrid in
-                  minutes
+                  minutes.
                 type: string
               storageGridRef:
-                description: StorageGrid Reference for the TenantClass
+                description: StorageGrid Reference for the TenantClass.
                 properties:
                   name:
                     default: ""
@@ -99,14 +99,14 @@ spec:
               usePathStyleAccess:
                 default: false
                 description: pathstyle access means the bucketname is part of the
-                  path
+                  path.
                 type: boolean
             type: object
           status:
-            description: S3TenantClassStatus defines the observed state of S3TenantClass
+            description: S3TenantClassStatus defines the observed state of S3TenantClass.
             properties:
               conditions:
-                description: Track S3TenantClass conditions
+                description: Track S3TenantClass conditions.
                 items:
                   description: "Condition contains details for one aspect of the current
                     state of this API Resource.\n---\nThis struct is intended for
@@ -176,48 +176,48 @@ spec:
                   type: object
                 type: array
               displayName:
-                description: The displayname of the S3TenantClass
+                description: The displayname of the S3TenantClass.
                 type: string
               ipv4AccessEnabled:
                 default: true
-                description: Define whether ipv4 access is enabled
+                description: Define whether ipv4 access is enabled.
                 type: boolean
               ipv6AccessEnabled:
                 default: false
-                description: Define whether ipv6 access is enabled
+                description: Define whether ipv6 access is enabled.
                 type: boolean
               lastUpdated:
-                description: Track the last time the S3TenantClass was updated
+                description: Track the last time the S3TenantClass was updated.
                 format: date-time
                 type: string
               port:
-                description: Port for the S3TenantClass
+                description: Port for the S3TenantClass.
                 format: int32
                 type: integer
               s3Endpoints:
-                description: S3 Endpoint
+                description: S3 Endpoint.
                 items:
                   type: string
                 type: array
               s3VIPs:
-                description: S3 VIP
+                description: S3 VIP.
                 items:
                   type: string
                 type: array
               secure:
                 description: Secure defines whether TLS is enabled on the endpoint
-                  or not
+                  or not.
                 type: boolean
               tenants:
                 description: |-
-                  track a list of tenants that use this class
-                  needed to update the tenantclass when a tenant is created or deleted
+                  track a list of tenants that use this class.
+                  needed to update the tenantclass when a tenant is created or deleted.
                 items:
                   type: string
                 type: array
               untrustedNetworksDropped:
                 default: false
-                description: drop requests on untrusted client networks
+                description: drop requests on untrusted client networks.
                 type: boolean
             type: object
         type: object

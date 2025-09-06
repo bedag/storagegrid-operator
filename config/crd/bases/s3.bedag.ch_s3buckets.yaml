@@ -36,7 +36,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: S3Bucket is the Schema for the s3buckets API
+        description: S3Bucket is the Schema for the s3buckets API.
         properties:
           apiVersion:
             description: |-
@@ -56,15 +56,15 @@ spec:
           metadata:
             type: object
           spec:
-            description: S3BucketSpec defines the desired state of S3Bucket
+            description: S3BucketSpec defines the desired state of S3Bucket.
             properties:
               bucketPolicyJson:
                 description: |-
-                  specify a s3 bucketpolicy as json to apply to the bucket
-                  check the s3 documentation for the policy json format
+                  specify a s3 bucketpolicy as json to apply to the bucket.
+                  check the s3 documentation for the policy json format.
                 type: string
               region:
-                description: region of the S3 Bucket
+                description: region of the S3 Bucket.
                 type: string
                 x-kubernetes-validations:
                 - message: region is immutable
@@ -72,11 +72,11 @@ spec:
               retentionInDays:
                 default: 0
                 description: Optional retention in days for objects in the bucket,
-                  defaults to 0, meaning unlimited retention
+                  defaults to 0, meaning unlimited retention.
                 format: int32
                 type: integer
               s3TenantRef:
-                description: tenant the bucket will be created in
+                description: tenant the bucket will be created in.
                 properties:
                   apiVersion:
                     description: API version of the referent.
@@ -124,35 +124,35 @@ spec:
                   rule: self == oldSelf
             type: object
           status:
-            description: S3BucketStatus defines the observed state of S3Bucket
+            description: S3BucketStatus defines the observed state of S3Bucket.
             properties:
               accessKeyId:
-                description: S3 Access Key ID for the bucket admin
+                description: S3 Access Key ID for the bucket admin.
                 type: string
               bucketName:
                 description: The bucketname is generated automatically to prevent
-                  duplication
+                  duplication.
                 type: string
                 x-kubernetes-validations:
                 - message: bucketName is immutable
                   rule: self == oldSelf
               bucketUsage:
                 description: BucketUsage is the total uf bytes and objects in this
-                  bucket
+                  bucket.
                 properties:
                   Bytes:
                     anyOf:
                     - type: integer
                     - type: string
-                    description: total resources used by the S3 Bucket
+                    description: total resources used by the S3 Bucket.
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
                   objectCount:
-                    description: total objects stored in the S3 Bucket
+                    description: total objects stored in the S3 Bucket.
                     type: integer
                 type: object
               conditions:
-                description: Track s3Bucket conditions
+                description: Track s3Bucket conditions.
                 items:
                   description: "Condition contains details for one aspect of the current
                     state of this API Resource.\n---\nThis struct is intended for
@@ -222,20 +222,20 @@ spec:
                   type: object
                 type: array
               lastAppliedPolicy:
-                description: track last successfully applied policy
+                description: track last successfully applied policy.
                 type: string
               region:
-                description: The region the bucket is created in
+                description: The region the bucket is created in.
                 type: string
               s3AdminKeysSecretRef:
                 description: |-
-                  SecretRef for the bucket-admin s3 keys
-                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-s3-admin-keypair
+                  SecretRef for the bucket-admin s3 keys.
+                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-s3-admin-keypair.
                   the secret must contain the following keys:
                     data:
                       accessKeyId: <base64 encoded access key id>
                       secretAccessKey: <base64 encoded secret access key>
-                  this is the administrative keypair to manage this buckets and it's objects
+                  this is the administrative keypair to manage this buckets and it's objects.
                 properties:
                   name:
                     default: ""
@@ -251,30 +251,30 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               s3ApiEndpoint:
-                description: s3 api endpoint for the bucket
+                description: s3 api endpoint for the bucket.
                 properties:
                   pathStyleAccess:
                     default: false
                     description: |-
-                      Use pathstyle access for the s3 api endpoint
-                      Defaults to false if not set
+                      Use pathstyle access for the s3 api endpoint.
+                      Defaults to false if not set.
                     type: boolean
                   port:
-                    description: Port for the S3 API endpoint
+                    description: Port for the S3 API endpoint.
                     format: int32
                     type: integer
                   s3TenantClassName:
                     default: ""
                     description: TenantClassName which this S3ApiEndpoint belongs
-                      to
+                      to.
                     type: string
                   s3Urls:
-                    description: urls of the s3 api endpoint
+                    description: urls of the s3 api endpoint.
                     items:
                       type: string
                     type: array
                   s3VIPs:
-                    description: S3 VIPs to use for potential fw requests
+                    description: S3 VIPs to use for potential fw requests.
                     items:
                       type: string
                     type: array

@@ -51,7 +51,7 @@ type StorageGridSpec struct {
 	DefaultBucketRegion string `json:"defaultBucketRegion,omitempty"`
 
 	// Controls whether tenant names should be prefixed in the backend.
-	// Possible values:.
+	// Possible values:
 	// - "Disabled": (default) No prefixing
 	// - "Namespace": Namespace is added as a prefix (e.g., "namespace-tenant")
 	// +kubebuilder:validation:Enum=Disabled;Namespace
@@ -76,7 +76,7 @@ type TenantDeletionPolicy struct {
 	RetentionDuration *metav1.Duration `json:"retentionDuration,omitempty"`
 
 	// Policy specifies the deletion policy for tenants.
-	// Possible values:.
+	// Possible values:
 	// - "Delete": Tenants are deleted on the backend immediately.
 	// - "Retain": (default) Tenants are retained and need to be manually deleted later.
 	// - "RetainThenDelete": Tenants are retained for the duration specified in RetentionDuration, then deleted.

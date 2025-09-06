@@ -48,7 +48,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: S3TenantAccount is the Schema for the s3tenantaccounts API
+        description: S3TenantAccount is the Schema for the s3tenantaccounts API.
         properties:
           apiVersion:
             description: |-
@@ -69,26 +69,26 @@ spec:
             type: object
           spec:
             description: |-
-              S3TenantAccountSpec defines the desired state of S3TenantAccount
+              S3TenantAccountSpec defines the desired state of S3TenantAccount.
               There's no field for the S3 Tenant Account name as the name specified in metadata.name will be used as the account name in the backend.
             properties:
               additionalTenantMetadata:
                 additionalProperties:
                   type: string
                 description: |-
-                  As there is no metadata field in the backend, you can use this to add <field>:<value> pairs to the description
+                  As there is no metadata field in the backend, you can use this to add <field>:<value> pairs to the description.
                   This will always include the specified owner and description as default fields.
                 type: object
               adminSecretRef:
                 default: {}
                 description: |-
-                  SecretRef for the admin tenant user
-                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentails
+                  SecretRef for the admin tenant user.
+                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentials.
                   the secret must contain the following keys:
                     data:
                       username: <base64 encoded username>
                       password: <base64 encoded password>
-                  the admin user is used to manage the tenant and perform administrative tasks
+                  the admin user is used to manage the tenant and perform administrative tasks.
                 properties:
                   apiVersion:
                     description: API version of the referent.
@@ -133,62 +133,62 @@ spec:
                 x-kubernetes-map-type: atomic
               allowedNamespaces:
                 description: |-
-                  Configure which namespaces are allowed to create buckets in this tenant (supports wildcards)
-                  if unset only the namespace of the tenant is allowed
+                  Configure which namespaces are allowed to create buckets in this tenant (supports wildcards).
+                  if unset only the namespace of the tenant is allowed.
                 items:
                   type: string
                 type: array
               defaultBucketRegion:
                 description: |-
-                  default bucket region to use
-                  if not set, the default region of the StorageGrid will be used
+                  default bucket region to use.
+                  if not set, the default region of the StorageGrid will be used.
                 type: string
               description:
                 description: |-
-                  User facing description of the S3 Tenant in Kubernetes
+                  User facing description of the S3 Tenant in Kubernetes.
                   This will be reflected in the backend.
                 type: string
               features:
                 description: |-
-                  Features of the S3 Tenant
-                  Currently only maintained by admins
+                  Features of the S3 Tenant.
+                  Currently only maintained by admins.
                 properties:
                   customIdentitySource:
-                    description: Allow users to use CustomIdentitySource
+                    description: Allow users to use CustomIdentitySource.
                     type: boolean
                   platformServices:
-                    description: Enable PlatformServices like CloudMirror
+                    description: Enable PlatformServices like CloudMirror.
                     type: boolean
                   selectObjectContent:
                     description: Enable SelectObjectContent API to filter and retrieve
-                      object data
+                      object data.
                     type: boolean
                 type: object
               name:
                 description: |-
-                  Name to identify the S3 Tenant in the backned
-                  This name will be prefixed with predefined values
+                  Name to identify the S3 Tenant in the backned.
+                  This name will be prefixed with predefined values.
                   to ensure uniqueness across the backend.
                 type: string
               owner:
                 default: unknown
                 description: |-
-                  Owner of the S3 Tenant
+                  Owner of the S3 Tenant.
                   Specify the owning resource of the tenant (e.g., a user or a team).
-                  This will be added to the tenant description in the bakcned
+                  This will be added to the tenant description in the bakcned.
                   There is no validation for the owner, so you can use any string.
                 type: string
               rootSecretRef:
                 default: {}
                 description: |-
-                  SecretRef for the root tenant user
-                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentails
+                  SecretRef for the root tenant user.
+                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentials.
                   the secret must contain the following keys:
                     data:
                       username: <base64 encoded username>
                       password: <base64 encoded password>
-                  the root user is used to manage the tenant and perform administrative tasks
-                  the root user is only for the platform team and should not be used by end users
+                  the root user is used to manage the tenant and perform administrative tasks.
+                  the root user is only for the platform team and should not be used by end users.
                 properties:
                   apiVersion:
                     description: API version of the referent.
@@ -234,13 +234,13 @@ spec:
               s3AdminKeysSecretRef:
                 default: {}
                 description: |-
-                  SecretRef for the admin s3 keys
-                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-s3-admin-keypair
+                  SecretRef for the admin s3 keys.
+                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-s3-admin-keypair.
                   the secret must contain the following keys:
                     data:
                       accessKeyId: <base64 encoded access key id>
                       secretAccessKey: <base64 encoded secret access key>
-                  this is the administrative keypair to manage buckets and objects in the tenant
+                  this is the administrative keypair to manage buckets and objects in the tenant.
                 properties:
                   apiVersion:
                     description: API version of the referent.
@@ -285,8 +285,8 @@ spec:
                 x-kubernetes-map-type: atomic
               s3TenantClassName:
                 description: |-
-                  define tenantclassname for s3 endpoint accessibility
-                  if not specified the default tenant class will be used
+                  define tenantclassname for s3 endpoint accessibility.
+                  if not specified the default tenant class will be used.
                 maxLength: 63
                 type: string
               s3TenantRef:
@@ -342,7 +342,7 @@ spec:
                   This will just create the secrets in the specified namespace, but not go back and delete old ones.
                 type: string
               storageGridRef:
-                description: StorageGrid reference
+                description: StorageGrid reference.
                 properties:
                   name:
                     default: ""
@@ -365,7 +365,7 @@ spec:
                 - type: integer
                 - type: string
                 description: |-
-                  the storage quota for the S3 Tenant
+                  the storage quota for the S3 Tenant.
                   should be specified using a quantity string (e.g., "512Mi", "1Gi").
                   Example:
                     storageQuota: "1Gi"
@@ -373,8 +373,8 @@ spec:
                 x-kubernetes-int-or-string: true
               tenantDeletionPolicy:
                 description: |-
-                  Set tenantdeletionpolicy for this account
-                  this overrides the policy set in the StorageGrid CRD
+                  Set tenantdeletionpolicy for this account.
+                  this overrides the policy set in the StorageGrid CRD.
                 properties:
                   policy:
                     default: Retain
@@ -394,25 +394,25 @@ spec:
                     description: |-
                       RetentionDuration specifies the duration to retain resources after deletion is requested.
                       Accepts values like "60m", "24h", etc., using the standard Kubernetes duration format.
-                      set this to 0 to disable retention
+                      set this to 0 to disable retention.
                       Defaults to "168h" (7 days).
                     type: string
                 type: object
             type: object
           status:
             default: {}
-            description: S3TenantAccountStatus defines the observed state of S3TenantAccount
+            description: S3TenantAccountStatus defines the observed state of S3TenantAccount.
             properties:
               adminSecretRef:
                 default: {}
                 description: |-
-                  SecretRef for the admin tenant user
-                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentails
+                  SecretRef for the admin tenant user.
+                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentials.
                   the secret must contain the following keys:
                     data:
                       username: <base64 encoded username>
                       password: <base64 encoded password>
-                  the admin user is used to manage the tenant and perform administrative tasks
+                  the admin user is used to manage the tenant and perform administrative tasks.
                 properties:
                   apiVersion:
                     description: API version of the referent.
@@ -456,7 +456,7 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               conditions:
-                description: Track s3Tenant conditions
+                description: Track s3Tenant conditions.
                 items:
                   description: "Condition contains details for one aspect of the current
                     state of this API Resource.\n---\nThis struct is intended for
@@ -527,38 +527,38 @@ spec:
                 type: array
               defaultBucketRegion:
                 description: Default region for the buckets of the tenant inherited
-                  from grid if not specified by the tenant
+                  from grid if not specified by the tenant.
                 type: string
               deletionTimestamp:
                 description: |-
-                  DeletionTimestamp is set when the tenant account is due for deletion
-                  if this timestamp is reached, the tenant account will be deleted both in Kubernetes and in the backend
+                  DeletionTimestamp is set when the tenant account is due for deletion.
+                  if this timestamp is reached, the tenant account will be deleted both in Kubernetes and in the backend.
                 format: date-time
                 type: string
               description:
                 description: |-
-                  Compiled description with all metadata
-                  This will include the owner, description and additional metadata
-                  Used to track changes in the tenant description
+                  Compiled description with all metadata.
+                  This will include the owner, description and additional metadata.
+                  Used to track changes in the tenant description.
                 type: string
               desiredTenantBackendName:
                 description: DesiredTenantBackendName is the name of the desired state
-                  in the backend
+                  in the backend.
                 type: string
               gridEndpoint:
                 description: |-
-                  grid endpoint of the backend
-                  this is the endpoint to access the StorageGrid management API
+                  grid endpoint of the backend.
+                  this is the endpoint to access the StorageGrid management API.
                 type: string
               observedTenantBackendName:
                 default: ""
-                description: ObservedTenantBackendName is the actual name in the backend
+                description: ObservedTenantBackendName is the actual name in the backend.
                 type: string
               phase:
                 default: Pending
                 description: |-
-                  Phase displays the current state of the S3 Tenant
-                  Possible values:
+                  Phase displays the current state of the S3 Tenant.
+                  Possible values:.
                   - "Pending": The tenant is being created.
                   - "Ready": The tenant is ready to use.
                   - "Failed": The tenant creation failed.
@@ -578,40 +578,40 @@ spec:
                 - Bound
                 type: string
               quota:
-                description: Quota of the S3 Tenant storage
+                description: Quota of the S3 Tenant storage.
                 properties:
                   limit:
                     anyOf:
                     - type: integer
                     - type: string
                     description: Total storage limit for the S3 Tenant configured
-                      on the backend
+                      on the backend.
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
                   used:
                     anyOf:
                     - type: integer
                     - type: string
-                    description: Total storage used by the S3 Tenant
+                    description: Total storage used by the S3 Tenant.
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
                 type: object
               regions:
-                description: Available Regions for the S3 Tenant
+                description: Available Regions for the S3 Tenant.
                 items:
                   type: string
                 type: array
               rootSecretRef:
                 default: {}
                 description: |-
-                  SecretRef for the root tenant user
-                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentails
+                  SecretRef for the root tenant user.
+                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-admin-credentials.
                   the secret must contain the following keys:
                     data:
                       username: <base64 encoded username>
                       password: <base64 encoded password>
-                  the root user is used to manage the tenant and perform administrative tasks
-                  the root user is only for the platform team and should not be used by end users
+                  the root user is used to manage the tenant and perform administrative tasks.
+                  the root user is only for the platform team and should not be used by end users.
                 properties:
                   apiVersion:
                     description: API version of the referent.
@@ -656,18 +656,18 @@ spec:
                 x-kubernetes-map-type: atomic
               s3AdminAccessKeyId:
                 description: |-
-                  S3AdminAccessKeyId is the ID for the administrative S3 access key
-                  this key is used to manage buckets and objects in the tenant
+                  S3AdminAccessKeyId is the ID for the administrative S3 access key.
+                  this key is used to manage buckets and objects in the tenant.
                 type: string
               s3AdminKeysSecretRef:
                 description: |-
-                  SecretRef for the admin s3 keys
-                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-s3-admin-keypair
+                  SecretRef for the admin s3 keys.
+                  secret will be created and overridden by the operator, defaults to <S3 Tenant>-s3-admin-keypair.
                   the secret must contain the following keys:
                     data:
                       accessKeyId: <base64 encoded access key id>
                       secretAccessKey: <base64 encoded secret access key>
-                  this is the administrative keypair to manage buckets and objects in the tenant
+                  this is the administrative keypair to manage buckets and objects in the tenant.
                 properties:
                   apiVersion:
                     description: API version of the referent.
@@ -713,37 +713,37 @@ spec:
               s3ApiEndpoint:
                 default: {}
                 description: |-
-                  S3 endpoint to use for tenant users
-                  Includes URLs and VIPs to access your buckets and objects
+                  S3 endpoint to use for tenant users.
+                  Includes URLs and VIPs to access your buckets and objects.
                 properties:
                   pathStyleAccess:
                     default: false
                     description: |-
-                      Use pathstyle access for the s3 api endpoint
-                      Defaults to false if not set
+                      Use pathstyle access for the s3 api endpoint.
+                      Defaults to false if not set.
                     type: boolean
                   port:
-                    description: Port for the S3 API endpoint
+                    description: Port for the S3 API endpoint.
                     format: int32
                     type: integer
                   s3TenantClassName:
                     default: ""
                     description: TenantClassName which this S3ApiEndpoint belongs
-                      to
+                      to.
                     type: string
                   s3Urls:
-                    description: urls of the s3 api endpoint
+                    description: urls of the s3 api endpoint.
                     items:
                       type: string
                     type: array
                   s3VIPs:
-                    description: S3 VIPs to use for potential fw requests
+                    description: S3 VIPs to use for potential fw requests.
                     items:
                       type: string
                     type: array
                 type: object
               s3TenantRef:
-                description: Reference to the S3Tenant this account is bounded by
+                description: Reference to the S3Tenant this account is bounded by.
                 properties:
                   apiVersion:
                     description: API version of the referent.
@@ -788,9 +788,9 @@ spec:
                 x-kubernetes-map-type: atomic
               tenantDeletionPolicy:
                 description: |-
-                  This is the applied tenant deletion policy
-                  this is either the policy set in the StorageGrid CRD or the one overridden in the S3TenantAccount
-                  this is needed to track changes in the deletion policy
+                  This is the applied tenant deletion policy.
+                  this is either the policy set in the StorageGrid CRD or the one overridden in the S3TenantAccount.
+                  this is needed to track changes in the deletion policy.
                 properties:
                   policy:
                     default: Retain
@@ -810,26 +810,26 @@ spec:
                     description: |-
                       RetentionDuration specifies the duration to retain resources after deletion is requested.
                       Accepts values like "60m", "24h", etc., using the standard Kubernetes duration format.
-                      set this to 0 to disable retention
+                      set this to 0 to disable retention.
                       Defaults to "168h" (7 days).
                     type: string
                 type: object
               tenantID:
-                description: TenantID of the S3 Tenant
+                description: TenantID of the S3 Tenant.
                 type: string
               tenantManagerURL:
                 description: |-
-                  TenantManagerURL of the S3 Tenant
-                  Use this URL to manage the tenant using the Web UI
+                  TenantManagerURL of the S3 Tenant.
+                  Use this URL to manage the tenant using the Web UI.
                 type: string
               usage:
-                description: Usage of the S3 Tenant
+                description: Usage of the S3 Tenant.
                 properties:
                   bucketCount:
-                    description: total buckets created by the S3 Tenant
+                    description: total buckets created by the S3 Tenant.
                     type: integer
                   objectCount:
-                    description: total objects stored by the S3 Tenant
+                    description: total objects stored by the S3 Tenant.
                     format: int64
                     type: integer
                 type: object

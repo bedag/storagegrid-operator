@@ -55,8 +55,10 @@ jobs:
     - name: Install CRDs
       run: make install
 
-    - name: Run E2E tests
-      run: make test-e2e
+    # we can't run e2e tests without a containerized storagegrid instance
+    # if you work at NetApp and have access to a StorageGrid docker license, please contact us to help set this up
+    # - name: Run E2E tests
+    #   run: make test-e2e
 
     - name: Collect logs on failure
       if: failure()

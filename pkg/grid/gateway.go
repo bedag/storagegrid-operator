@@ -50,7 +50,7 @@ type Gateway = struct {
 // 		log.Error(err, "Failed to get grid client").
 // 		return "", err.
 // 	}
-// 	return gridClient.Gateway.List(ctx).
+// 	return gridClient.Gateway().List(ctx).
 // }
 
 func FetchGateway(ctx context.Context, gatewayID string, gridClient *GridClient) (*Gateway, error) {
@@ -63,7 +63,7 @@ func FetchGateway(ctx context.Context, gatewayID string, gridClient *GridClient)
 		ServerConfig: nil,
 	}
 
-	gw, err := gridClient.Gateway.GetGatewayConfigById(ctx, gatewayID)
+	gw, err := gridClient.Gateway().GetGatewayConfigById(ctx, gatewayID)
 	if err != nil {
 		log.Error(err, "Failed to get gateway")
 		return nil, err
@@ -93,7 +93,7 @@ func fetchGWServerConfig(ctx context.Context, gw *GatewayConfig, gridClient *Gri
 	log := log.FromContext(ctx).WithValues("func", "fetchGWServerConfig")
 	log.V(1).Info("Fetching gateway server configuration")
 
-	srvConfig, err := gridClient.Gateway.GetGatewayServerConfig(ctx, gw.Id)
+	srvConfig, err := gridClient.Gateway().GetGatewayServerConfig(ctx, gw.Id)
 	if err != nil {
 		log.Error(err, "Failed to get server configuration")
 		return nil, err
@@ -109,7 +109,7 @@ func fetchHAGroups(ctx context.Context, gw *GatewayConfig, gridClient *GridClien
 	// get all hagroups mapped to the gateway.hagroups.
 	hagroups := []HAGroup{}
 	for _, hagroup := range *gw.PinTargets.HaGroups {
-		hagroup, err := gridClient.HAGroup.GetById(ctx, hagroup)
+		hagroup, err := gridClient.HAGroup().GetById(ctx, hagroup)
 		if err != nil {
 			log.Error(err, "Failed to get HA group")
 			return nil, err
@@ -199,7 +199,7 @@ func AddTenantToAllowlist(ctx context.Context, tenantID string, gw *Gateway, gri
 	gw.ServerConfig.AccountRestrictionMode = &allowlistMode
 
 	// update server config.
-	srvConfig, err := gridClient.Gateway.UpdateGatewayServerConfig(ctx, gw.Gateway.Id, gw.ServerConfig)
+	srvConfig, err := gridClient.Gateway().UpdateGatewayServerConfig(ctx, gw.Gateway.Id, gw.ServerConfig)
 	if err != nil {
 		log.Error(err, "Failed to update server configuration")
 		return err
@@ -231,7 +231,7 @@ func RemoveTenantFromAllowlist(ctx context.Context, tenantID string, gw *Gateway
 	gw.ServerConfig.AccountRestrictionMode = &allowlistMode
 
 	// update server config.
-	srvConfig, err := gridClient.Gateway.UpdateGatewayServerConfig(ctx, gw.Gateway.Id, gw.ServerConfig)
+	srvConfig, err := gridClient.Gateway().UpdateGatewayServerConfig(ctx, gw.Gateway.Id, gw.ServerConfig)
 	if err != nil {
 		log.Error(err, "Failed to update server configuration")
 		return err

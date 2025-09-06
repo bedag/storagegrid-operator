@@ -67,7 +67,7 @@ func CreateTenant(ctx context.Context, name string, description string, quota in
 		Password: &pw,
 	}
 
-	createdTenant, err := gridClient.Tenant.Create(ctx, &tenant)
+	createdTenant, err := gridClient.Tenant().Create(ctx, &tenant)
 	if err != nil {
 		log.Error(err, "Failed to create tenant")
 		return "", "", err
@@ -80,7 +80,7 @@ func CreateTenant(ctx context.Context, name string, description string, quota in
 func FetchTenant(ctx context.Context, tenantID string, gridClient *GridClient) (*Tenant, error) {
 	log := log.FromContext(ctx).WithValues("func", "FetchTenant")
 
-	tenant, err := gridClient.Tenant.GetById(ctx, tenantID)
+	tenant, err := gridClient.Tenant().GetById(ctx, tenantID)
 	if err != nil {
 		log.Error(err, "Failed to fetch tenant")
 		return nil, err
@@ -128,13 +128,13 @@ func SetTenantAdminPassword(ctx context.Context, tenantClient *TenantClient) (st
 	newPassword := generatePassword(12, true, true, true)
 
 	// get userid by name.
-	user, err := tenantClient.Users.GetByName(ctx, adminUserName)
+	user, err := tenantClient.Users().GetByName(ctx, adminUserName)
 	if err != nil {
 		log.Error(err, "Failed to get tenant admin user ID")
 		return "", "", err
 	}
 
-	err = tenantClient.Users.SetPassword(ctx, *user.Id, newPassword)
+	err = tenantClient.Users().SetPassword(ctx, *user.Id, newPassword)
 	if err != nil {
 		log.Error(err, "Failed to set password for tenant admin user")
 		return "", "", err
@@ -183,7 +183,7 @@ func FetchTenantUsage(ctx context.Context, tenantID string, gridClient *GridClie
 	log := log.FromContext(ctx).WithValues("func", "FetchTenantUsage")
 	log.V(1).Info(fmt.Sprintf("Fetching tenant usage for tenant with id %s", tenantID))
 
-	tenantUsage, err := gridClient.Tenant.GetUsage(ctx, tenantID)
+	tenantUsage, err := gridClient.Tenant().GetUsage(ctx, tenantID)
 	if err != nil {
 		log.Error(err, "Failed to fetch tenant usage")
 		return nil, err
@@ -229,7 +229,7 @@ func updateTenant(ctx context.Context, tenant *Tenant, gridClient *GridClient) e
 	log := log.FromContext(ctx).WithValues("func", "updateTenant")
 	log.V(1).Info("Updating tenant")
 
-	_, err := gridClient.Tenant.Update(ctx, tenant)
+	_, err := gridClient.Tenant().Update(ctx, tenant)
 	if err != nil {
 		log.Error(err, "Failed to update tenant")
 		return err
@@ -276,11 +276,11 @@ func DeleteTenant(ctx context.Context, tenantId string, gridClient *GridClient) 
 
 	// check if the tenant still exists on the backend.
 	// we need to do this, because otherwise the deletion will fail.
-	_, err := gridClient.Tenant.GetById(ctx, tenantId)
+	_, err := gridClient.Tenant().GetById(ctx, tenantId)
 	if err != nil {
 		log.Error(err, "Unable to fetch tenant, it might have been deleted already, removing from kubernetes")
 		return nil
 	}
 
-	return gridClient.Tenant.Delete(ctx, tenantId)
+	return gridClient.Tenant().Delete(ctx, tenantId)
 }

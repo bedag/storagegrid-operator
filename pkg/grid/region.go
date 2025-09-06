@@ -27,5 +27,5 @@ func GetRegions(ctx context.Context, gridClient *GridClient) (*[]string, error) 
 	log := log.FromContext(ctx).WithValues("func", "GetRegions")
 	log.V(1).Info("Fetching regions")
 
-	return gridClient.Region.List(ctx)
+	return gridClient.Region().List(ctx)
 }

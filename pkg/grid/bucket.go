@@ -51,7 +51,7 @@ func CreateBucket(ctx context.Context, name string, region string, retentionInDa
 	}
 
 	// no need to keep the result.
-	_, err = tenantClient.Bucket.Create(ctx, &bucket)
+	_, err = tenantClient.Bucket().Create(ctx, &bucket)
 	if err != nil {
 		log.Error(err, "Failed to create bucket")
 		return err
@@ -150,13 +150,13 @@ func CreateS3Credentials(ctx context.Context, bucketName string, identifier stri
 
 	_, bucketAdminUser := getBucketGroupAndAdminUserName(identifier)
 
-	user, err := tenantClient.Users.GetByName(ctx, bucketAdminUser)
+	user, err := tenantClient.Users().GetByName(ctx, bucketAdminUser)
 	if err != nil {
 		log.Error(err, "Failed to get user by name")
 		return "", "", "", err
 	}
 
-	createdS3AccessKey, err := tenantClient.S3AccessKeys.CreateForUser(ctx, *user.Id, &s3AccessKey)
+	createdS3AccessKey, err := tenantClient.S3AccessKeys().CreateForUser(ctx, *user.Id, &s3AccessKey)
 	if err != nil {
 		log.Error(err, "Failed to create s3 access key")
 		return "", "", "", err
@@ -172,14 +172,14 @@ func RecreateS3Credentials(ctx context.Context, bucketName string, identifier st
 
 	_, bucketAdminUser := getBucketGroupAndAdminUserName(identifier)
 
-	user, err := tenantClient.Users.GetByName(ctx, bucketAdminUser)
+	user, err := tenantClient.Users().GetByName(ctx, bucketAdminUser)
 	if err != nil {
 		log.Error(err, "Failed to get user by name")
 		return "", "", "", err
 	}
 
 	// delete the existing s3 credentials.
-	err = tenantClient.S3AccessKeys.DeleteForUser(ctx, *user.Id, accessKeyId)
+	err = tenantClient.S3AccessKeys().DeleteForUser(ctx, *user.Id, accessKeyId)
 	if err != nil {
 		log.Error(err, "Failed to delete s3 access key")
 		return "", "", "", err
@@ -194,14 +194,14 @@ func CreateAdminS3Credentials(ctx context.Context, tenantClient *TenantClient) (
 	log := log.FromContext(ctx).WithValues("func", "CreateS3Credentials")
 	log.V(1).Info("Creating admin s3 credentials")
 
-	adminUser, err := tenantClient.Users.GetByName(ctx, adminUserName)
+	adminUser, err := tenantClient.Users().GetByName(ctx, adminUserName)
 	if err != nil {
 		log.Error(err, "Failed to get admin user by name")
 		return "", "", "", err
 	}
 
 	s3AccessKey := models.S3AccessKey{}
-	createdS3AccessKey, err := tenantClient.S3AccessKeys.CreateForUser(ctx, *adminUser.Id, &s3AccessKey)
+	createdS3AccessKey, err := tenantClient.S3AccessKeys().CreateForUser(ctx, *adminUser.Id, &s3AccessKey)
 	if err != nil {
 		log.Error(err, "Failed to create s3 access key")
 		return "", "", "", err
@@ -215,14 +215,14 @@ func RecreateAdminS3Credentials(ctx context.Context, accessKeyId string, tenantC
 	log := log.FromContext(ctx).WithValues("func", "RecreateS3Credentials")
 	log.V(1).Info("Recreating admin s3 credentials")
 
-	adminUser, err := tenantClient.Users.GetByName(ctx, adminUserName)
+	adminUser, err := tenantClient.Users().GetByName(ctx, adminUserName)
 	if err != nil {
 		log.Error(err, "Failed to get admin user by name")
 		return "", "", "", err
 	}
 
 	// delete the existing s3 credentials.
-	err = tenantClient.S3AccessKeys.DeleteForUser(ctx, *adminUser.Id, accessKeyId)
+	err = tenantClient.S3AccessKeys().DeleteForUser(ctx, *adminUser.Id, accessKeyId)
 	if err != nil {
 		log.Error(err, "Failed to delete s3 access key")
 		return "", "", "", err
@@ -238,7 +238,7 @@ func BucketExists(ctx context.Context, bucketName string, tenantClient *TenantCl
 	log.V(1).Info(fmt.Sprintf("Checking if bucket %s exists", bucketName))
 
 	// if the bucket was not found an error is returned thus the bucket does not exist.
-	_, err := tenantClient.Bucket.GetByName(ctx, bucketName)
+	_, err := tenantClient.Bucket().GetByName(ctx, bucketName)
 	if err != nil {
 		if strings.HasSuffix(err.Error(), "not found") {
 			log.V(1).Info(fmt.Sprintf("Bucket %s does not exist", bucketName))
@@ -257,7 +257,7 @@ func FetchBucketUsage(ctx context.Context, bucketName string, tenantClient *Tena
 	log := log.FromContext(ctx).WithValues("func", "FetchBucketUsage")
 	log.V(1).Info(fmt.Sprintf("Fetching bucket usage for bucket %s", bucketName))
 
-	bucketUsage, err := tenantClient.Bucket.GetUsage(ctx, bucketName)
+	bucketUsage, err := tenantClient.Bucket().GetUsage(ctx, bucketName)
 	if err != nil {
 		log.Error(err, "Failed to fetch bucket usage")
 		return nil, err
@@ -299,7 +299,7 @@ func DeleteBucket(ctx context.Context, bucketName string, tenantClient *TenantCl
 	log := log.FromContext(ctx).WithValues("func", "DeleteBucket")
 	log.V(1).Info(fmt.Sprintf("Deleting bucket %s", bucketName))
 
-	return tenantClient.Bucket.Delete(ctx, bucketName)
+	return tenantClient.Bucket().Delete(ctx, bucketName)
 }
 
 func DeleteBucketAdmin(ctx context.Context, identifier string, tenantClient *TenantClient) error {

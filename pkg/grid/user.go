@@ -34,7 +34,7 @@ func createUser(ctx context.Context, username string, groupID string, tenantClie
 		MemberOf:   []string{groupID},
 	}
 
-	createdUser, err := tenantClient.Users.Create(ctx, &user)
+	createdUser, err := tenantClient.Users().Create(ctx, &user)
 	if err != nil {
 		log.Error(err, "Failed to create user")
 		return "", err
@@ -48,7 +48,7 @@ func userExists(ctx context.Context, username string, tenantClient *TenantClient
 	log := log.FromContext(ctx).WithValues("func", "userExists")
 	log.V(1).Info(fmt.Sprintf("Checking if user %s exists", username))
 
-	user, err := tenantClient.Users.GetByName(ctx, username)
+	user, err := tenantClient.Users().GetByName(ctx, username)
 	if err == nil {
 		log.V(1).Info(fmt.Sprintf("User %s exists", username))
 		return true, *user.Id
@@ -87,14 +87,14 @@ func ensureGroupMembership(ctx context.Context, username string, groupID string,
 	log.V(1).Info(fmt.Sprintf("Ensuring user %s is member of group with id %s", username, groupID))
 
 	// get user by name.
-	user, err := tenantClient.Users.GetByName(ctx, username)
+	user, err := tenantClient.Users().GetByName(ctx, username)
 	if err != nil {
 		log.Error(err, "Failed to get user by name")
 		return err
 	}
 
 	// get group by id.
-	group, err := tenantClient.Groups.GetById(ctx, groupID)
+	group, err := tenantClient.Groups().GetById(ctx, groupID)
 	if err != nil {
 		log.Error(err, "Failed to get group by id")
 		return err
@@ -110,7 +110,7 @@ func ensureGroupMembership(ctx context.Context, username string, groupID string,
 
 	// add group to the memberof list.
 	user.MemberOf = append(user.MemberOf, *group.Id)
-	_, err = tenantClient.Users.Update(ctx, user)
+	_, err = tenantClient.Users().Update(ctx, user)
 	if err != nil {
 		log.Error(err, "Failed to update user")
 	}
@@ -123,13 +123,13 @@ func deleteUserByName(ctx context.Context, username string, tenantClient *Tenant
 	log := log.FromContext(ctx).WithValues("func", "DeleteUserByName")
 	log.V(1).Info(fmt.Sprintf("Deleting user %s", username))
 
-	user, err := tenantClient.Users.GetByName(ctx, username)
+	user, err := tenantClient.Users().GetByName(ctx, username)
 	if err != nil {
 		log.Error(err, "Failed to get user by name")
 		return err
 	}
 
-	return tenantClient.Users.Delete(ctx, *user.Id)
+	return tenantClient.Users().Delete(ctx, *user.Id)
 }
 
 func createGroup(ctx context.Context, groupName string, policies *models.TenantGroupPolicies, tenantClient *TenantClient) (string, error) {
@@ -148,7 +148,7 @@ func createGroup(ctx context.Context, groupName string, policies *models.TenantG
 		Policies:    policies,
 	}
 
-	createdGroup, err := tenantClient.Groups.Create(ctx, &group)
+	createdGroup, err := tenantClient.Groups().Create(ctx, &group)
 	if err != nil {
 		log.Error(err, "Failed to create group")
 		return "", err
@@ -162,7 +162,7 @@ func groupExists(ctx context.Context, groupName string, tenantClient *TenantClie
 	log := log.FromContext(ctx).WithValues("func", "groupExists")
 	log.V(1).Info(fmt.Sprintf("Checking if group %s exists", groupName))
 
-	group, err := tenantClient.Groups.GetByName(ctx, groupName)
+	group, err := tenantClient.Groups().GetByName(ctx, groupName)
 	if err == nil {
 		log.V(1).Info(fmt.Sprintf("Group %s exists", groupName))
 		return true, *group.Id
@@ -198,11 +198,11 @@ func deleteGroupByName(ctx context.Context, groupName string, tenantClient *Tena
 	log := log.FromContext(ctx).WithValues("func", "DeleteGroupByName")
 	log.V(1).Info(fmt.Sprintf("Deleting group %s", groupName))
 
-	group, err := tenantClient.Groups.GetByName(ctx, groupName)
+	group, err := tenantClient.Groups().GetByName(ctx, groupName)
 	if err != nil {
 		log.Error(err, "Failed to get group by name")
 		return err
 	}
 
-	return tenantClient.Groups.Delete(ctx, *group.Id)
+	return tenantClient.Groups().Delete(ctx, *group.Id)
 }

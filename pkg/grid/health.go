@@ -28,7 +28,7 @@ func IsOperative(ctx context.Context, gridClient *GridClient) (bool, error) {
 	log.V(1).Info("Checking if grid is operative")
 
 	// Check if the Grid is healthy and available.
-	health, err := gridClient.Health.Get(ctx)
+	health, err := gridClient.Health().Get(ctx)
 	if err != nil {
 		log.Error(err, "Failed to get grid health")
 		return false, err
@@ -44,7 +44,7 @@ func GetOperativeReason(ctx context.Context, gridClient *GridClient) ([]string, 
 	returnedIssues := make([]string, 0)
 
 	// Get the health issues from the Grid.
-	health, err := gridClient.Health.Get(ctx)
+	health, err := gridClient.Health().Get(ctx)
 	if err != nil {
 		log.Error(err, "Failed to get grid health")
 		return returnedIssues, err

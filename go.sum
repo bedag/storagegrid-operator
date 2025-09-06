@@ -166,6 +166,8 @@ github.com/yehlo/storagegrid-sdk-go v0.4.1 h1:Szqq/MGDbWrMuV3NKkJVdeJps/wHRn8mcd
 github.com/yehlo/storagegrid-sdk-go v0.4.1/go.mod h1:Al+GjMEcSvthYtD+xNcOBssU8MYRcxXrlK/2ZXA1Byg=
 github.com/yehlo/storagegrid-sdk-go v0.4.2 h1:dfYuwX/XfepmPhutlnyOo7z+3miIpjeJcbyMj5625yY=
 github.com/yehlo/storagegrid-sdk-go v0.4.2/go.mod h1:Al+GjMEcSvthYtD+xNcOBssU8MYRcxXrlK/2ZXA1Byg=
+github.com/yehlo/storagegrid-sdk-go v0.5.0 h1:uCAOJiRHnXfg0Nf+Om7eSPORIxTNC93NjYBYeYWkF1s=
+github.com/yehlo/storagegrid-sdk-go v0.5.0/go.mod h1:Al+GjMEcSvthYtD+xNcOBssU8MYRcxXrlK/2ZXA1Byg=
 github.com/yuin/goldmark v1.1.27/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 github.com/yuin/goldmark v1.2.1/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=
 go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.44.0 h1:KfYpVmrjI7JuToy5k8XV3nkapjWx48k4E4JOtVstzQI=

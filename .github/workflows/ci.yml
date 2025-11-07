@@ -95,7 +95,7 @@ jobs:
       run: make build
 
     - name: Upload binary artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v5
       with:
         name: manager-binary
         path: bin/manager

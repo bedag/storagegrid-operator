@@ -506,7 +506,7 @@ func (r *S3TenantReconciler) finalize(ctx context.Context, rctx *tenantReconcile
 
 	// if annotation is set to ignore unmanaged buckets only linkedBuckets are considered.
 	ignoreUnmanaged := false
-	if val, exists := rctx.S3Tenant.Annotations[AnnotationIgnoreUnmanagedBuckets]; exists && strings.ToLower(val) == "true" {
+	if val, exists := rctx.S3Tenant.Annotations[AnnotationIgnoreUnmanagedBuckets]; exists && strings.EqualFold(val, "true") {
 		ignoreUnmanaged = true
 	}
 

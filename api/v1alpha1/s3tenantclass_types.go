@@ -98,6 +98,11 @@ type S3TenantClassStatus struct {
 	S3VIPs []string `json:"s3VIPs,omitempty"`
 
 	// Track S3TenantClass conditions.
+	// Track s3Tenant conditions.
+	// Conditions is an array of conditions.
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 
 	// Track the last time the S3TenantClass was updated.

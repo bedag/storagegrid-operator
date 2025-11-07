@@ -27,7 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	s3v1alpha1 "git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1"
+	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
 )
 
 var _ = Describe("StorageGrid Controller", func() {

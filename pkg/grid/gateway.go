@@ -22,7 +22,7 @@ import (
 	"slices"
 	"strings"
 
-	models "github.com/yehlo/storagegrid-sdk-go/models"
+	models "github.com/bedag/storagegrid-sdk-go/models"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -175,7 +175,7 @@ func IsPathStyleAccessEnabled(gw *Gateway) bool {
 
 	// we can use GetS3Endpoints because this would not remove the wildcard.
 	for _, endpoint := range GetS3Endpoints(gw) {
-		// TODO: maybe need to adjust in the future, since this is a very basic check.
+		// maybe need to adjust in the future, since this is a very basic check.
 		if strings.HasPrefix(endpoint, "*") {
 			return false
 		}

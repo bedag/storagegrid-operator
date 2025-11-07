@@ -33,7 +33,8 @@ type S3TenantSpec struct {
 // S3TenantStatus defines the observed state of S3Tenant.
 type S3TenantStatus struct {
 	// keep track of linked buckets in this tenant.
-	// all buckets are within the same namespace as the tenant.
+	// These are only the buckets managed by the operator itself.
+	// Manually created buckets are not visible here
 	// +optional
 	LinkedBuckets []string `json:"linkedBuckets,omitempty"`
 
@@ -45,6 +46,10 @@ type S3TenantStatus struct {
 	CommonTenantStatus `json:",inline"`
 
 	// Track s3Tenant conditions.
+	// Conditions is an array of conditions.
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 

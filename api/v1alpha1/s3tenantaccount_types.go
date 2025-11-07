@@ -130,6 +130,11 @@ type S3TenantAccountStatus struct {
 	TenantDeletionPolicy *TenantDeletionPolicy `json:"tenantDeletionPolicy,omitempty"`
 
 	// Track s3Tenant conditions.
+	// Track s3Tenant conditions.
+	// Conditions is an array of conditions.
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 

@@ -9,7 +9,7 @@ plugins:
   manifests.sdk.operatorframework.io/v2: {}
   scorecard.sdk.operatorframework.io/v2: {}
 projectName: storagegrid-operator
-repo: git.mgmtbi.ch/cloud/storagegrid-operator
+repo: github.com/bedag/storagegrid-operator
 resources:
 - api:
     crdVersion: v1
@@ -18,7 +18,7 @@ resources:
   domain: bedag.ch
   group: s3
   kind: S3Tenant
-  path: git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1
+  path: github.com/bedag/storagegrid-operator/api/v1alpha1
   version: v1alpha1
   webhooks:
     defaulting: true
@@ -30,7 +30,7 @@ resources:
   domain: bedag.ch
   group: s3
   kind: StorageGrid
-  path: git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1
+  path: github.com/bedag/storagegrid-operator/api/v1alpha1
   version: v1alpha1
   webhooks:
     validation: true
@@ -42,7 +42,7 @@ resources:
   domain: bedag.ch
   group: s3
   kind: S3Bucket
-  path: git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1
+  path: github.com/bedag/storagegrid-operator/api/v1alpha1
   version: v1alpha1
   webhooks:
     validation: true
@@ -54,7 +54,7 @@ resources:
   domain: bedag.ch
   group: s3
   kind: S3BucketPolicy
-  path: git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1
+  path: github.com/bedag/storagegrid-operator/api/v1alpha1
   version: v1alpha1
   webhooks:
     validation: true
@@ -65,7 +65,7 @@ resources:
   domain: bedag.ch
   group: s3
   kind: S3TenantClass
-  path: git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1
+  path: github.com/bedag/storagegrid-operator/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
@@ -73,6 +73,6 @@ resources:
   domain: bedag.ch
   group: s3
   kind: S3TenantAccount
-  path: git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1
+  path: github.com/bedag/storagegrid-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

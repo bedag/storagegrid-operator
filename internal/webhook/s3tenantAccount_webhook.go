@@ -28,9 +28,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	controller "git.mgmtbi.ch/cloud/storagegrid-operator/internal/controller"
+	controller "github.com/bedag/storagegrid-operator/internal/controller"
 
-	s3v1alpha1 "git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1"
+	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
 )
 
 // log is for logging in this package.
@@ -53,9 +53,6 @@ func (r *S3TenantAccountValidator) SetupWebhookWithManager(mgr ctrl.Manager) err
 		Complete()
 }
 
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!.
-
-// TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
 // +kubebuilder:webhook:path=/validate-s3-bedag-ch-v1alpha1-s3tenantaccount,mutating=false,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=s3tenantaccounts,verbs=create;update;delete,versions=v1alpha1,name=vs3tenantaccount.kb.io,admissionReviewVersions=v1
@@ -67,7 +64,11 @@ type S3TenantAccountDefaulter struct{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type.
 func (r *S3TenantAccountDefaulter) Default(ctx context.Context, obj runtime.Object) error {
-	s3tenantAccount := obj.(*s3v1alpha1.S3TenantAccount)
+	s3tenantAccount, ok := obj.(*s3v1alpha1.S3TenantAccount)
+	if !ok {
+		return fmt.Errorf("object is not an S3TenantAccount")
+	}
+
 	s3tenantAccountlog.Info("running defaulter", "name", s3tenantAccount.Name)
 
 	// make sure to initially add the annotation to allow class change.
@@ -81,7 +82,11 @@ func (r *S3TenantAccountDefaulter) Default(ctx context.Context, obj runtime.Obje
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantAccountValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	s3tenantAccount := obj.(*s3v1alpha1.S3TenantAccount)
+	s3tenantAccount, ok := obj.(*s3v1alpha1.S3TenantAccount)
+	if !ok {
+		return nil, fmt.Errorf("object is not an S3TenantAccount")
+	}
+
 	s3tenantAccountlog.Info("validate create", "name", s3tenantAccount.Name)
 
 	// Check if the TenantAccountClass exists.
@@ -100,7 +105,11 @@ func (r *S3TenantAccountValidator) ValidateCreate(ctx context.Context, obj runti
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantAccountValidator) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (admission.Warnings, error) {
-	s3tenantAccount := newObj.(*s3v1alpha1.S3TenantAccount)
+	s3tenantAccount, ok := newObj.(*s3v1alpha1.S3TenantAccount)
+	if !ok {
+		return nil, fmt.Errorf("object is not an S3TenantAccount")
+	}
+
 	s3tenantAccountlog.Info("validate update", "name", s3tenantAccount.Name)
 
 	// Check if the TenantAccountClass exists.
@@ -114,13 +123,16 @@ func (r *S3TenantAccountValidator) ValidateUpdate(ctx context.Context, oldObj ru
 		return nil, fmt.Errorf("TenantClass %s does not exist", s3tenantAccount.Spec.S3TenantClassName)
 	}
 
-	// TODO(user): fill in your validation logic upon object update.
 	return nil, nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantAccountValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	s3tenantAccount := obj.(*s3v1alpha1.S3TenantAccount)
+	s3tenantAccount, ok := obj.(*s3v1alpha1.S3TenantAccount)
+	if !ok {
+		return nil, fmt.Errorf("object is not an S3TenantAccount")
+	}
+
 	s3tenantAccountlog.Info("validate delete", "name", s3tenantAccount.Name)
 
 	// deletion is blocked until the allow-delete annotation is added.

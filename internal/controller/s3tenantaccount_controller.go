@@ -34,9 +34,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	s3v1alpha1 "git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1"
-	"git.mgmtbi.ch/cloud/storagegrid-operator/pkg/grid"
-	"git.mgmtbi.ch/cloud/storagegrid-operator/pkg/kube"
+	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
+	"github.com/bedag/storagegrid-operator/pkg/grid"
+	"github.com/bedag/storagegrid-operator/pkg/kube"
 )
 
 // S3TenantAccountReconciler reconciles a S3TenantAccount object.
@@ -86,10 +86,6 @@ type conditionCheck struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to.
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by.
-// the S3TenantAccount object against the actual cluster state, and then.
-// perform operations to make the cluster state reflect the state specified by.
-// the user.
 //
 // For more details, check Reconcile and its Result here:.
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
@@ -754,7 +750,7 @@ func (r *S3TenantAccountReconciler) reconcileTenantName(ctx context.Context, rct
 	log := log.FromContext(ctx)
 
 	prefix := ""
-	if rctx.SG.Spec.TenantPrefix == "Namespace" {
+	if rctx.SG.Spec.TenantPrefix == s3v1alpha1.TenantPrefixNamespace {
 		// if the tenant prefix is set to namespace, we use the namespace of the binding S3Tenant.
 		if rctx.S3Tenant.Name == "" {
 			log.V(1).Info("S3Tenant is not set, cannot use namespace as prefix, leaving empty")
@@ -819,7 +815,6 @@ func (r *S3TenantAccountReconciler) reconcileTenantDescription(ctx context.Conte
 	description := map[string]string{
 		"kubernetes_namespace": namespace,
 		"user_description":     *rctx.Account.Spec.Description,
-		"owner":                *rctx.Account.Spec.Owner,
 	}
 
 	// add any additional metadata specified by the user.
@@ -872,7 +867,6 @@ func (r *S3TenantAccountReconciler) reconcileGridEndpoint(ctx context.Context, r
 func (r *S3TenantAccountReconciler) reconcileGridReadiness(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// TODO: this should change to using status.Conditions, status.Ready is the human readable version of the conditions.
 	if !rctx.SG.Status.Ready {
 		log.Error(fmt.Errorf("StorageGrid is not ready"), fmt.Sprintf("StorageGrid %s not ready", rctx.Account.Spec.StorageGridRef.Name))
 		return fmt.Errorf("StorageGrid %s is not ready", rctx.Account.Spec.StorageGridRef.Name)
@@ -1026,6 +1020,8 @@ func (r *S3TenantAccountReconciler) reconcileRegions(ctx context.Context, rctx *
 	}
 
 	// propagate regions from grid to tenant if changed.
+	slices.Sort(rctx.Account.Status.Regions)
+	slices.Sort(rctx.SG.Status.Regions)
 	if !slices.Equal(rctx.Account.Status.Regions, rctx.SG.Status.Regions) {
 		log.V(1).Info("Updating region list in tenant status")
 		rctx.Account.Status.Regions = rctx.SG.Status.Regions

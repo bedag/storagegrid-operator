@@ -23,7 +23,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	models "github.com/yehlo/storagegrid-sdk-go/models"
+	models "github.com/bedag/storagegrid-sdk-go/models"
 )
 
 type BucketUsage = models.BucketStats

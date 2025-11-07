@@ -31,9 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	s3v1alpha1 "git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1"
-	"git.mgmtbi.ch/cloud/storagegrid-operator/pkg/grid"
-	"git.mgmtbi.ch/cloud/storagegrid-operator/pkg/kube"
+	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
+	"github.com/bedag/storagegrid-operator/pkg/grid"
+	"github.com/bedag/storagegrid-operator/pkg/kube"
 )
 
 // S3TenantClassReconciler reconciles a S3TenantClass object.
@@ -65,10 +65,6 @@ const (
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to.
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by.
-// the S3TenantClass object against the actual cluster state, and then.
-// perform operations to make the cluster state reflect the state specified by.
-// the user.
 //
 // For more details, check Reconcile and its Result here:.
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.4/pkg/reconcile
@@ -302,7 +298,6 @@ func (r *S3TenantClassReconciler) reconcileFinalizerAndDlelete(ctx context.Conte
 func (r *S3TenantClassReconciler) reconcileGridReadiness(ctx context.Context, sg *s3v1alpha1.StorageGrid) error {
 	log := log.FromContext(ctx)
 
-	// TODO: this should change to using status.Conditions, status.Ready is the human readable version of the conditions.
 	if !sg.Status.Ready {
 		log.Error(fmt.Errorf("StorageGrid is not ready"), fmt.Sprintf("StorageGrid %s not ready", sg.Name))
 		return fmt.Errorf("grid %s is not operative", sg.Name)

@@ -31,10 +31,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	s3v1alpha1 "git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1"
-	"git.mgmtbi.ch/cloud/storagegrid-operator/pkg/grid"
-	"git.mgmtbi.ch/cloud/storagegrid-operator/pkg/kube"
-	"git.mgmtbi.ch/cloud/storagegrid-operator/pkg/s3"
+	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
+	"github.com/bedag/storagegrid-operator/pkg/grid"
+	"github.com/bedag/storagegrid-operator/pkg/kube"
+	"github.com/bedag/storagegrid-operator/pkg/s3"
 )
 
 // S3BucketReconciler reconciles a S3Bucket object.

@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 
-	s3v1alpha1 "git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1"
-	controller "git.mgmtbi.ch/cloud/storagegrid-operator/internal/controller"
+	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
+	controller "github.com/bedag/storagegrid-operator/internal/controller"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -51,15 +51,17 @@ func (r *S3TenantValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!.
-
 // +kubebuilder:webhook:path=/mutate-s3-bedag-ch-v1alpha1-s3tenant,mutating=true,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=s3tenants,verbs=create;update,versions=v1alpha1,name=ms3tenant.kb.io,admissionReviewVersions=v1
 
 type S3TenantDefaulter struct{}
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type.
 func (r *S3TenantDefaulter) Default(ctx context.Context, obj runtime.Object) error {
-	s3tenant := obj.(*s3v1alpha1.S3Tenant)
+	s3tenant, ok := obj.(*s3v1alpha1.S3Tenant)
+	if !ok {
+		return fmt.Errorf("object is not an S3Tenant")
+	}
+
 	s3tenantlog.Info("running defaulter", "name", s3tenant.Name)
 
 	// default tenantname if not set.
@@ -69,20 +71,21 @@ func (r *S3TenantDefaulter) Default(ctx context.Context, obj runtime.Object) err
 	}
 
 	return nil
-
-	// TODO(user): fill in your defaulting logic.
 }
 
-// TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
-// +kubebuilder:webhook:path=/validate-s3-bedag-ch-v1alpha1-s3tenant,mutating=false,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=s3tenants,verbs=create;update,versions=v1alpha1,name=vs3tenant.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-s3-bedag-ch-v1alpha1-s3tenant,mutating=false,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=s3tenants,verbs=create;update;delete,versions=v1alpha1,name=vs3tenant.kb.io,admissionReviewVersions=v1
 
 var _ webhook.CustomValidator = &S3TenantValidator{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	s3tenant := obj.(*s3v1alpha1.S3Tenant)
+	s3tenant, ok := obj.(*s3v1alpha1.S3Tenant)
+	if !ok {
+		return nil, fmt.Errorf("object is not an S3Tenant")
+	}
+
 	s3tenantlog.Info("validate create", "name", s3tenant.Name)
 
 	// Check if the TenantClass exists.
@@ -96,22 +99,27 @@ func (r *S3TenantValidator) ValidateCreate(ctx context.Context, obj runtime.Obje
 		return nil, fmt.Errorf("TenantClass %s does not exist", s3tenant.Spec.S3TenantClassName)
 	}
 
-	// TODO(user): fill in your validation logic upon object creation.
 	return nil, nil
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantValidator) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (admission.Warnings, error) {
-	s3tenant := newObj.(*s3v1alpha1.S3Tenant)
+	s3tenant, ok := newObj.(*s3v1alpha1.S3Tenant)
+	if !ok {
+		return nil, fmt.Errorf("object is not an S3Tenant")
+	}
 	s3tenantlog.Info("validate update", "name", s3tenant.Name)
 
-	// TODO(user): fill in your validation logic upon object update.
 	return nil, nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	s3tenant := obj.(*s3v1alpha1.S3Tenant)
+	s3tenant, ok := obj.(*s3v1alpha1.S3Tenant)
+	if !ok {
+		return nil, fmt.Errorf("object is not an S3Tenant")
+	}
+
 	s3tenantlog.Info("validate delete", "name", s3tenant.Name)
 
 	// deletion is blocked until the allow-delete annotation is added.

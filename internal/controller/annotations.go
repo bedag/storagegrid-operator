@@ -56,4 +56,10 @@ var (
 
 	// Annotation to drain a bucket, deleting all objects stored in it before deleting the bucket itself.
 	AnnotationDrainBucket = fmt.Sprintf("%s.%s/force-drain-bucket", BucketPrefix, Domain)
+
+	// Tenant annotation to ignore buckets on deletion
+	// this annotation only applied to buckets that are not managed by the operator itself.
+	// eg buckets created manually or by another operator.
+	// buckets will be orphaned and the account is left intact
+	AnnotationIgnoreUnmanagedBuckets = fmt.Sprintf("%s.%s/ignore-unmanaged-buckets", TenantPrefix, Domain)
 )

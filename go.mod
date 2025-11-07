@@ -1,6 +1,6 @@
-module git.mgmtbi.ch/cloud/storagegrid-operator
+module github.com/bedag/storagegrid-operator
 
-go 1.23.5
+go 1.25.3
 
 require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.60
@@ -33,6 +33,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.36.2
 	github.com/aws/aws-sdk-go-v2/config v1.29.7
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.77.1
+	github.com/bedag/storagegrid-sdk-go v0.1.1
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
@@ -74,7 +75,6 @@ require (
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
-	github.com/yehlo/storagegrid-sdk-go v0.5.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.44.0 // indirect
 	go.opentelemetry.io/otel v1.19.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.19.0 // indirect

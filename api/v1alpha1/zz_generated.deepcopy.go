@@ -54,11 +54,6 @@ func (in *CommonTenantSpec) DeepCopyInto(out *CommonTenantSpec) {
 		*out = new(string)
 		**out = **in
 	}
-	if in.Owner != nil {
-		in, out := &in.Owner, &out.Owner
-		*out = new(string)
-		**out = **in
-	}
 	if in.AdditionalTenantMetadata != nil {
 		in, out := &in.AdditionalTenantMetadata, &out.AdditionalTenantMetadata
 		*out = make(map[string]string, len(*in))

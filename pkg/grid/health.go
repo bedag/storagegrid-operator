@@ -23,7 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func IsOperative(ctx context.Context, gridClient *GridClient) (bool, error) {
+func IsOperative(ctx context.Context, gridClient *GridClient, maxUnavailable int) (bool, error) {
 	log := log.FromContext(ctx).WithValues("func", "IsOperative")
 	log.V(1).Info("Checking if grid is operative")
 
@@ -34,10 +34,10 @@ func IsOperative(ctx context.Context, gridClient *GridClient) (bool, error) {
 		return false, err
 	}
 
-	return health.Operative(), nil
+	return health.Operative(maxUnavailable), nil
 }
 
-func GetOperativeReason(ctx context.Context, gridClient *GridClient) ([]string, error) {
+func GetOperativeReason(ctx context.Context, gridClient *GridClient, maxUnavailableNodes int) ([]string, error) {
 	log := log.FromContext(ctx).WithValues("func", "GetHealthIssues")
 	log.V(1).Info("Fetching grid health issues")
 
@@ -69,7 +69,7 @@ func GetOperativeReason(ctx context.Context, gridClient *GridClient) ([]string, 
 		if health.Nodes.Unknown != nil {
 			notConnected += *health.Nodes.Unknown
 		}
-		if notConnected > 0 {
+		if notConnected > maxUnavailableNodes {
 			log.V(1).Info("Grid health issues found", "notConnected", notConnected)
 			returnedIssues = append(returnedIssues, fmt.Sprintf("Too many nodes not connected: %d", notConnected))
 		}

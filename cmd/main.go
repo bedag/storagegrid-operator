@@ -38,9 +38,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	s3v1alpha1 "git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1"
-	"git.mgmtbi.ch/cloud/storagegrid-operator/internal/controller"
-	s3webhook "git.mgmtbi.ch/cloud/storagegrid-operator/internal/webhook"
+	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
+	"github.com/bedag/storagegrid-operator/internal/controller"
+	s3webhook "github.com/bedag/storagegrid-operator/internal/webhook"
 	// +kubebuilder:scaffold:imports
 )
 

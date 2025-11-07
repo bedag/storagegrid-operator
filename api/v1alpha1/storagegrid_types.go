@@ -27,12 +27,19 @@ const (
 )
 
 type TenantDeletionPolicyType string
+type TenantPrefix string
 
 // TenantDeletionPolicyType defines the type of deletion policy for tenants.
 const (
 	TenantDeletionPolicyDelete           TenantDeletionPolicyType = "Delete"
 	TenantDeletionPolicyRetain           TenantDeletionPolicyType = "Retain"
 	TenantDeletionPolicyRetainThenDelete TenantDeletionPolicyType = "RetainThenDelete"
+)
+
+// TenantPrefix defines the type of prefixing for tenant names.
+const (
+	TenantPrefixDisabled  TenantPrefix = "Disabled"
+	TenantPrefixNamespace TenantPrefix = "Namespace"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!.
@@ -56,14 +63,22 @@ type StorageGridSpec struct {
 	// - "Namespace": Namespace is added as a prefix (e.g., "namespace-tenant")
 	// +kubebuilder:validation:Enum=Disabled;Namespace
 	// +kubebuilder:default="Disabled"
-	TenantPrefix string `json:"tenantPrefix,omitempty"`
+	TenantPrefix TenantPrefix `json:"tenantPrefix,omitempty"`
 
 	// DefaultDeletionPolicy specifies how associated resources (e.g., Tenants) should be handled.
 	// when the Tenant resource is deleted.
 	// A tenant will always be able to override this policy if specified in the Tenant resource.
+	// By default this is set to Retain with a retention duration of 7 days.
+	// The maximum retention duration is 30 days.
 	// +optional
 	// +kubebuilder:default={retentionDuration: "168h"}
 	DefaultTenantDeletionPolicy *TenantDeletionPolicy `json:"defaultTenantDeletionPolicy,omitempty"`
+
+	// Amount of nodes (default: 1) that can be unavailable before the StorageGrid is considered not ready.
+	// This is a safeguard to prevent operations when the StorageGrid is not fully available.
+	// +kubebuilder:default=1
+	// +optional
+	MaxUnavailableNodes int `json:"maxUnavailableNodes,omitempty"`
 }
 
 type TenantDeletionPolicy struct {
@@ -73,6 +88,7 @@ type TenantDeletionPolicy struct {
 	// Defaults to "168h" (7 days).
 	// +optional
 	// +kubebuilder:default="168h"
+	// +kubebuilder:validation:XValidation:rule="duration(self) <= duration('720h')",message="retentionDuration must not exceed 30 days"
 	RetentionDuration *metav1.Duration `json:"retentionDuration,omitempty"`
 
 	// Policy specifies the deletion policy for tenants.
@@ -112,6 +128,11 @@ type StorageGridStatus struct {
 	Ready bool `json:"ready,omitempty"`
 
 	// Track StorageGrid conditions.
+	// Track s3Tenant conditions.
+	// Conditions is an array of conditions.
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 

@@ -85,12 +85,17 @@ type S3BucketStatus struct {
 	LastAppliedPolicy string `json:"lastAppliedPolicy,omitempty"`
 
 	// Track s3Bucket conditions.
+	// Conditions is an array of conditions.
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 
 type BucketUsage struct {
 	// total objects stored in the S3 Bucket.
-	ObjectCount int `json:"objectCount,omitempty"`
+	// +default=0
+	ObjectCount int `json:"objectCount"`
 
 	// total resources used by the S3 Bucket.
 	Bytes *resource.Quantity `json:"Bytes,omitempty"`

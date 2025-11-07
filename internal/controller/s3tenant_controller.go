@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	s3v1alpha1 "git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1"
+	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
 )
 
 // S3TenantReconciler reconciles a S3Tenant object.
@@ -68,10 +68,6 @@ const (
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to.
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by.
-// the S3Tenant object against the actual cluster state, and then.
-// perform operations to make the cluster state reflect the state specified by.
-// the user.
 //
 // For more details, check Reconcile and its Result here:.
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.18.4/pkg/reconcile
@@ -153,17 +149,6 @@ func (r *S3TenantReconciler) doReconcile(ctx context.Context, rctx *tenantReconc
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "OwnerReferenceError", fmt.Sprintf("Failed to set owner reference: %s", err.Error()))
 	}
 
-	// examine DeletionTimestamp to determine if object is under deletion.
-	err = r.reconcileFinalizerAndDlelete(ctx, rctx)
-	if err != nil {
-		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "ReconcileFailed", fmt.Sprintf("Failed to reconcile delete or finalizer %s", err.Error()))
-		return err
-	}
-	if rctx.DoRequeue {
-		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "FinalizerReconcileSucceeded", "Finalizer and deletion timestamp reconciled successfully, requeuing")
-		return nil
-	}
-
 	// update the tenantAccountSpec if needed.
 	err = r.reconcileTenantAccountSpec(ctx, rctx)
 	if err != nil {
@@ -197,6 +182,19 @@ func (r *S3TenantReconciler) doReconcile(ctx context.Context, rctx *tenantReconc
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantAccountStatusSyncFailed", fmt.Sprintf("Failed to sync tenant account status: %s", err.Error()))
 	}
 	r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypePending, metav1.ConditionFalse, "TenantAccountReady", fmt.Sprintf("S3TenantAccount %s is ready", rctx.Account.Name))
+
+	// examine DeletionTimestamp to determine if object is under deletion.
+	// contrary to other resources we can only now safely handle deletion because we need to ensure that the status of the account is in sync
+	// before we can safely delete the tenant.
+	err = r.reconcileFinalizerAndDlelete(ctx, rctx)
+	if err != nil {
+		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "ReconcileFailed", fmt.Sprintf("Failed to reconcile delete or finalizer %s", err.Error()))
+		return err
+	}
+	if rctx.DoRequeue {
+		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "FinalizerReconcileSucceeded", "Finalizer and deletion timestamp reconciled successfully, requeuing")
+		return nil
+	}
 
 	// get all the buckets linked to this tenant.
 	err = r.reconcileLinkedBuckets(ctx, rctx)
@@ -506,9 +504,22 @@ func (r *S3TenantReconciler) finalize(ctx context.Context, rctx *tenantReconcile
 		log.Error(err, "Failed to update tenant usage")
 	}
 
-	// if tenant still has buckets, abort deletion.
-	if rctx.S3Tenant.Status.TenantUsage.BucketCount > 0 {
-		return fmt.Errorf("cannot delete tenant with buckets")
+	// if annotation is set to ignore unmanaged buckets only linkedBuckets are considered.
+	ignoreUnmanaged := false
+	if val, exists := rctx.S3Tenant.Annotations[AnnotationIgnoreUnmanagedBuckets]; exists && strings.ToLower(val) == "true" {
+		ignoreUnmanaged = true
+	}
+
+	if ignoreUnmanaged {
+		// if there are any managed buckets linked to this tenant, abort deletion.
+		if len(rctx.S3Tenant.Status.LinkedBuckets) > 0 {
+			return fmt.Errorf("cannot delete tenant with linked buckets: %v", rctx.S3Tenant.Status.LinkedBuckets)
+		}
+	} else {
+		// if tenant still has any buckets, abort deletion.
+		if rctx.S3Tenant.Status.TenantUsage.BucketCount > 0 {
+			return fmt.Errorf("cannot delete tenant with buckets")
+		}
 	}
 
 	// make sure the tenantref is removed from the account.

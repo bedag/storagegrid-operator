@@ -46,14 +46,6 @@ type CommonTenantSpec struct {
 	// +optional
 	Description *string `json:"description,omitempty"`
 
-	// Owner of the S3 Tenant.
-	// Specify the owning resource of the tenant (e.g., a user or a team).
-	// This will be added to the tenant description in the bakcned.
-	// There is no validation for the owner, so you can use any string.
-	// +optional
-	// +kubebuilder:default="unknown"
-	Owner *string `json:"owner,omitempty"`
-
 	// As there is no metadata field in the backend, you can use this to add <field>:<value> pairs to the description.
 	// This will always include the specified owner and description as default fields.
 	// +optional

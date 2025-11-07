@@ -17,8 +17,8 @@ limitations under the License.
 package grid
 
 import (
-	client "github.com/yehlo/storagegrid-sdk-go/client"
-	models "github.com/yehlo/storagegrid-sdk-go/models"
+	client "github.com/bedag/storagegrid-sdk-go/client"
+	models "github.com/bedag/storagegrid-sdk-go/models"
 )
 
 type GridClient = client.GridClient

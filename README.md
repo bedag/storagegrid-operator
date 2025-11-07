@@ -117,7 +117,7 @@ This operator is currently only provided as source. You can deploy it by cloning
 
 ```bash
 # Clone the repository
-git clone https://git.mgmtbi.ch/cloud/storagegrid-operator.git
+git clone https://github.com/bedag/storagegrid-operator.git
 cd storagegrid-operator
 
 # Deploy the operator

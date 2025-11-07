@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"strings"
 
-	s3v1alpha1 "git.mgmtbi.ch/cloud/storagegrid-operator/api/v1alpha1"
+	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -59,9 +59,7 @@ func (r *S3BucketValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// TODO(user): EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!.
-
-// TODO(user): change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
+// change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
 // +kubebuilder:webhook:path=/validate-s3-bedag-ch-v1alpha1-s3bucket,mutating=false,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=s3buckets,verbs=create;update,versions=v1alpha1,name=vs3bucket.kb.io,admissionReviewVersions=v1
@@ -70,7 +68,11 @@ var _ webhook.CustomValidator = &S3BucketValidator{}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3BucketValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	s3bucket := obj.(*s3v1alpha1.S3Bucket)
+	s3bucket, ok := obj.(*s3v1alpha1.S3Bucket)
+	if !ok {
+		return nil, fmt.Errorf("object is not an S3Bucket")
+	}
+
 	s3bucketlog.Info("validate create", "name", s3bucket.Name)
 
 	s3Teant, err := r.getTenant(ctx, s3bucket)
@@ -84,13 +86,16 @@ func (r *S3BucketValidator) ValidateCreate(ctx context.Context, obj runtime.Obje
 		return nil, fmt.Errorf("namespace %s is not allowed to create buckets in tenant %s", s3bucket.Namespace, s3Teant.Name)
 	}
 
-	// TODO(user): fill in your validation logic upon object creation.
 	return nil, nil
 }
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3BucketValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	s3bucket := newObj.(*s3v1alpha1.S3Bucket)
+	s3bucket, ok := newObj.(*s3v1alpha1.S3Bucket)
+	if !ok {
+		return nil, fmt.Errorf("object is not an S3Bucket")
+	}
+
 	s3bucketlog.Info("validate update", "name", s3bucket.Name)
 
 	s3Teant, err := r.getTenant(ctx, s3bucket)
@@ -104,16 +109,18 @@ func (r *S3BucketValidator) ValidateUpdate(ctx context.Context, oldObj, newObj r
 		return nil, fmt.Errorf("namespace %s is not allowed to create buckets in tenant %s", s3bucket.Namespace, s3Teant.Name)
 	}
 
-	// TODO(user): fill in your validation logic upon object update.
 	return nil, nil
 }
 
 // ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3BucketValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
-	s3bucket := obj.(*s3v1alpha1.S3Bucket)
+	s3bucket, ok := obj.(*s3v1alpha1.S3Bucket)
+	if !ok {
+		return nil, fmt.Errorf("object is not an S3Bucket")
+	}
+
 	s3bucketlog.Info("validate delete", "name", s3bucket.Name)
 
-	// TODO(user): fill in your validation logic upon object deletion.
 	return nil, nil
 }
 

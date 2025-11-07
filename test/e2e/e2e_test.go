@@ -24,7 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"git.mgmtbi.ch/cloud/storagegrid-operator/test/utils"
+	"github.com/bedag/storagegrid-operator/test/utils"
 )
 
 const namespace = "storagegrid-operator-system"

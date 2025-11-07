@@ -57,7 +57,7 @@ This operator revolves around the following Custom Resource Definitions (CRDs):
 ### StorageGrid
 Cluster-scoped resource representing a StorageGrid installation. Manages connection credentials and global configuration.
 
-Through this you can specify the endpoint aswell as defaults for tenants referring to this StorageGrid. 
+Through this you can specify the endpoint as well as defaults for tenants referring to this StorageGrid. 
 
 ### S3TenantClass
 Cluster-scoped resource defining S3 loadbalancer endpoint within your StorageGrid installation. Used by S3TenantAccounts to determine which endpoint to use.
@@ -85,7 +85,7 @@ This then is the `PersistentVolumeClaim` equivalent in our analogy. It is a name
 ### S3Bucket
 Namespace-scoped resource for managing S3 buckets within a tenant. This is a basic interface to create and manage S3 buckets for your tenants and might be deprecated in the future in favor of more generic S3 operators. 
 
-Currently it supports basic bucket CRUD operations aswell as defining a policy that gets applied to the bucket.
+Currently it supports basic bucket CRUD operations as well as defining a policy that gets applied to the bucket.
 
 ## Features
 
@@ -107,7 +107,7 @@ Currently it supports basic bucket CRUD operations aswell as defining a policy t
 
 ### Required network access
 
-The operator needs network access to the StorageGrid management endpoint aswell as the S3 loadbalancer endpoints. Make sure that the cluster where the operator is running has access to these endpoints.
+The operator needs network access to the StorageGrid management endpoint as well as the S3 loadbalancer endpoints. Make sure that the cluster where the operator is running has access to these endpoints.
 
 You can skip out on the S3 loadbalancer endpoints if you don't plan on using `spec.bucketPolicyJson`on your `S3Bucket` resource, but the management endpoint is required for all operations.
 
@@ -117,7 +117,7 @@ This operator is currently only provided as source. You can deploy it by cloning
 
 ```bash
 # Clone the repository
-git clone https://github.com/bedag/storagegrid-operator.git
+git clone https://git.mgmtbi.ch/cloud/storagegrid-operator.git
 cd storagegrid-operator
 
 # Deploy the operator
@@ -190,12 +190,12 @@ spec:
     name: my-storagegrid
   s3TenantClassName: default # or omit as it defaults to "default"
   description: "My application tenant"
-  owner: "team-alpha"
   quota:
     limit: "100Gi"
   additionalTenantMetadata:
     project: "my-project"
     environment: "production"
+    owner: "team-alpha"
 ```
 
 #### Available Annotations
@@ -209,7 +209,7 @@ metadata:
     # Force deletion and recreation of the tenant on next reconciliation
     tenant.s3.bedag.ch/recreate-tenant: "true" 
 
-    # As the change of the tenant class can lead to to unexpected lose of access, this annotation must be set to allow the change of the tenant class.
+    # As the change of the tenant class can lead to unexpected lose of access, this annotation must be set to allow the change of the tenant class.
     tenant.s3.bedag.ch/allow-tenant-class-name-change: "true" 
 
     # The tenant is protected from accidental deletion, setting this annotation to "true" will allow deletion of the tenant.
@@ -218,7 +218,7 @@ metadata:
 
 #### Secrets Created
 
-When the `S3Tenant` is created, the operator will create multiple `Secrets` in the same namespace containing the S3 access credentials aswell as the admin for the grid URL of the tenant. The secrets will be named `s3-tenant-<tenant-name>-s3-admin-keypair` and `s3-tenant-<tenant-name>-admin-credentials`.
+When the `S3Tenant` is created, the operator will create multiple `Secrets` in the same namespace containing the S3 access credentials as well as the admin for the grid URL of the tenant. The secrets will be named `s3-tenant-<tenant-name>-s3-admin-keypair` and `s3-tenant-<tenant-name>-admin-credentials`.
 
 These secrets can be used by your applications for administrative access to the tenant or for S3 access.
 
@@ -266,7 +266,6 @@ The operator automatically enriches tenant descriptions with metadata:
 
 - `kubernetes_namespace`: The namespace of the S3Tenant
 - `user_description`: Custom description field
-- `owner`: Tenant owner information -> will be deprecated in favor of `additionalTenantMetadata`
 - Custom fields from `additionalTenantMetadata`
 
 ### Webhooks

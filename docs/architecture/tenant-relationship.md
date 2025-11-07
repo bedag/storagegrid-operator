@@ -80,10 +80,10 @@ spec:
     name: production-sg
   s3TenantClassName: standard  # Class defining S3 endpoints
   description: "My application tenant"
-  owner: "team-alpha"
   quota:
     limit: "100Gi"
   additionalTenantMetadata:
+    owner: "team-alpha"
     project: "my-project"
     environment: "production"
 ```

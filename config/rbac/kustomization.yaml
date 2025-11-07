@@ -32,4 +32,4 @@ resources:
 - storagegrid_viewer_role.yaml
 - s3tenant_editor_role.yaml
 - s3tenant_viewer_role.yaml
-
+- operator_admin_role.yaml

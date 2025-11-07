@@ -28,117 +28,9 @@ rules:
   - s3.bedag.ch
   resources:
   - s3buckets
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - s3.bedag.ch
-  resources:
-  - s3buckets/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - s3.bedag.ch
-  resources:
-  - s3buckets/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - s3.bedag.ch
-  resources:
   - s3tenantaccounts
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - s3.bedag.ch
-  resources:
-  - s3tenantaccounts/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - s3.bedag.ch
-  resources:
-  - s3tenantaccounts/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - s3.bedag.ch
-  resources:
-  - s3tenantaccountss
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - s3.bedag.ch
-  resources:
   - s3tenantclasses
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - s3.bedag.ch
-  resources:
-  - s3tenantclasses/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - s3.bedag.ch
-  resources:
-  - s3tenantclasses/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - s3.bedag.ch
-  resources:
   - s3tenants
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - s3.bedag.ch
-  resources:
-  - s3tenants/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - s3.bedag.ch
-  resources:
-  - s3tenants/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - s3.bedag.ch
-  resources:
   - storagegrids
   verbs:
   - create
@@ -151,14 +43,30 @@ rules:
 - apiGroups:
   - s3.bedag.ch
   resources:
+  - s3buckets/finalizers
+  - s3tenantaccounts/finalizers
+  - s3tenantclasses/finalizers
+  - s3tenants/finalizers
   - storagegrids/finalizers
   verbs:
   - update
 - apiGroups:
   - s3.bedag.ch
   resources:
+  - s3buckets/status
+  - s3tenantaccounts/status
+  - s3tenantclasses/status
+  - s3tenants/status
   - storagegrids/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - s3.bedag.ch
+  resources:
+  - s3tenantaccountss
+  verbs:
+  - get
+  - list
+  - watch

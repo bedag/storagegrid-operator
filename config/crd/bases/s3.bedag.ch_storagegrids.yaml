@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.15.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: storagegrids.s3.bedag.ch
 spec:
   group: s3.bedag.ch
@@ -65,6 +65,8 @@ spec:
                   DefaultDeletionPolicy specifies how associated resources (e.g., Tenants) should be handled.
                   when the Tenant resource is deleted.
                   A tenant will always be able to override this policy if specified in the Tenant resource.
+                  By default this is set to Retain with a retention duration of 7 days.
+                  The maximum retention duration is 30 days.
                 properties:
                   policy:
                     default: Retain
@@ -87,10 +89,19 @@ spec:
                       set this to 0 to disable retention.
                       Defaults to "168h" (7 days).
                     type: string
+                    x-kubernetes-validations:
+                    - message: retentionDuration must not exceed 30 days
+                      rule: duration(self) <= duration('720h')
                 type: object
               endpoint:
                 description: The endpoint of the StorageGrid.
                 type: string
+              maxUnavailableNodes:
+                default: 1
+                description: |-
+                  Amount of nodes (default: 1) that can be unavailable before the StorageGrid is considered not ready.
+                  This is a safeguard to prevent operations when the StorageGrid is not fully available.
+                type: integer
               secretRef:
                 description: The secret containing the credentials for the StorageGrid.
                 properties:
@@ -106,7 +117,6 @@ spec:
                       the event) or if no container name is specified "spec.containers[2]" (container with
                       index 2 in this pod). This syntax is chosen only to have some well-defined way of
                       referencing a part of an object.
-                      TODO: this design is not final and this field is subject to change in the future.
                     type: string
                   kind:
                     description: |-
@@ -153,18 +163,13 @@ spec:
             description: StorageGridStatus defines the observed state of StorageGrid.
             properties:
               conditions:
-                description: Track StorageGrid conditions.
+                description: |-
+                  Track StorageGrid conditions.
+                  Track s3Tenant conditions.
+                  Conditions is an array of conditions.
                 items:
-                  description: "Condition contains details for one aspect of the current
-                    state of this API Resource.\n---\nThis struct is intended for
-                    direct use as an array at the field path .status.conditions.  For
-                    example,\n\n\n\ttype FooStatus struct{\n\t    // Represents the
-                    observations of a foo's current state.\n\t    // Known .status.conditions.type
-                    are: \"Available\", \"Progressing\", and \"Degraded\"\n\t    //
-                    +patchMergeKey=type\n\t    // +patchStrategy=merge\n\t    // +listType=map\n\t
-                    \   // +listMapKey=type\n\t    Conditions []metav1.Condition `json:\"conditions,omitempty\"
-                    patchStrategy:\"merge\" patchMergeKey:\"type\" protobuf:\"bytes,1,rep,name=conditions\"`\n\n\n\t
-                    \   // other fields\n\t}"
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
                   properties:
                     lastTransitionTime:
                       description: |-
@@ -205,12 +210,7 @@ spec:
                       - Unknown
                       type: string
                     type:
-                      description: |-
-                        type of condition in CamelCase or in foo.example.com/CamelCase.
-                        ---
-                        Many .condition.type values are consistent across resources like Available, but because arbitrary conditions can be
-                        useful (see .node.status.conditions), the ability to deconflict is important.
-                        The regex it matches is (dns1123SubdomainFmt/)?(qualifiedNameFmt)
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
                       maxLength: 316
                       pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                       type: string
@@ -222,6 +222,9 @@ spec:
                   - type
                   type: object
                 type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
               defaultBucketRegion:
                 description: DefaultRegion for buckets created in the StorageGrid.
                 type: string
@@ -250,6 +253,9 @@ spec:
                       set this to 0 to disable retention.
                       Defaults to "168h" (7 days).
                     type: string
+                    x-kubernetes-validations:
+                    - message: retentionDuration must not exceed 30 days
+                      rule: duration(self) <= duration('720h')
                 type: object
               ready:
                 default: false

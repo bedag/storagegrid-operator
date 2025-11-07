@@ -86,6 +86,7 @@ webhooks:
     operations:
     - CREATE
     - UPDATE
+    - DELETE
     resources:
     - s3tenants
   sideEffects: None

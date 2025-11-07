@@ -11,6 +11,5 @@ spec:
   name: jle-test
   defaultBucketRegion: ch-bern-1
   description: Test S3 Tenant
-  owner: unknown
   s3TenantClassName: itpfe
   storageQuota: 6Gi

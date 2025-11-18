@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: storagegrid-credentials
+  namespace: storagegrid-operator-system
+type: Opaque
+stringData:
+  username: "root"
+  password: "changeme"
+---
+apiVersion: s3.bedag.ch/v1alpha1
+kind: StorageGrid
+metadata:
+  labels:
+    app.kubernetes.io/name: storagegrid-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: storagegrid-sample
+spec:
+  secretRef:
+    name: storagegrid-credentials
+    namespace: storagegrid-operator-system
+  endpoint: "https://storagegrid.example.com"
+  s3ApiEndpoint:
+    pathStyleAccess: true
+    url: https://s3.storagegrid.example.com:10443

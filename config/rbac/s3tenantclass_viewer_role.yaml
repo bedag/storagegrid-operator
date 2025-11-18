@@ -1,0 +1,23 @@
+# permissions for end users to view s3tenantclasses.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: storagegrid-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: s3tenantclass-viewer-role
+rules:
+- apiGroups:
+  - s3.bedag.ch
+  resources:
+  - s3tenantclasses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - s3.bedag.ch
+  resources:
+  - s3tenantclasses/status
+  verbs:
+  - get

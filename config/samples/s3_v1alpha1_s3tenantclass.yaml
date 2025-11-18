@@ -1,0 +1,12 @@
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3TenantClass
+metadata:
+  labels:
+    app.kubernetes.io/name: storagegrid-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: default
+spec:
+  storageGridRef:
+    name: storagegrid-sample
+  backingID: "gateway-endpoint-id"
+  enforce: true

@@ -1,0 +1,13 @@
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3Bucket
+metadata:
+  labels:
+    app.kubernetes.io/name: storagegrid-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: s3bucket-sample
+spec:
+  s3TenantRef:
+    name: s3tenant-sample
+    namespace: default
+  region: us-east-1
+  

@@ -1,0 +1,36 @@
+# Ignore everything by default
+*
+
+# Include only what we need
+!go.mod
+!go.sum
+!cmd/
+!api/
+!internal/
+!pkg/
+!hack/
+!Makefile
+
+# Exclude build artifacts
+bin/
+dist/
+cover.out
+
+# Exclude git and IDE files
+.git/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Exclude test files
+*_test.go
+test/
+
+# Exclude CI/CD files
+.github/
+
+# Exclude docs
+docs/
+README.md
+LICENSE

@@ -1,0 +1,15 @@
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3TenantAccount
+metadata:
+  labels:
+    app.kubernetes.io/name: storagegrid-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: s3tenantaccount-sample
+spec:
+  storageGridRef:
+    name: storagegrid-sample
+  name: sample-tenant-account
+  defaultBucketRegion: us-east-1
+  description: Sample S3 Tenant Account
+  s3TenantClassName: default
+  storageQuota: 100Gi

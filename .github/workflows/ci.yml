@@ -74,23 +74,6 @@ jobs:
     - name: Run unit tests
       run: make test
 
-    - name: Run tests with coverage
-      run: |
-        go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
-    
-    - name: Generate coverage report
-      run: |
-        go tool cover -html=coverage.out -o coverage.html
-        go tool cover -func=coverage.out
-    
-    - name: Upload coverage reports as artifacts
-      uses: actions/upload-artifact@v5
-      with:
-        name: coverage-reports
-        path: |
-          coverage.out
-          coverage.html
-
   docker-build:
     name: Docker Build and Push
     runs-on: ubuntu-latest

@@ -90,8 +90,29 @@ func (r *StorageGridReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// use conditions to derive the readiness state.
 	r.deriveReadiness(ctx, rctx.SG)
 
-	// in any other case we just update the status.
-	if updateErr := r.Status().Update(ctx, sg); updateErr != nil {
+	// update the annotations if they were updated.
+	// needs to be done before the status is updated because we lose the annotations otherwise.
+	if rctx.ObjectUpdated {
+		// creating a deep copy of the status to avoid modifying the original object.
+		statusCopy := rctx.SG.DeepCopy()
+
+		log.V(1).Info("Annotations were updated, updating the object")
+		if updateErr := r.Update(ctx, rctx.SG); updateErr != nil {
+			log.Error(updateErr, "Failed to update annotations")
+			if err != nil {
+				err = fmt.Errorf("reconciliation failed: %w, failed to update annotations: %w", err, updateErr)
+			} else {
+				err = fmt.Errorf("failed to update annotations: %w", updateErr)
+			}
+		} else {
+			log.V(1).Info("Annotations updated successfully")
+		}
+
+		rctx.SG.Status = statusCopy.Status // restore the status from the copy
+	}
+
+	// Due to condition tracking status always needs to be updated.
+	if updateErr := r.Status().Update(ctx, rctx.SG); updateErr != nil {
 		log.Error(updateErr, "Failed to update status, requeuing")
 		if err == nil {
 			// no error occurred during reconciliation, but status update failed.

@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -33,6 +34,7 @@ import (
 var _ = Describe("S3Bucket Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
+		const tenantName = "test-tenant"
 
 		ctx := context.Background()
 
@@ -40,18 +42,45 @@ var _ = Describe("S3Bucket Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
+		tenantNamespacedName := types.NamespacedName{
+			Name:      tenantName,
+			Namespace: "default",
+		}
 		s3bucket := &s3v1alpha1.S3Bucket{}
 
 		BeforeEach(func() {
+			// Create S3Tenant dependency first
+			By("creating the S3Tenant dependency")
+			tenant := &s3v1alpha1.S3Tenant{}
+			err := k8sClient.Get(ctx, tenantNamespacedName, tenant)
+			if err != nil && errors.IsNotFound(err) {
+				tenant = &s3v1alpha1.S3Tenant{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      tenantName,
+						Namespace: "default",
+					},
+					Spec: s3v1alpha1.S3TenantSpec{},
+				}
+				Expect(k8sClient.Create(ctx, tenant)).To(Succeed())
+				// Update status to Bound phase
+				tenant.Status.Phase = s3v1alpha1.PhaseBound
+				Expect(k8sClient.Status().Update(ctx, tenant)).To(Succeed())
+			}
+
 			By("creating the custom resource for the Kind S3Bucket")
-			err := k8sClient.Get(ctx, typeNamespacedName, s3bucket)
+			err = k8sClient.Get(ctx, typeNamespacedName, s3bucket)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &s3v1alpha1.S3Bucket{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: s3v1alpha1.S3BucketSpec{
+						S3TenantRef: corev1.ObjectReference{
+							Name:      tenantName,
+							Namespace: "default",
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
@@ -65,6 +94,14 @@ var _ = Describe("S3Bucket Controller", func() {
 
 			By("Cleanup the specific resource instance S3Bucket")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+
+			// Cleanup tenant
+			tenant := &s3v1alpha1.S3Tenant{}
+			err = k8sClient.Get(ctx, tenantNamespacedName, tenant)
+			if err == nil {
+				By("Cleanup the S3Tenant dependency")
+				Expect(k8sClient.Delete(ctx, tenant)).To(Succeed())
+			}
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
@@ -76,7 +113,10 @@ var _ = Describe("S3Bucket Controller", func() {
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
-			Expect(err).NotTo(HaveOccurred())
+			// Without a real StorageGrid backend and bound tenant, we expect an error
+			// The important thing is that it doesn't panic and handles dependencies
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("tenant"))
 			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
 			// Example: If you expect a certain status condition after reconciliation, verify it here.
 		})

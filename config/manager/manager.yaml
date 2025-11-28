@@ -59,11 +59,11 @@ spec:
         #   type: RuntimeDefault
       containers:
       - command:
-        - /storagegrid-operator-controller
+        - /manager
         args:
           - --leader-elect
           - --health-probe-bind-address=:8081
-        image: controller:latest
+        image: bedag/storagegrid-operator:latest
         env:
         - name: OPERATOR_NAMESPACE
           valueFrom:

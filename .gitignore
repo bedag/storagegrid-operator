@@ -33,3 +33,4 @@ crash.*.log
 tmp/
 tests/crds/*.yml
 .tilt-tmp
+__debug*

@@ -1,5 +1,19 @@
 # Image URL to use all building/pushing image targets
-IMG ?= bedag/storagegrid-operator:latest
+IMAGE_REGISTRY ?= bedag/storagegrid-operator
+IMG ?= $(IMAGE_REGISTRY):latest
+
+# Git-based versioning for Docker images
+GIT_COMMIT := $(shell git rev-parse --short HEAD)
+GIT_BRANCH := $(shell git rev-parse --abbrev-ref HEAD | sed 's/\//-/g')
+GIT_TAG := $(shell git describe --tags --exact-match 2>/dev/null)
+
+# Generate all image tags
+IMAGE_TAGS := $(IMAGE_REGISTRY):latest $(IMAGE_REGISTRY):$(GIT_COMMIT)
+ifneq ($(GIT_TAG),)
+	IMAGE_TAGS += $(IMAGE_REGISTRY):$(GIT_TAG)
+else ifneq ($(GIT_BRANCH),)
+	IMAGE_TAGS += $(IMAGE_REGISTRY):$(GIT_BRANCH)
+endif
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -116,12 +130,24 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
-docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
+docker-build: ## Build docker image with all tags (latest, commit SHA, branch/tag).
+	@echo "Building images with tags: $(IMAGE_TAGS)"
+	@tag_args=""; \
+	for tag in $(IMAGE_TAGS); do \
+		tag_args="$$tag_args -t $$tag"; \
+	done; \
+	$(CONTAINER_TOOL) build $$tag_args .
+
+.PHONY: docker-build-and-push
+docker-build-and-push: docker-build docker-push ## Build and push docker image with all tags.
 
 .PHONY: docker-push
-docker-push: ## Push docker image with the manager.
-	$(CONTAINER_TOOL) push ${IMG}
+docker-push: ## Push docker image with all tags (latest, commit SHA, branch/tag).
+	@echo "Pushing images with tags: $(IMAGE_TAGS)"
+	@for tag in $(IMAGE_TAGS); do \
+		echo "Pushing $$tag..."; \
+		$(CONTAINER_TOOL) push $$tag || exit 1; \
+	done
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:

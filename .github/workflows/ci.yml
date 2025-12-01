@@ -20,7 +20,7 @@ on:
 env:
   # Common versions
   GOLANGCI_VERSION: 'v2.4.0'
-  IMAGE_REGISTRY: yehlo/storagegrid-operator # todo: switch to bedag once access is granted
+  IMAGE_REGISTRY: bedag/storagegrid-operator 
 
 jobs:
   lint:

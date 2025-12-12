@@ -30,14 +30,6 @@ resources:
 
 # Uncomment the patches line if you enable Metrics, and/or are using webhooks and cert-manager
 patches:
-# [BEDAG] bedag specific patches to make the operator run in our env
-# - path: bedag_patches/manager_image.yaml
-#   target:
-#     kind: Deployment
-# - path: bedag_patches/security_context.yaml
-#   target:
-#     kind: Deployment
-
 
 # [METRICS] The following patch will enable the metrics endpoint using HTTPS and the port :8443.
 # More info: https://book.kubebuilder.io/reference/metrics

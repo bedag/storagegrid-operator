@@ -4,7 +4,7 @@ go 1.25.3
 
 require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.18.21
-	github.com/onsi/ginkgo/v2 v2.27.2
+	github.com/onsi/ginkgo/v2 v2.27.3
 	github.com/onsi/gomega v1.38.2
 	k8s.io/apimachinery v0.34.1
 	k8s.io/client-go v0.34.1

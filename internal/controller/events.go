@@ -74,8 +74,9 @@ const (
 // These events reflect gateway endpoint management and tenant allowlist operations.
 const (
 	// Gateway Management Events
-	EventGatewayFetchFailed     = "GatewayFetchFailed"
-	EventGatewayStatusRefreshed = "GatewayStatusRefreshed"
+	EventGatewayFetchFailed       = "GatewayFetchFailed"
+	EventGatewayStatusRefreshed   = "GatewayStatusRefreshed"
+	EventEndpointNotInCertificate = "EndpointNotInCertificate"
 
 	// Tenant Allowlist Management Events
 	EventTenantAddedToAllowlist     = "TenantAddedToAllowlist"

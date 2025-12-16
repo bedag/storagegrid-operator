@@ -78,8 +78,8 @@ type S3BucketStatus struct {
 	// +optional
 	S3AdminKeysSecretRef *corev1.LocalObjectReference `json:"s3AdminKeysSecretRef"`
 
-	// s3 api endpoint for the bucket.
-	S3ApiEndpoint *S3ApiEndpoint `json:"s3ApiEndpoint,omitempty"`
+	// s3 endpoint configuration for the bucket.
+	S3EndpointConfig *S3EndpointConfig `json:"s3EndpointConfig,omitempty"`
 
 	// track last successfully applied policy.
 	LastAppliedPolicy string `json:"lastAppliedPolicy,omitempty"`
@@ -98,7 +98,7 @@ type BucketUsage struct {
 	ObjectCount int `json:"objectCount"`
 
 	// total resources used by the S3 Bucket.
-	Bytes *resource.Quantity `json:"Bytes,omitempty"`
+	Bytes *resource.Quantity `json:"bytes,omitempty"`
 }
 
 // +kubebuilder:object:root=true

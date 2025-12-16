@@ -53,6 +53,30 @@ type S3TenantClassSpec struct {
 	// +kubebuilder:default="60m"
 	// +optional
 	RefreshInterval *metav1.Duration `json:"refreshInterval,omitempty"`
+
+	// PreferredEndpoints controls which gateway endpoints are exposed to tenants.
+	// If unset, all discovered endpoints from the gateway certificate are exposed
+	// with the first as default. If set, only specified endpoints are exposed.
+	// +optional
+	PreferredEndpoints *PreferredEndpointsSpec `json:"preferredEndpoints,omitempty"`
+}
+
+// PreferredEndpointsSpec defines which endpoints from the StorageGrid gateway
+// should be exposed to tenants. If unset, all discovered endpoints are exposed.
+type PreferredEndpointsSpec struct {
+	// DefaultEndpoint is the primary S3 endpoint to expose. This endpoint will
+	// be listed first and marked as the default. It will be included in the
+	// endpoint list even if not found in the gateway certificate SANs (with a warning).
+	// +kubebuilder:validation:MinLength=1
+	DefaultEndpoint string `json:"defaultEndpoint"`
+
+	// AdditionalEndpoints are extra S3 endpoints to expose alongside the default.
+	// If unset (nil), all discovered endpoints from the gateway certificate are included.
+	// If set to an empty list ([]), only the DefaultEndpoint is exposed.
+	// Endpoints not found in the gateway certificate SANs will be kept in status but
+	// a warning event will be emitted (admin knows best).
+	// +optional
+	AdditionalEndpoints []string `json:"additionalEndpoints,omitempty"`
 }
 
 // S3TenantClassStatus defines the observed state of S3TenantClass.
@@ -91,11 +115,10 @@ type S3TenantClassStatus struct {
 	// needed to update the tenantclass when a tenant is created or deleted.
 	S3TenantIDs []string `json:"tenants,omitempty"`
 
-	// S3 Endpoint.
-	S3Endpoints []string `json:"s3Endpoints,omitempty"`
-
-	// S3 VIP.
-	S3VIPs []string `json:"s3VIPs,omitempty"`
+	// S3 endpoint configuration for tenant access.
+	// Contains the list of addresses and default address configuration.
+	// +optional
+	S3EndpointConfig *S3EndpointConfig `json:"s3EndpointConfig,omitempty"`
 
 	// Track S3TenantClass conditions.
 	// Track s3Tenant conditions.
@@ -113,6 +136,7 @@ type S3TenantClassStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="StorageGrid",type="string",JSONPath=".spec.storageGridRef.name",description="The StorageGrid this tenant account belongs to"
 // +kubebuilder:printcolumn:name="DisplayName",type="string",JSONPath=".status.displayName",description="Displayname within StorageGrid"
+// +kubebuilder:printcolumn:name="Default Address",type="string",JSONPath=".status.s3EndpointConfig.defaultAddress",description="Default S3 address"
 // +kubebuilder:printcolumn:name="Enforce",type="string",JSONPath=".spec.enforce",description="Where it will be enforced, so only tenants in this class can use the backing gateway"
 // +kubebuilder:printcolumn:JSONPath=`.metadata.creationTimestamp`,name=`AGE`,type=date
 // +kubebuilder:resource:scope=Cluster,shortName={"s3class"}

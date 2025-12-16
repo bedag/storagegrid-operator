@@ -149,7 +149,8 @@ type S3TenantAccountStatus struct {
 // +kubebuilder:printcolumn:name="TenantBackendName",type="string",JSONPath=".status.observedTenantBackendName",description="The name of the tenant in the backend"
 // +kubebuilder:printcolumn:name="StorageGrid",type="string",JSONPath=".spec.storageGridRef.name",description="The StorageGrid this tenant account belongs to"
 // +kubebuilder:printcolumn:name="Capacity",type="string",JSONPath=".status.quota.limit",description="Configured capacity of the tenant"
-// +kubebuilder:printcolumn:name="TenantClass",type="string",JSONPath=".status.s3ApiEndpoint.s3TenantClassName",description="The class of the tenant account"
+// +kubebuilder:printcolumn:name="Default Address",type="string",JSONPath=".status.s3EndpointConfig.defaultAddress",description="Default S3 address"
+// +kubebuilder:printcolumn:name="TenantClass",type="string",JSONPath=".status.s3EndpointConfig.s3TenantClassName",description="The class of the tenant account"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Current phase of the tenant account"
 // +kubebuilder:printcolumn:JSONPath=`.metadata.creationTimestamp`,name=`AGE`,type=date
 // +kubebuilder:resource:scope=Cluster,shortName={"s3accs","s3acc"}

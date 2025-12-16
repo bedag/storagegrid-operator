@@ -33,7 +33,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
 	"github.com/bedag/storagegrid-operator/pkg/grid"
@@ -1293,22 +1296,27 @@ func (r *S3TenantAccountReconciler) evaluateQuotaConditions(ctx context.Context,
 func (r *S3TenantAccountReconciler) reconcileS3TenantClass(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
+	// Initialize S3EndpointConfig if nil
+	if rctx.Account.Status.S3EndpointConfig == nil {
+		rctx.Account.Status.S3EndpointConfig = &s3v1alpha1.S3EndpointConfig{}
+	}
+
 	// check if the S3TenantClass is set, if not set it to the default value.
-	if rctx.Account.Status.S3ApiEndpoint.S3TenantClassName == "" {
+	if rctx.Account.Status.S3EndpointConfig.S3TenantClassName == "" {
 		// if unset we can just update the value.
 		if rctx.Account.Spec.S3TenantClassName == "" {
 			// if the S3TenantClassName is not set in the spec, we can use the default class.
 			log.V(1).Info("S3TenantClassName is not set, using default class")
-			rctx.Account.Status.S3ApiEndpoint.S3TenantClassName = "default"
+			rctx.Account.Status.S3EndpointConfig.S3TenantClassName = "default"
 		} else {
 			// if the S3TenantClassName is set in the spec, we can use that value.
-			log.V(1).Info(fmt.Sprintf("S3TenantClassName is set to %s", rctx.Account.Status.S3ApiEndpoint.S3TenantClassName))
-			rctx.Account.Status.S3ApiEndpoint.S3TenantClassName = rctx.Account.Spec.S3TenantClassName
+			log.V(1).Info(fmt.Sprintf("S3TenantClassName is set to %s", rctx.Account.Status.S3EndpointConfig.S3TenantClassName))
+			rctx.Account.Status.S3EndpointConfig.S3TenantClassName = rctx.Account.Spec.S3TenantClassName
 		}
 	}
 
 	// if the was changed we need to be a bit more careful.
-	if rctx.Account.Status.S3ApiEndpoint.S3TenantClassName != rctx.Account.Spec.S3TenantClassName {
+	if rctx.Account.Status.S3EndpointConfig.S3TenantClassName != rctx.Account.Spec.S3TenantClassName {
 		// first verify that the annotation is set to allow changing the tenant class name.
 		if rctx.Account.Annotations == nil {
 			return fmt.Errorf("S3TenantClassName is set to %s, but annotation %s to allow change is not set, not updating", rctx.Account.Spec.S3TenantClassName, AnnotationAllowTenantClassNameChange)
@@ -1322,8 +1330,8 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantClass(ctx context.Context, 
 		}
 
 		// if the annotation is set accordingly we can update the tenant class name.
-		log.V(1).Info(fmt.Sprintf("S3TenantClassName was updated from %s to %s", rctx.Account.Status.S3ApiEndpoint.S3TenantClassName, rctx.Account.Spec.S3TenantClassName))
-		rctx.Account.Status.S3ApiEndpoint.S3TenantClassName = rctx.Account.Spec.S3TenantClassName
+		log.V(1).Info(fmt.Sprintf("S3TenantClassName was updated from %s to %s", rctx.Account.Status.S3EndpointConfig.S3TenantClassName, rctx.Account.Spec.S3TenantClassName))
+		rctx.Account.Status.S3EndpointConfig.S3TenantClassName = rctx.Account.Spec.S3TenantClassName
 
 		// reprotect the S3TenantClassName by setting the annotation.
 		log.V(1).Info("Removing annotation to protect S3TenantClassName from further changes")
@@ -1331,20 +1339,16 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantClass(ctx context.Context, 
 		rctx.ObjectUpdated = true
 	}
 
-	// get s3 api endpoint from the tenantclass.
+	// get s3 endpoint config from the tenantclass.
 	accountClass := &s3v1alpha1.S3TenantClass{}
-	if err := r.Get(ctx, types.NamespacedName{Name: rctx.Account.Status.S3ApiEndpoint.S3TenantClassName}, accountClass); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: rctx.Account.Status.S3EndpointConfig.S3TenantClassName}, accountClass); err != nil {
 		log.Error(err, "Failed to retrieve S3TenantClass")
 		return err
 	}
 
-	rctx.Account.Status.S3ApiEndpoint = &s3v1alpha1.S3ApiEndpoint{
-		S3TenantClassName: accountClass.Name,
-		S3Urls:            accountClass.Status.S3Endpoints,
-		S3VIPs:            accountClass.Status.S3VIPs,
-		Port:              accountClass.Status.Port,
-		PathStyleAccess:   &accountClass.Spec.UsePathStyleAccess,
-	}
+	// Always copy S3EndpointConfig from TenantClass status (addresses can change).
+	// This ensures we always reflect the current state of the gateway configuration.
+	rctx.Account.Status.S3EndpointConfig = accountClass.Status.S3EndpointConfig
 
 	return nil
 }
@@ -1414,13 +1418,16 @@ func (r *S3TenantAccountReconciler) createTenantAdminCredentials(ctx context.Con
 		}
 	}
 
-	// if tenantref is set use this as owner instead.
+	// Determine owner for the admin secret.
+	// Always use S3Tenant as owner if it exists (user-facing secret).
+	// Otherwise fall back to Account (platform-managed scenario).
 	var owner metav1.Object
 	if rctx.Account.Spec.S3TenantRef != nil {
 		owner = rctx.S3Tenant
 	} else {
 		owner = rctx.Account
 	}
+
 	err = kube.CreateCredentialSecret(ctx, r.Client, rctx.Account.Status.AdminSecretRef.Namespace, rctx.Account.Status.AdminSecretRef.Name, username, password, owner)
 	if err != nil {
 		log.Error(err, "Failed to create secret")
@@ -1556,6 +1563,66 @@ func (r *S3TenantAccountReconciler) finalize(ctx context.Context, rctx *accountR
 	return fmt.Errorf("S3TenantAccount %s deletion in progress, requeuing to check again", rctx.Account.Name)
 }
 
+// tenantClassEndpointChangePredicate creates a predicate that only triggers when
+// S3EndpointConfig in the TenantClass status actually changes.
+// This ensures we only reconcile accounts when endpoint configuration changes,
+// ignoring other irrelevant status updates.
+func (r *S3TenantAccountReconciler) tenantClassEndpointChangePredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			// Trigger on create so new TenantClasses with endpoint config get picked up
+			return true
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldClass, okOld := e.ObjectOld.(*s3v1alpha1.S3TenantClass)
+			newClass, okNew := e.ObjectNew.(*s3v1alpha1.S3TenantClass)
+
+			if !okOld || !okNew {
+				return false
+			}
+
+			// Only trigger if S3EndpointConfig in status actually changed
+			return !reflect.DeepEqual(oldClass.Status.S3EndpointConfig, newClass.Status.S3EndpointConfig)
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			// Don't trigger on delete - accounts will handle their own cleanup
+			return false
+		},
+	}
+}
+
+// mapTenantClassToAccounts maps S3TenantClass changes to S3TenantAccounts that reference it.
+// This ensures endpoint configuration changes propagate immediately to dependent accounts.
+// Uses the field indexer to efficiently find only accounts referencing the changed TenantClass.
+func (r *S3TenantAccountReconciler) mapTenantClassToAccounts(ctx context.Context, obj client.Object) []ctrl.Request {
+	log := log.FromContext(ctx)
+	tenantClass := obj.(*s3v1alpha1.S3TenantClass)
+
+	// Find all accounts using this TenantClass via field indexer
+	// This only returns accounts that reference this specific class
+	accounts := &s3v1alpha1.S3TenantAccountList{}
+	if err := r.List(ctx, accounts, client.MatchingFields{
+		"status.s3EndpointConfig.s3TenantClassName": tenantClass.Name,
+	}); err != nil {
+		log.Error(err, "Failed to list accounts for TenantClass", "tenantClass", tenantClass.Name)
+		return []ctrl.Request{}
+	}
+
+	// Create reconciliation requests for each affected account
+	requests := make([]ctrl.Request, len(accounts.Items))
+	for i, acc := range accounts.Items {
+		requests[i] = ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: acc.Name},
+		}
+	}
+
+	if len(requests) > 0 {
+		log.V(1).Info(fmt.Sprintf("Triggering reconciliation for %d account(s) due to TenantClass endpoint config change", len(requests)), "tenantClass", tenantClass.Name)
+	}
+
+	return requests
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *S3TenantAccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	tenantRefFunc := func(obj client.Object) []string {
@@ -1571,6 +1638,11 @@ func (r *S3TenantAccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			PredicateWithoutStatusChange(),
 		)).
 		Owns(&corev1.Secret{}).
+		Watches(
+			&s3v1alpha1.S3TenantClass{},
+			handler.EnqueueRequestsFromMapFunc(r.mapTenantClassToAccounts),
+			builder.WithPredicates(r.tenantClassEndpointChangePredicate()),
+		).
 		Complete(r)
 }
 

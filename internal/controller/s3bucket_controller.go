@@ -353,8 +353,8 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 	if exists {
 		log.V(1).Info("Bucket already exists", "bucketName", rctx.Bucket.Status.BucketName)
 
-		// Update S3 API endpoint from tenant.
-		rctx.Bucket.Status.S3ApiEndpoint = rctx.S3Tenant.Status.S3ApiEndpoint
+		// Update S3 endpoint config from tenant.
+		rctx.Bucket.Status.S3EndpointConfig = rctx.S3Tenant.Status.S3EndpointConfig
 
 		return nil
 	}
@@ -557,19 +557,24 @@ func (r *S3BucketReconciler) initS3Client(ctx context.Context, rctx *bucketRecon
 		return fmt.Errorf("failed to fetch S3 credentials: %w", err)
 	}
 
-	// Initialize S3 client.
-	endpoint := fmt.Sprintf("https://%s:%d", rctx.Bucket.Status.S3ApiEndpoint.S3Urls[0], rctx.Bucket.Status.S3ApiEndpoint.Port)
-	s3client, err := s3.InitS3Client(ctx, endpoint, accessKey, secretKey, rctx.Bucket.Status.Region, *rctx.Bucket.Status.S3ApiEndpoint.PathStyleAccess)
+	// Initialize S3 client using default address.
+	var endpointURL string
+	if rctx.Bucket.Status.S3EndpointConfig != nil && len(rctx.Bucket.Status.S3EndpointConfig.Addresses) > 0 {
+		endpointURL = fmt.Sprintf("https://%s:%d", rctx.Bucket.Status.S3EndpointConfig.DefaultAddress, rctx.Bucket.Status.S3EndpointConfig.Port)
+	} else {
+		return fmt.Errorf("no S3 endpoint configuration available in bucket status")
+	}
+	s3client, err := s3.InitS3Client(ctx, endpointURL, accessKey, secretKey, rctx.Bucket.Status.Region, *rctx.Bucket.Status.S3EndpointConfig.PathStyleAccess)
 	if err != nil {
 		log.Error(err, "Failed to initialize S3 client")
 		r.emitEvent(rctx, corev1.EventTypeWarning, EventS3EndpointConnectionFailed,
-			fmt.Sprintf("Failed to connect to S3 endpoint %s: %v (check network access to loadbalancer)", endpoint, err))
+			fmt.Sprintf("Failed to connect to S3 endpoint %s: %v (check network access to loadbalancer)", endpointURL, err))
 		return fmt.Errorf("failed to initialize S3 client: %w", err)
 	}
 
 	rctx.S3Client = s3client
 	r.emitEvent(rctx, corev1.EventTypeNormal, EventS3EndpointConnectionEstablished,
-		fmt.Sprintf("Successfully connected to S3 endpoint %s", endpoint))
+		fmt.Sprintf("Successfully connected to S3 endpoint %s", endpointURL))
 
 	log.V(1).Info("S3 client initialized successfully")
 	return nil

@@ -10,3 +10,23 @@ spec:
     name: storagegrid-sample
   backingID: "gateway-endpoint-id"
   enforce: true
+  # preferredEndpoints controls which addresses are exposed to tenants.
+  # If unset, all discovered addresses (DNS names/VIPs) from the gateway certificate are exposed.
+  # All addresses point to the same gateway/loadbalancer configuration.
+  #
+  # Example 1: Expose only specific addresses with a default
+  # preferredEndpoints:
+  #   defaultEndpoint: "s3.example.com"
+  #   additionalEndpoints:
+  #     - "s3-backup.example.com"
+  #     - "192.168.1.100"
+  #
+  # Example 2: Expose only the default address (empty additionalEndpoints list)
+  # preferredEndpoints:
+  #   defaultEndpoint: "s3.example.com"
+  #   additionalEndpoints: []
+  #
+  # Example 3: Expose default + all discovered addresses (nil additionalEndpoints)
+  # preferredEndpoints:
+  #   defaultEndpoint: "s3.example.com"
+  #   # additionalEndpoints omitted = include all discovered addresses

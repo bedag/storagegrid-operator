@@ -207,39 +207,46 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &s3v1alpha1.S3TenantAccount{}, "status.s3ApiEndpoint.s3TenantClassName", func(rawObj client.Object) []string {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &s3v1alpha1.S3TenantAccount{}, "status.s3EndpointConfig.s3TenantClassName", func(rawObj client.Object) []string {
 		s3Tenant := rawObj.(*s3v1alpha1.S3TenantAccount)
-		return []string{s3Tenant.Status.S3ApiEndpoint.S3TenantClassName}
+		if s3Tenant.Status.S3EndpointConfig == nil {
+			return []string{}
+		}
+		return []string{s3Tenant.Status.S3EndpointConfig.S3TenantClassName}
 	}); err != nil {
 		setupLog.Error(err, "unable to create field index for S3Tenant")
 		os.Exit(1)
 	}
 
 	if err = (&controller.S3TenantReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("s3tenant-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "S3Tenant")
 		os.Exit(1)
 	}
 	if err = (&controller.StorageGridReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("storagegrid-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "StorageGrid")
 		os.Exit(1)
 	}
 	if err = (&controller.S3BucketReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("s3bucket-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "S3Bucket")
 		os.Exit(1)
 	}
 
 	if err = (&controller.S3TenantClassReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("s3tenantclass-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "S3TenantClass")
 		os.Exit(1)
@@ -262,6 +269,7 @@ func main() {
 	if err = (&controller.S3TenantAccountReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
+		Recorder:          mgr.GetEventRecorderFor("s3tenantaccount-controller"),
 		OperatorNamespace: operatorNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "S3TenantAccount")

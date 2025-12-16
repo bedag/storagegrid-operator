@@ -29,4 +29,5 @@ const (
 	ConditionTypeRetained                 = "Retained"
 	ConditionTypeRetainThenDelete         = "RetainThenDelete"
 	ConditionTypeDeletionTimestampReached = "DeletionTimestampReached"
+	ConditionTypeConfigurationSynced      = "ConfigurationSynced"
 )

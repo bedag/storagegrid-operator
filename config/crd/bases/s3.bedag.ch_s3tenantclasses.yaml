@@ -25,6 +25,10 @@ spec:
       jsonPath: .status.displayName
       name: DisplayName
       type: string
+    - description: Default S3 address
+      jsonPath: .status.s3EndpointConfig.defaultAddress
+      name: Default Address
+      type: string
     - description: Where it will be enforced, so only tenants in this class can use
         the backing gateway
       jsonPath: .spec.enforce
@@ -72,6 +76,32 @@ spec:
                   Enforce make sure that only the tenants in this class can.
                   use the backing gateway in the StorageGrid.
                 type: boolean
+              preferredEndpoints:
+                description: |-
+                  PreferredEndpoints controls which gateway endpoints are exposed to tenants.
+                  If unset, all discovered endpoints from the gateway certificate are exposed
+                  with the first as default. If set, only specified endpoints are exposed.
+                properties:
+                  additionalEndpoints:
+                    description: |-
+                      AdditionalEndpoints are extra S3 endpoints to expose alongside the default.
+                      If unset (nil), all discovered endpoints from the gateway certificate are included.
+                      If set to an empty list ([]), only the DefaultEndpoint is exposed.
+                      Endpoints not found in the gateway certificate SANs will be kept in status but
+                      a warning event will be emitted (admin knows best).
+                    items:
+                      type: string
+                    type: array
+                  defaultEndpoint:
+                    description: |-
+                      DefaultEndpoint is the primary S3 endpoint to expose. This endpoint will
+                      be listed first and marked as the default. It will be included in the
+                      endpoint list even if not found in the gateway certificate SANs (with a warning).
+                    minLength: 1
+                    type: string
+                required:
+                - defaultEndpoint
+                type: object
               refreshInterval:
                 default: 60m
                 description: Frequency to check for changes in the StorageGrid in
@@ -185,16 +215,42 @@ spec:
                 description: Port for the S3TenantClass.
                 format: int32
                 type: integer
-              s3Endpoints:
-                description: S3 Endpoint.
-                items:
-                  type: string
-                type: array
-              s3VIPs:
-                description: S3 VIP.
-                items:
-                  type: string
-                type: array
+              s3EndpointConfig:
+                description: |-
+                  S3 endpoint configuration for tenant access.
+                  Contains the list of addresses and default address configuration.
+                properties:
+                  addresses:
+                    description: |-
+                      Addresses is the deduplicated list of DNS names and IP addresses for this S3 endpoint.
+                      All addresses point to the same gateway/loadbalancer configuration.
+                      Addresses always atleast contains the DefaultAddress.
+                    items:
+                      type: string
+                    type: array
+                  defaultAddress:
+                    description: |-
+                      DefaultAddress is the primary address from the Addresses list.
+                      This is the recommended address to use for S3 API access.
+                    type: string
+                  pathStyleAccess:
+                    default: false
+                    description: |-
+                      PathStyleAccess indicates if path-style S3 access is required.
+                      When true, use path-style URLs (https://endpoint/bucket/key).
+                      When false, use virtual-hosted-style URLs (https://bucket.endpoint/key).
+                      Defaults to false if not set.
+                    type: boolean
+                  port:
+                    description: Port is the HTTPS port for S3 API access.
+                    format: int32
+                    type: integer
+                  s3TenantClassName:
+                    default: ""
+                    description: TenantClassName which this S3EndpointConfig belongs
+                      to.
+                    type: string
+                type: object
               secure:
                 description: Secure defines whether TLS is enabled on the endpoint
                   or not.

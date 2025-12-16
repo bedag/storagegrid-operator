@@ -36,6 +36,17 @@ Explains the relationship between `S3Tenant` and `S3TenantAccount` resources:
 
 *Necessary for understanding how tenants are modeled and managed.*
 
+#### [Event Architecture](./events.md)
+Describes the event recording implementation and design decisions:
+
+- **Pattern Selection**: PV/PVC approach without cross-resource propagation
+- **Emission Timing**: Immediate emission for real-time visibility
+- **Event Frequency**: State-change only emission to prevent spam
+- **Critical Events**: S3 endpoint access, backend connection, health monitoring
+- **Implementation**: 64 unique event reasons across 5 controllers
+
+*Important for understanding observability and troubleshooting workflows.*
+
 ## 🏗️ Architectural Principles
 
 The StorageGrid Operator is built on several key architectural principles:

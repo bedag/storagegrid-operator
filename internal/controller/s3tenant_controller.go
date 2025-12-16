@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -41,7 +42,8 @@ import (
 // S3TenantReconciler reconciles a S3Tenant object.
 type S3TenantReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 type tenantReconcileContext struct {
@@ -65,6 +67,7 @@ const (
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenants/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenants/finalizers,verbs=update
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenantaccounts,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to.
 // move the current state of the cluster closer to the desired state.
@@ -163,6 +166,27 @@ func (r *S3TenantReconciler) doReconcile(ctx context.Context, rctx *tenantReconc
 	}
 	r.setCondition(rctx.S3Tenant, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionTrue, "TenantAccountReady", fmt.Sprintf("S3Tenant Account %s is ready for storage operations", rctx.Account.Name))
 
+	// Check if account was just bound or configuration was applied
+	if rctx.Account.Status.Phase == s3v1alpha1.PhaseBound {
+		accountBoundCondition := meta.FindStatusCondition(rctx.S3Tenant.Status.Conditions, s3v1alpha1.ContitionTypeBackingResourceReady)
+		if accountBoundCondition == nil || accountBoundCondition.Status != metav1.ConditionTrue {
+			r.emitEvent(rctx, corev1.EventTypeNormal, EventAccountBound,
+				fmt.Sprintf("Successfully bound to S3TenantAccount %s", rctx.Account.Name))
+		}
+
+		// Check if configuration is synced
+		if equality.Semantic.DeepEqual(rctx.S3Tenant.Spec.CommonTenantSpec, rctx.Account.Spec.CommonTenantSpec) {
+			r.emitEvent(rctx, corev1.EventTypeNormal, EventConfigurationApplied,
+				"S3TenantAccount has successfully applied all configuration changes")
+			r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeConfigurationSynced, metav1.ConditionTrue,
+				"Synced", "Configuration is synchronized with S3TenantAccount")
+			rctx.S3Tenant.Status.ObservedGeneration = rctx.S3Tenant.Generation
+		} else {
+			r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeConfigurationSynced, metav1.ConditionFalse,
+				"Pending", "Configuration changes pending")
+		}
+	}
+
 	// certain annotations need to be set on the tenantAccount.
 	err = r.reconcileTenantAnnotations(ctx, rctx)
 	if err != nil {
@@ -178,6 +202,8 @@ func (r *S3TenantReconciler) doReconcile(ctx context.Context, rctx *tenantReconc
 	err = r.reconcileTenantAccountStatus(ctx, rctx)
 	if err != nil && err.Error() == errorAccountNotPhaseBound {
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypePending, metav1.ConditionTrue, "TenantAccountNotPhaseBound", fmt.Sprintf("S3TenantAccount %s is still in state %s", rctx.Account.Name, rctx.Account.Status.Phase))
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventAccountNotReady,
+			fmt.Sprintf("Waiting for S3TenantAccount %s to become ready (current phase: %s)", rctx.Account.Name, rctx.Account.Status.Phase))
 	} else if err != nil {
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantAccountStatusSyncFailed", fmt.Sprintf("Failed to sync tenant account status: %s", err.Error()))
 	}
@@ -204,6 +230,15 @@ func (r *S3TenantReconciler) doReconcile(ctx context.Context, rctx *tenantReconc
 
 	// reconciliation ran successfully.
 	r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "ReconcileSucceeded", "Reconciliation completed successfully")
+
+	// Emit ready event if tenant is now fully ready and this is a state transition
+	if rctx.Account.Status.Phase == s3v1alpha1.PhaseBound && rctx.S3Tenant.Status.Phase == "Bound" {
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantReady,
+			fmt.Sprintf("S3Tenant is ready for storage operations with %d linked bucket(s)", len(rctx.S3Tenant.Status.LinkedBuckets)))
+	} else if rctx.S3Tenant.Status.Phase != "Bound" {
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantNotReady,
+			fmt.Sprintf("S3Tenant is not ready (phase: %s)", rctx.S3Tenant.Status.Phase))
+	}
 
 	return nil
 }
@@ -325,13 +360,20 @@ func (r *S3TenantReconciler) reconcileTenantAccountReference(ctx context.Context
 		// if the account was not found we're assuming it needs to be created.
 		if client.IgnoreNotFound(err) == nil {
 			log.V(1).Info(fmt.Sprintf("S3TenantAccount %s not found, creating it", accountName))
+			r.emitEvent(rctx, corev1.EventTypeNormal, EventAccountCreating,
+				fmt.Sprintf("Creating backing S3TenantAccount %s", accountName))
+
 			account := r.generateTenantAccount(rctx.S3Tenant, accountName)
 			if err := r.Create(ctx, account); err != nil {
 				log.Error(err, fmt.Sprintf("Failed to create S3TenantAccount %s", accountName))
+				r.emitEvent(rctx, corev1.EventTypeWarning, EventAccountCreateFailed,
+					fmt.Sprintf("Failed to create S3TenantAccount: %v", err))
 				return fmt.Errorf("failed to create S3TenantAccount %s: %w", accountName, err)
 			}
 
 			log.V(1).Info(fmt.Sprintf("S3TenantAccount %s created successfully, requeing", accountName))
+			r.emitEvent(rctx, corev1.EventTypeNormal, EventAccountCreated,
+				fmt.Sprintf("Successfully created S3TenantAccount %s", accountName))
 			rctx.DoRequeue = true // requeue to ensure the account is fully initialized
 			return nil
 		} else {
@@ -423,16 +465,23 @@ func (r *S3TenantReconciler) reconcileTenantAccountSpec(ctx context.Context, rct
 	// we basically just want to do a deepEqual check for the common tenant spec.
 	if !equality.Semantic.DeepEqual(rctx.S3Tenant.Spec.CommonTenantSpec, rctx.Account.Spec.CommonTenantSpec) {
 		log.V(1).Info("S3Tenant spec changed, updating S3TenantAccount spec")
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventConfigurationChanged,
+			"Configuration changes detected, updating S3TenantAccount")
+
 		rctx.Account.Spec.CommonTenantSpec = rctx.S3Tenant.Spec.CommonTenantSpec
 
 		// we need to update the account spec.
 		if err := r.Update(ctx, rctx.Account); err != nil {
 			log.Error(err, "Failed to update S3TenantAccount spec")
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventConfigurationFailed,
+				fmt.Sprintf("Failed to update S3TenantAccount: %v", err))
 			return fmt.Errorf("failed to update S3TenantAccount spec: %w", err)
 		}
 
 		// if the spec was updated, we need to requeue the reconciliation loop.
 		log.V(1).Info("S3TenantAccount spec updated, requeuing reconciliation loop")
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventConfigurationPending,
+			"Waiting for S3TenantAccount to apply configuration changes")
 		rctx.DoRequeue = true
 	} else {
 		log.V(1).Info("S3Tenant spec did not change, no update needed for S3TenantAccount spec")
@@ -574,8 +623,8 @@ func (r *S3TenantReconciler) reconcileTenantAnnotations(ctx context.Context, rct
 			accountUpdateRequired = true
 		} else if val != value {
 			// if the annotation is set by the tenant, we check if it is the same.
-			log.V(1).Info("Overriding annotation on S3TenantAccount", "key", key, "oldValue", value, "newValue", val)
-			rctx.Account.Annotations[key] = val
+			log.V(1).Info("Overriding annotation on S3TenantAccount", "key", key, "oldValue", val, "newValue", value)
+			rctx.Account.Annotations[key] = value
 			accountUpdateRequired = true
 		}
 	}
@@ -635,4 +684,11 @@ func (r *S3TenantReconciler) mapAccountToTenant(ctx context.Context, obj client.
 			},
 		},
 	}
+}
+
+// emitEvent emits a Kubernetes event immediately.
+func (r *S3TenantReconciler) emitEvent(
+	rctx *tenantReconcileContext,
+	eventType, reason, message string) {
+	r.Recorder.Event(rctx.S3Tenant, eventType, reason, message)
 }

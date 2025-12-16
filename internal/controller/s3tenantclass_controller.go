@@ -19,11 +19,14 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -39,7 +42,8 @@ import (
 // S3TenantClassReconciler reconciles a S3TenantClass object.
 type S3TenantClassReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 type s3TenantClassReconcileContext struct {
@@ -62,6 +66,7 @@ const (
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenantaccountss,verbs=get;list;watch
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=storagegrids,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to.
 // move the current state of the cluster closer to the desired state.
@@ -166,14 +171,25 @@ func (r *S3TenantClassReconciler) doReconcile(ctx context.Context, rctx *s3Tenan
 	if err != nil {
 		r.setCondition(rctx.S3TenantClass, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionFalse, "StorageGridNotReady", fmt.Sprintf("Failed to initialize grid client due to %s even though it reports ready, do you have the correct secret?", rctx.StorageGrid.Name))
 		r.setCondition(rctx.S3TenantClass, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "GridClientInitFailed", fmt.Sprintf("Failed to initialize grid client: %v", err))
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBackendConnectionFailed,
+			fmt.Sprintf("Failed to connect to StorageGrid backend: %v", err))
 		return err
 	}
 	r.setCondition(rctx.S3TenantClass, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionTrue, "StorageGridReady", fmt.Sprintf("StorageGrid %s is ready", rctx.StorageGrid.Name))
+
+	// Check if we're recovering from a connection failure
+	backendCondition := meta.FindStatusCondition(rctx.S3TenantClass.Status.Conditions, s3v1alpha1.ContitionTypeBackingResourceReady)
+	if backendCondition != nil && backendCondition.Status == metav1.ConditionFalse && backendCondition.Reason == "StorageGridNotReady" {
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventBackendConnectionRestored,
+			fmt.Sprintf("Successfully connected to StorageGrid %s", rctx.StorageGrid.Name))
+	}
 
 	// cache the details from the tenantclass within the grid client.
 	err = r.fetchFromBackend(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.S3TenantClass, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "FetchGatewayFailed", fmt.Sprintf("Failed to fetch gateway %s: %v", rctx.S3TenantClass.Spec.BackingID, err))
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventGatewayFetchFailed,
+			fmt.Sprintf("Failed to fetch gateway %s: %v", rctx.S3TenantClass.Spec.BackingID, err))
 		return err
 	}
 
@@ -349,6 +365,9 @@ func (r *S3TenantClassReconciler) reconcileTenantClassStatus(ctx context.Context
 	log := log.FromContext(ctx)
 	refreshInterval := rctx.S3TenantClass.Spec.RefreshInterval
 
+	// Always Reconcile S3 endpoints with preferred endpoints configuration as it can be changed by admin.
+	r.reconcilePreferredEndpoints(ctx, rctx)
+
 	log.V(1).Info(fmt.Sprintf("Reconcile S3TenantClass %s status", rctx.S3TenantClass.Name))
 	if rctx.S3TenantClass.Status.LastUpdated.IsZero() || rctx.S3TenantClass.Status.LastUpdated.Add(refreshInterval.Duration).Before(metav1.Now().Time) {
 		log.V(1).Info(fmt.Sprintf("Refreshing S3TenantClass %s status", rctx.S3TenantClass.Name))
@@ -358,17 +377,112 @@ func (r *S3TenantClassReconciler) reconcileTenantClassStatus(ctx context.Context
 		rctx.S3TenantClass.Status.Secure = grid.IsTLSEnabled(rctx.Gateway)
 		rctx.S3TenantClass.Status.IPv4AccessEnabled = grid.IsIPv4AccessEnabled(rctx.Gateway)
 		rctx.S3TenantClass.Status.IPv6AccessEnabled = grid.IsIPv6AccessEnabled(rctx.Gateway)
-		rctx.S3TenantClass.Status.S3Endpoints = grid.GetS3Endpoints(rctx.Gateway)
-		rctx.S3TenantClass.Status.S3VIPs = grid.GetVIPs(rctx.Gateway)
 		rctx.S3TenantClass.Status.UntrustedNetworksDropped = grid.DropUntrustedNetworks(rctx.Gateway)
 
 		// set last updated.
 		rctx.S3TenantClass.Status.LastUpdated = metav1.Now()
+
+		addressCount := 0
+		if rctx.S3TenantClass.Status.S3EndpointConfig != nil {
+			addressCount = len(rctx.S3TenantClass.Status.S3EndpointConfig.Addresses)
+		}
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventGatewayStatusRefreshed,
+			fmt.Sprintf("Gateway status refreshed: %d address(es)", addressCount))
 	} else {
 		log.V(1).Info(fmt.Sprintf("Skipping S3TenantClass %s status refresh, last updated at %s", rctx.S3TenantClass.Name, rctx.S3TenantClass.Status.LastUpdated.String()))
 	}
 
 	log.V(1).Info(fmt.Sprintf("S3TenantClass %s status reconciled", rctx.S3TenantClass.Name))
+}
+
+// reconcilePreferredEndpoints processes the PreferredEndpoints spec and updates the status.
+// It handles endpoint discovery, filtering, and deduplication based on admin configuration.
+func (r *S3TenantClassReconciler) reconcilePreferredEndpoints(ctx context.Context, rctx *s3TenantClassReconcileContext) {
+	log := log.FromContext(ctx)
+
+	// Discover all endpoints from gateway certificate SANs.
+	discoveredURLs := grid.GetS3Endpoints(rctx.Gateway)
+	discoveredVIPs := grid.GetVIPs(rctx.Gateway)
+	allDiscovered := append(discoveredURLs, discoveredVIPs...)
+
+	var finalEndpoints []string
+	var defaultEndpoint string
+	pathStyleAccess := rctx.S3TenantClass.Spec.UsePathStyleAccess
+
+	if rctx.S3TenantClass.Spec.PreferredEndpoints != nil {
+		// Admin explicitly configured preferred endpoints.
+		preferredSpec := rctx.S3TenantClass.Spec.PreferredEndpoints
+		defaultEndpoint = preferredSpec.DefaultEndpoint
+
+		// Validate default endpoint exists in discovered SANs (warn if not, but still use it).
+		if !slices.Contains(allDiscovered, defaultEndpoint) {
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventEndpointNotInCertificate,
+				fmt.Sprintf("Default endpoint %s not found in gateway certificate SANs", defaultEndpoint))
+			log.V(1).Info(fmt.Sprintf("Default endpoint %s not in certificate, but keeping as configured", defaultEndpoint))
+		}
+
+		// Always include default as first entry.
+		finalEndpoints = []string{defaultEndpoint}
+
+		// Handle additionalEndpoints based on whether it's nil or explicit.
+		if preferredSpec.AdditionalEndpoints == nil {
+			// nil = include all discovered endpoints.
+			log.V(1).Info("AdditionalEndpoints unset, including all discovered endpoints")
+			finalEndpoints = append(finalEndpoints, allDiscovered...)
+		} else {
+			// Explicit list (even if empty) = only include what's specified.
+			log.V(1).Info(fmt.Sprintf("AdditionalEndpoints set with %d entries", len(preferredSpec.AdditionalEndpoints)))
+			for _, ep := range preferredSpec.AdditionalEndpoints {
+				// Keep endpoint even if not in SANs (admin knows best), but warn.
+				if !slices.Contains(allDiscovered, ep) {
+					r.emitEvent(rctx, corev1.EventTypeWarning, EventEndpointNotInCertificate,
+						fmt.Sprintf("Additional endpoint %s not found in gateway certificate SANs", ep))
+					log.V(1).Info(fmt.Sprintf("Additional endpoint %s not in certificate, but keeping as configured", ep))
+				}
+				finalEndpoints = append(finalEndpoints, ep)
+			}
+		}
+	} else {
+		// No preferred endpoints = expose all discovered.
+		log.V(1).Info("PreferredEndpoints not set, using all discovered endpoints")
+		finalEndpoints = allDiscovered
+
+		// Set default to first discovered endpoint (if any exist).
+		if len(finalEndpoints) > 0 {
+			defaultEndpoint = finalEndpoints[0]
+		} else {
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventGatewayFetchFailed,
+				"No S3 endpoints discovered from gateway certificate")
+			log.V(1).Info("Warning: No endpoints available after processing")
+		}
+	}
+
+	// Deduplicate final list and ensure default is first.
+	finalEndpoints = deduplicateEndpoints(finalEndpoints)
+
+	// Update status with processed endpoint configuration.
+	rctx.S3TenantClass.Status.S3EndpointConfig = &s3v1alpha1.S3EndpointConfig{
+		S3TenantClassName: rctx.S3TenantClass.Name,
+		Addresses:         finalEndpoints,
+		DefaultAddress:    defaultEndpoint,
+		Port:              rctx.S3TenantClass.Status.Port,
+		PathStyleAccess:   &pathStyleAccess,
+	}
+
+	log.V(1).Info(fmt.Sprintf("Reconciled endpoint config: %d address(es), default: %s", len(finalEndpoints), defaultEndpoint))
+}
+
+// deduplicateEndpoints removes duplicate entries from a slice of endpoints while preserving order.
+func deduplicateEndpoints(endpoints []string) []string {
+	seen := make(map[string]bool)
+	result := []string{}
+	for _, ep := range endpoints {
+		if !seen[ep] {
+			seen[ep] = true
+			result = append(result, ep)
+		}
+	}
+	return result
 }
 
 func (r *S3TenantClassReconciler) reconcileLinkedTenants(ctx context.Context, rctx *s3TenantClassReconcileContext) error {
@@ -377,7 +491,7 @@ func (r *S3TenantClassReconciler) reconcileLinkedTenants(ctx context.Context, rc
 	// List all tenants that reference this TenantClass.
 	tenants := &s3v1alpha1.S3TenantAccountList{}
 	opts := []client.ListOption{
-		client.MatchingFields{"status.s3ApiEndpoint.s3TenantClassName": rctx.S3TenantClass.Name},
+		client.MatchingFields{"status.s3EndpointConfig.s3TenantClassName": rctx.S3TenantClass.Name},
 	}
 	err := r.List(ctx, tenants, opts...)
 	if err != nil {
@@ -412,9 +526,13 @@ func (r *S3TenantClassReconciler) reconcileLinkedTenants(ctx context.Context, rc
 			err = grid.RemoveTenantFromAllowlist(ctx, tenantID, rctx.Gateway, rctx.GridClient)
 			if err != nil {
 				log.Error(err, "Failed to remove tenant from allowlist")
+				r.emitEvent(rctx, corev1.EventTypeWarning, EventAllowlistUpdateFailed,
+					fmt.Sprintf("Failed to remove tenant %s from allowlist: %v", tenantID, err))
 				return err
 			}
 			log.V(1).Info(fmt.Sprintf("Removed tenant %s from allowlist", tenantID))
+			r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantRemovedFromAllowlist,
+				fmt.Sprintf("Removed tenant %s from gateway allowlist", tenantID))
 		} else {
 			log.V(1).Info("Not enforcing allowlist, skipping removal")
 		}
@@ -428,7 +546,13 @@ func (r *S3TenantClassReconciler) reconcileLinkedTenants(ctx context.Context, rc
 			err = grid.AddTenantToAllowlist(ctx, tenantID, rctx.Gateway, rctx.GridClient)
 			if err != nil {
 				log.Error(err, "Failed to add tenant to allowlist")
+				r.emitEvent(rctx, corev1.EventTypeWarning, EventAllowlistUpdateFailed,
+					fmt.Sprintf("Failed to add tenant %s to allowlist: %v", tenantID, err))
 				return err
+			}
+			if tenantNew[tenantID] {
+				r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantAddedToAllowlist,
+					fmt.Sprintf("Added tenant %s to gateway allowlist", tenantID))
 			}
 		}
 
@@ -459,16 +583,16 @@ func (r *S3TenantClassReconciler) mapTenantToTenantClass(ctx context.Context, ob
 	}
 
 	// Handle delete events (Tenant is being deleted).
-	if !tenant.DeletionTimestamp.IsZero() && tenant.Status.S3ApiEndpoint.S3TenantClassName != "" {
+	if tenant.Status.S3EndpointConfig != nil && !tenant.DeletionTimestamp.IsZero() && tenant.Status.S3EndpointConfig.S3TenantClassName != "" {
 		return []reconcile.Request{
-			{NamespacedName: client.ObjectKey{Name: tenant.Status.S3ApiEndpoint.S3TenantClassName}},
+			{NamespacedName: client.ObjectKey{Name: tenant.Status.S3EndpointConfig.S3TenantClassName}},
 		}
 	}
 
 	// Handle create/update events.
-	if tenant.Status.S3ApiEndpoint.S3TenantClassName != "" {
+	if tenant.Status.S3EndpointConfig != nil && tenant.Status.S3EndpointConfig.S3TenantClassName != "" {
 		return []reconcile.Request{
-			{NamespacedName: client.ObjectKey{Name: tenant.Status.S3ApiEndpoint.S3TenantClassName}},
+			{NamespacedName: client.ObjectKey{Name: tenant.Status.S3EndpointConfig.S3TenantClassName}},
 		}
 	}
 
@@ -486,7 +610,7 @@ func (r *S3TenantClassReconciler) finalize(ctx context.Context, tenantClass *s3v
 	// this is already checked by a validationWebhook but we need to make sure anyway.
 
 	tenantList := &s3v1alpha1.S3TenantList{}
-	err := r.List(ctx, tenantList, client.MatchingFields{"Status.S3ApiEndpoint.S3TenantClassName": tenantClass.Name})
+	err := r.List(ctx, tenantList, client.MatchingFields{"status.s3EndpointConfig.s3TenantClassName": tenantClass.Name})
 	if err != nil {
 		if client.IgnoreNotFound(err) != nil {
 			log.Error(err, "Failed to list tenants")
@@ -515,4 +639,11 @@ func (r *S3TenantClassReconciler) setCondition(tenantClass *s3v1alpha1.S3TenantC
 	}
 
 	meta.SetStatusCondition(&tenantClass.Status.Conditions, condition)
+}
+
+// emitEvent emits a Kubernetes event immediately.
+func (r *S3TenantClassReconciler) emitEvent(
+	rctx *s3TenantClassReconcileContext,
+	eventType, reason, message string) {
+	r.Recorder.Event(rctx.S3TenantClass, eventType, reason, message)
 }

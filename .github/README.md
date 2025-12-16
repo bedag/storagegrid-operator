@@ -64,6 +64,12 @@ Cluster-scoped resource defining S3 loadbalancer endpoint within your StorageGri
 
 This is similiar to an IngressClass in Kubernetes and always points to an existing loadbalancer endpoint in StorageGrid. Through the `spec.enforce` field you can enforce that tenants using this class will only be able to access the grid through this loadbalancer endpoint.
 
+The operator automatically discovers all endpoints from the gateway's certificate SANs. You can control which endpoints are exposed to tenants using the `spec.preferredEndpoints` field:
+- **Not set**: All discovered endpoints are exposed (default behavior)
+- **Set with default + nil additionalEndpoints**: Default endpoint plus all discovered endpoints
+- **Set with default + empty list `[]`**: Only the default endpoint is exposed
+- **Set with default + explicit list**: Default endpoint plus only the specified endpoints
+
 See more details on the official docs: https://docs.netapp.com/us-en/storagegrid-116/admin/configuring-load-balancer-endpoints.html 
 
 ### S3TenantAccount
@@ -96,6 +102,33 @@ Currently it supports basic bucket CRUD operations as well as defining a policy 
 - **Webhook Validation**: Built-in validation for resource configurations
 - **Garbage Collection**: Proper cleanup cascade when resources are deleted
 - **Metadata Enrichment**: As NetApp doesn't support tags on tenants, we enrich the tenant description with useful metadata such as the namespace, owner, and custom fields.
+- **Event Observability**: Kubernetes events for state transitions, errors, and significant operations across all controllers
+
+## Event Observability
+
+The operator emits Kubernetes events for state transitions, errors, and significant operations across all controllers. Events provide a user-visible timeline of operations without requiring log access.
+
+**Key characteristics:**
+- 64 unique event types across 5 controllers
+- Immediate emission for real-time visibility
+- State-change emission to prevent spam
+- Separate event streams per resource (no cross-resource propagation)
+
+For detailed information on event architecture and implementation, see [Event Architecture](../docs/architecture/events.md).
+
+### Critical Events
+
+**S3 Endpoint Connectivity** - If bucket policy operations fail, check for:
+- `S3EndpointConnectionFailed`: Cannot reach S3 loadbalancer endpoint
+- `S3EndpointConnectionEstablished`: Connection successful
+
+**Backend Connection** - For tenant operations:
+- `BackendConnectionFailed`: Cannot reach StorageGrid management API
+- `BackendConnectionRestored`: Management API connection restored
+
+**Grid Health** - For overall grid status:
+- `GridUnhealthy`: Too many unavailable nodes
+- `GridHealthRecovered`: Grid has recovered
 
 ## Installation
 
@@ -175,6 +208,14 @@ spec:
     name: my-storagegrid
   backingID: "gateway-endpoint-id" # check your storagegrid for the correct ID
   enforce: true
+  
+  # Optional: Control which endpoints are exposed to tenants
+  # If not set, all discovered endpoints from the gateway certificate are exposed
+  preferredEndpoints:
+    defaultEndpoint: "s3.example.com"  # Primary endpoint (always exposed)
+    # additionalEndpoints: []           # Empty list = only default endpoint
+    # additionalEndpoints:              # Omit = all discovered endpoints
+    #   - "s3-backup.example.com"       # Explicit list = only these + default
 ```
 
 ### 3. Create an S3Tenant
@@ -258,6 +299,49 @@ This user will have full access to the bucket and may be used instead of the adm
 > Same as with the `S3Tenant`, you can customize the name of this secret through the `spec.s3AdminKeysSecretRef` field on the `S3Bucket`.
 
 ## Configuration
+
+### Endpoint Filtering
+
+The operator discovers all endpoints from the StorageGrid gateway's certificate SANs. By default, all discovered endpoints (DNS names and VIPs) are exposed to tenants. You can control this using `preferredEndpoints` in the S3TenantClass:
+
+**Expose all discovered endpoints (default)**:
+```yaml
+spec:
+  # preferredEndpoints not set - all endpoints exposed, first as default
+```
+
+**Expose specific endpoints only**:
+```yaml
+spec:
+  preferredEndpoints:
+    defaultEndpoint: "s3.example.com"
+    additionalEndpoints:
+      - "s3-backup.example.com"
+      - "192.168.1.100"
+```
+
+**Expose only the default endpoint**:
+```yaml
+spec:
+  preferredEndpoints:
+    defaultEndpoint: "s3.example.com"
+    additionalEndpoints: []  # Empty list = default only
+```
+
+**Expose default + all discovered**:
+```yaml
+spec:
+  preferredEndpoints:
+    defaultEndpoint: "s3.example.com"
+    # additionalEndpoints omitted = include all discovered
+```
+
+**Behavior notes**:
+- Addresses not found in certificate SANs are kept with a warning event (admin knows best)
+- When `additionalEndpoints` is nil (unset), all discovered addresses are included
+- When `additionalEndpoints` is an empty list `[]`, only the default is exposed
+- The default address is always listed first in status
+- All addresses in the configuration point to the same gateway/loadbalancer
 
 ### Tenant Metadata
 
@@ -370,7 +454,7 @@ For issues and questions:
 
 ## Roadmap
 
-- [ ] Add Events
+- [x] Add Events
 - [ ] Implement Annotations to drain buckets and tenants on request
 - [ ] Integrate proper e2e tests - currently unable to test against a real StorageGrid instance due to lack of grid docker license. 
 - [ ] Write proper metrics of CRs created and backend calls

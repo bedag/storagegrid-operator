@@ -139,7 +139,7 @@ spec:
                 description: BucketUsage is the total uf bytes and objects in this
                   bucket.
                 properties:
-                  Bytes:
+                  bytes:
                     anyOf:
                     - type: integer
                     - type: string
@@ -242,34 +242,39 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              s3ApiEndpoint:
-                description: s3 api endpoint for the bucket.
+              s3EndpointConfig:
+                description: s3 endpoint configuration for the bucket.
                 properties:
+                  addresses:
+                    description: |-
+                      Addresses is the deduplicated list of DNS names and IP addresses for this S3 endpoint.
+                      All addresses point to the same gateway/loadbalancer configuration.
+                      Addresses always atleast contains the DefaultAddress.
+                    items:
+                      type: string
+                    type: array
+                  defaultAddress:
+                    description: |-
+                      DefaultAddress is the primary address from the Addresses list.
+                      This is the recommended address to use for S3 API access.
+                    type: string
                   pathStyleAccess:
                     default: false
                     description: |-
-                      Use pathstyle access for the s3 api endpoint.
+                      PathStyleAccess indicates if path-style S3 access is required.
+                      When true, use path-style URLs (https://endpoint/bucket/key).
+                      When false, use virtual-hosted-style URLs (https://bucket.endpoint/key).
                       Defaults to false if not set.
                     type: boolean
                   port:
-                    description: Port for the S3 API endpoint.
+                    description: Port is the HTTPS port for S3 API access.
                     format: int32
                     type: integer
                   s3TenantClassName:
                     default: ""
-                    description: TenantClassName which this S3ApiEndpoint belongs
+                    description: TenantClassName which this S3EndpointConfig belongs
                       to.
                     type: string
-                  s3Urls:
-                    description: urls of the s3 api endpoint.
-                    items:
-                      type: string
-                    type: array
-                  s3VIPs:
-                    description: S3 VIPs to use for potential fw requests.
-                    items:
-                      type: string
-                    type: array
                 type: object
             type: object
         type: object

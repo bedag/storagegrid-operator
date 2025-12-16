@@ -164,10 +164,10 @@ type CommonTenantStatus struct {
 	// +optional
 	S3AdminKeysSecretRef *corev1.ObjectReference `json:"s3AdminKeysSecretRef"`
 
-	// S3 endpoint to use for tenant users.
-	// Includes URLs and VIPs to access your buckets and objects.
+	// S3 endpoint configuration for tenant users.
+	// Contains addresses to access your buckets and objects.
 	// +kubebuilder:default:={}
-	S3ApiEndpoint *S3ApiEndpoint `json:"s3ApiEndpoint,omitempty"`
+	S3EndpointConfig *S3EndpointConfig `json:"s3EndpointConfig,omitempty"`
 }
 
 type QuotaStatus struct {
@@ -178,25 +178,32 @@ type QuotaStatus struct {
 	Limit *resource.Quantity `json:"limit,omitempty"`
 }
 
-type S3ApiEndpoint struct {
-	// TenantClassName which this S3ApiEndpoint belongs to.
+// S3EndpointConfig contains S3 endpoint configuration for accessing the tenant's buckets and objects.
+// This represents a single gateway/loadbalancer configuration with multiple DNS names or IP addresses.
+type S3EndpointConfig struct {
+	// TenantClassName which this S3EndpointConfig belongs to.
 	// +optional
 	// +kubebuilder:default=""
 	S3TenantClassName string `json:"s3TenantClassName,omitempty"`
 
-	// urls of the s3 api endpoint.
+	// Addresses is the deduplicated list of DNS names and IP addresses for this S3 endpoint.
+	// All addresses point to the same gateway/loadbalancer configuration.
+	// Addresses always atleast contains the DefaultAddress.
 	// +optional
-	S3Urls []string `json:"s3Urls,omitempty"`
+	Addresses []string `json:"addresses,omitempty"`
 
-	// S3 VIPs to use for potential fw requests.
+	// DefaultAddress is the primary address from the Addresses list.
+	// This is the recommended address to use for S3 API access.
 	// +optional
-	S3VIPs []string `json:"s3VIPs,omitempty"`
+	DefaultAddress string `json:"defaultAddress,omitempty"`
 
-	// Port for the S3 API endpoint.
+	// Port is the HTTPS port for S3 API access.
 	// +optional
 	Port int32 `json:"port,omitempty"`
 
-	// Use pathstyle access for the s3 api endpoint.
+	// PathStyleAccess indicates if path-style S3 access is required.
+	// When true, use path-style URLs (https://endpoint/bucket/key).
+	// When false, use virtual-hosted-style URLs (https://bucket.endpoint/key).
 	// Defaults to false if not set.
 	// +optional
 	// +kubebuilder:default=false

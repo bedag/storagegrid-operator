@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,7 +41,8 @@ import (
 // S3BucketReconciler reconciles a S3Bucket object.
 type S3BucketReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 const (
@@ -68,6 +70,7 @@ type bucketReconcileContext struct {
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenants,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop.
 func (r *S3BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -144,8 +147,12 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 	if err := r.reconcileTenantReadiness(ctx, rctx); err != nil {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantNotReady", err.Error())
 		r.setCondition(rctx.Bucket, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionFalse, "TenantNotReady", err.Error())
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketTenantNotReady,
+			fmt.Sprintf("Waiting for S3Tenant %s to become ready (current phase: %s)", rctx.S3Tenant.Name, rctx.S3Tenant.Status.Phase))
 		return err
 	}
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketTenantReady,
+		fmt.Sprintf("S3Tenant %s is ready for bucket operations", rctx.S3Tenant.Name))
 
 	// Initialize tenant client.
 	if err := r.reconcileTenantClient(ctx, rctx); err != nil {
@@ -346,8 +353,8 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 	if exists {
 		log.V(1).Info("Bucket already exists", "bucketName", rctx.Bucket.Status.BucketName)
 
-		// Update S3 API endpoint from tenant.
-		rctx.Bucket.Status.S3ApiEndpoint = rctx.S3Tenant.Status.S3ApiEndpoint
+		// Update S3 endpoint config from tenant.
+		rctx.Bucket.Status.S3EndpointConfig = rctx.S3Tenant.Status.S3EndpointConfig
 
 		return nil
 	}
@@ -364,13 +371,20 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 		return err
 	}
 
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketCreating,
+		fmt.Sprintf("Creating bucket %s in region %s", rctx.Bucket.Status.BucketName, rctx.Bucket.Status.Region))
+
 	// Create bucket.
 	err = grid.CreateBucket(ctx, rctx.Bucket.Status.BucketName, rctx.Bucket.Spec.Region, *rctx.Bucket.Spec.RetentionInDays, rctx.TenantClient)
 	if err != nil {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionFalse, "BucketCreateReconcileFailed", err.Error())
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketCreateFailed,
+			fmt.Sprintf("Failed to create bucket: %v", err))
 		return fmt.Errorf("failed to create bucket: %w", err)
 	}
 	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionTrue, "BucketCreated", "Bucket created successfully")
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketCreated,
+		fmt.Sprintf("Successfully created bucket %s", rctx.Bucket.Status.BucketName))
 
 	log.V(1).Info("Bucket created successfully", "bucketName", rctx.Bucket.Status.BucketName)
 
@@ -390,13 +404,19 @@ func (r *S3BucketReconciler) reconcileRegion(ctx context.Context, rctx *bucketRe
 		log.V(1).Info("Setting default region from tenant",
 			"defaultBucketRegion", rctx.S3Tenant.Status.DefaultBucketRegion)
 		rctx.Bucket.Status.Region = rctx.S3Tenant.Status.DefaultBucketRegion
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketRegionSet,
+			fmt.Sprintf("Using default region %s from tenant", rctx.S3Tenant.Status.DefaultBucketRegion))
 	} else {
 		rctx.Bucket.Status.Region = rctx.Bucket.Spec.Region
 
 		// Validate specified region exists in tenant.
 		if !slices.Contains(rctx.S3Tenant.Status.Regions, rctx.Bucket.Status.Region) {
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketRegionValidationFailed,
+				fmt.Sprintf("Specified region %s does not exist in tenant (available: %v)", rctx.Bucket.Spec.Region, rctx.S3Tenant.Status.Regions))
 			return fmt.Errorf("specified region %s does not exist in tenant", rctx.Bucket.Spec.Region)
 		}
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketRegionSet,
+			fmt.Sprintf("Using specified region %s", rctx.Bucket.Spec.Region))
 	}
 
 	log.V(1).Info("Region validation successful", "region", rctx.Bucket.Status.Region)
@@ -409,10 +429,14 @@ func (r *S3BucketReconciler) reconcileBucketAdmin(ctx context.Context, rctx *buc
 	// we're using the bucket UID as unique identifier for the admin user.
 	err := grid.CreateBucketAdminIfNotExists(ctx, rctx.Bucket.Status.BucketName, r.getBucketIdentifier(rctx.Bucket), rctx.TenantClient)
 	if err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketAdminUserCreateFailed,
+			fmt.Sprintf("Failed to create admin user: %v", err))
 		return fmt.Errorf("failed to create admin user: %w", err)
 	}
 
 	log.V(1).Info("Admin user created successfully")
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketAdminUserCreated,
+		fmt.Sprintf("Created admin user and group for bucket %s", rctx.Bucket.Status.BucketName))
 	return nil
 }
 
@@ -458,10 +482,15 @@ func (r *S3BucketReconciler) createS3AdminKeypair(ctx context.Context, rctx *buc
 
 	if recreate {
 		log.V(1).Info("Recreating S3 keypair")
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketCredentialsRotated,
+			fmt.Sprintf("Rotating S3 credentials for bucket %s", rctx.Bucket.Status.BucketName))
+
 		// recreate the S3 admin keypair with existing access key ID.
 		accessKeyId, accessKey, secretKey, err = grid.RecreateS3Credentials(ctx, rctx.Bucket.Status.BucketName, r.getBucketIdentifier(rctx.Bucket), rctx.Bucket.Status.AccessKeyId, rctx.TenantClient)
 		if err != nil {
 			log.Error(err, "Failed to recreate S3 admin keypair")
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketCredentialsRotationFailed,
+				fmt.Sprintf("Failed to rotate credentials: %v", err))
 			return err
 		}
 	} else {
@@ -470,8 +499,12 @@ func (r *S3BucketReconciler) createS3AdminKeypair(ctx context.Context, rctx *buc
 		accessKeyId, accessKey, secretKey, err = grid.CreateS3Credentials(ctx, rctx.Bucket.Status.BucketName, r.getBucketIdentifier(rctx.Bucket), rctx.TenantClient)
 		if err != nil {
 			log.Error(err, "Failed to create s3 keys")
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketCredentialsRotationFailed,
+				fmt.Sprintf("Failed to create S3 credentials: %v", err))
 			return err
 		}
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketCredentialsCreated,
+			fmt.Sprintf("Created S3 credentials for bucket %s", rctx.Bucket.Status.BucketName))
 	}
 
 	// store s3 keys in a secret.
@@ -493,6 +526,8 @@ func (r *S3BucketReconciler) reconcileBucketUsage(ctx context.Context, rctx *buc
 	usage, err := grid.FetchBucketUsage(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient)
 	if err != nil {
 		log.Error(err, "Failed to fetch bucket usage")
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketUsageFetchFailed,
+			fmt.Sprintf("Failed to fetch usage metrics: %v", err))
 		return fmt.Errorf("failed to fetch bucket usage: %w", err)
 	}
 
@@ -501,6 +536,9 @@ func (r *S3BucketReconciler) reconcileBucketUsage(ctx context.Context, rctx *buc
 	// Update status with usage information.
 	rctx.Bucket.Status.BucketUsage.ObjectCount = grid.GetBucketObjectCount(rctx.BucketUsage)
 	rctx.Bucket.Status.BucketUsage.Bytes = kube.ParseBytes(grid.GetBucketUsedBytes(rctx.BucketUsage))
+
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketUsageUpdated,
+		fmt.Sprintf("Updated usage: %d objects, %s", rctx.Bucket.Status.BucketUsage.ObjectCount, rctx.Bucket.Status.BucketUsage.Bytes))
 
 	log.V(1).Info("Bucket usage updated",
 		"objectCount", rctx.Bucket.Status.BucketUsage.ObjectCount,
@@ -519,15 +557,24 @@ func (r *S3BucketReconciler) initS3Client(ctx context.Context, rctx *bucketRecon
 		return fmt.Errorf("failed to fetch S3 credentials: %w", err)
 	}
 
-	// Initialize S3 client.
-	endpoint := fmt.Sprintf("https://%s:%d", rctx.Bucket.Status.S3ApiEndpoint.S3Urls[0], rctx.Bucket.Status.S3ApiEndpoint.Port)
-	s3client, err := s3.InitS3Client(ctx, endpoint, accessKey, secretKey, rctx.Bucket.Status.Region, *rctx.Bucket.Status.S3ApiEndpoint.PathStyleAccess)
+	// Initialize S3 client using default address.
+	var endpointURL string
+	if rctx.Bucket.Status.S3EndpointConfig != nil && len(rctx.Bucket.Status.S3EndpointConfig.Addresses) > 0 {
+		endpointURL = fmt.Sprintf("https://%s:%d", rctx.Bucket.Status.S3EndpointConfig.DefaultAddress, rctx.Bucket.Status.S3EndpointConfig.Port)
+	} else {
+		return fmt.Errorf("no S3 endpoint configuration available in bucket status")
+	}
+	s3client, err := s3.InitS3Client(ctx, endpointURL, accessKey, secretKey, rctx.Bucket.Status.Region, *rctx.Bucket.Status.S3EndpointConfig.PathStyleAccess)
 	if err != nil {
 		log.Error(err, "Failed to initialize S3 client")
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventS3EndpointConnectionFailed,
+			fmt.Sprintf("Failed to connect to S3 endpoint %s: %v (check network access to loadbalancer)", endpointURL, err))
 		return fmt.Errorf("failed to initialize S3 client: %w", err)
 	}
 
 	rctx.S3Client = s3client
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventS3EndpointConnectionEstablished,
+		fmt.Sprintf("Successfully connected to S3 endpoint %s", endpointURL))
 
 	log.V(1).Info("S3 client initialized successfully")
 	return nil
@@ -556,11 +603,15 @@ func (r *S3BucketReconciler) reconcileBucketPolicyApply(ctx context.Context, rct
 		log.V(1).Info("Applying bucket policy")
 		err = s3.ApplyPolicy(ctx, rctx.Bucket.Status.BucketName, rctx.Bucket.Spec.BucketPolicyJson, rctx.S3Client)
 		if err != nil {
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketPolicyApplyFailed,
+				fmt.Sprintf("Failed to apply bucket policy: %v", err))
 			return fmt.Errorf("failed to apply policy: %w", err)
 		}
 
 		rctx.Bucket.Status.LastAppliedPolicy = rctx.Bucket.Spec.BucketPolicyJson
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionTrue, "PolicyApplied", "Bucket policy applied successfully")
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketPolicyApplied,
+			"Successfully applied bucket policy")
 		log.V(1).Info("Bucket policy applied successfully")
 	} else {
 		log.V(1).Info("Bucket policy already applied, no changes needed")
@@ -577,11 +628,15 @@ func (r *S3BucketReconciler) reconcileBucketPolicyRemove(ctx context.Context, rc
 		log.V(1).Info("Removing bucket policy")
 		err := s3.DeletePolicy(ctx, rctx.Bucket.Status.BucketName, rctx.S3Client)
 		if err != nil {
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketPolicyRemoveFailed,
+				fmt.Sprintf("Failed to remove bucket policy: %v", err))
 			return fmt.Errorf("failed to delete policy: %w", err)
 		}
 
 		rctx.Bucket.Status.LastAppliedPolicy = ""
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionTrue, "PolicyDeleted", "Bucket policy removed successfully")
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketPolicyRemoved,
+			"Successfully removed bucket policy")
 		log.V(1).Info("Bucket policy removed successfully")
 	}
 
@@ -601,6 +656,8 @@ func (r *S3BucketReconciler) finalize(ctx context.Context, rctx *bucketReconcile
 	if rctx.Bucket.Status.BucketUsage.ObjectCount > 0 {
 		err := fmt.Errorf("bucket %s still has %d objects, cannot delete. Delete objects first or drain bucket using the drain-bucket-force annotation", rctx.Bucket.Status.BucketName, rctx.Bucket.Status.BucketUsage.ObjectCount)
 		log.Error(err, "Bucket not empty, cannot finalize")
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketNotEmpty,
+			fmt.Sprintf("Cannot delete bucket %s: still contains %d objects", rctx.Bucket.Status.BucketName, rctx.Bucket.Status.BucketUsage.ObjectCount))
 		return err
 	}
 
@@ -619,11 +676,18 @@ func (r *S3BucketReconciler) finalize(ctx context.Context, rctx *bucketReconcile
 	// Delete bucket from tenant.
 	// TODO: test if we need to drain the bucket first.
 	if rctx.Bucket.Status.BucketName != "" {
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketDeleting,
+			fmt.Sprintf("Deleting bucket %s", rctx.Bucket.Status.BucketName))
+
 		if err := grid.DeleteBucket(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient); err != nil {
 			log.Error(err, "Failed to delete bucket", "bucketName", rctx.Bucket.Status.BucketName)
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketDeleteFailed,
+				fmt.Sprintf("Failed to delete bucket: %v", err))
 			return fmt.Errorf("failed to delete bucket %s: %w", rctx.Bucket.Status.BucketName, err)
 		}
 		log.V(1).Info("Bucket deleted successfully", "bucketName", rctx.Bucket.Status.BucketName)
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketDeleted,
+			fmt.Sprintf("Successfully deleted bucket %s", rctx.Bucket.Status.BucketName))
 	}
 
 	log.V(1).Info("Finalization completed successfully")
@@ -664,6 +728,13 @@ func (r *S3BucketReconciler) reconcileBucketName(ctx context.Context, s3Bucket *
 
 func (r *S3BucketReconciler) getBucketIdentifier(s3Bucket *s3v1alpha1.S3Bucket) string {
 	return string(s3Bucket.UID)[0:8]
+}
+
+// emitEvent emits a Kubernetes event immediately.
+func (r *S3BucketReconciler) emitEvent(
+	rctx *bucketReconcileContext,
+	eventType, reason, message string) {
+	r.Recorder.Event(rctx.Bucket, eventType, reason, message)
 }
 
 // SetupWithManager sets up the controller with the Manager.

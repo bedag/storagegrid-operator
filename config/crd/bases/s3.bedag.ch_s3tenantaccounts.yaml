@@ -34,8 +34,12 @@ spec:
       jsonPath: .status.quota.limit
       name: Capacity
       type: string
+    - description: Default S3 address
+      jsonPath: .status.s3EndpointConfig.defaultAddress
+      name: Default Address
+      type: string
     - description: The class of the tenant account
-      jsonPath: .status.s3ApiEndpoint.s3TenantClassName
+      jsonPath: .status.s3EndpointConfig.s3TenantClassName
       name: TenantClass
       type: string
     - description: Current phase of the tenant account
@@ -530,6 +534,12 @@ spec:
                   grid endpoint of the backend.
                   this is the endpoint to access the StorageGrid management API.
                 type: string
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the most recent generation observed by the controller.
+                  It is used to track whether the controller has processed the latest spec changes.
+                format: int64
+                type: integer
               observedTenantBackendName:
                 default: ""
                 description: ObservedTenantBackendName is the actual name in the backend.
@@ -688,37 +698,42 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
-              s3ApiEndpoint:
+              s3EndpointConfig:
                 default: {}
                 description: |-
-                  S3 endpoint to use for tenant users.
-                  Includes URLs and VIPs to access your buckets and objects.
+                  S3 endpoint configuration for tenant users.
+                  Contains addresses to access your buckets and objects.
                 properties:
+                  addresses:
+                    description: |-
+                      Addresses is the deduplicated list of DNS names and IP addresses for this S3 endpoint.
+                      All addresses point to the same gateway/loadbalancer configuration.
+                      Addresses always atleast contains the DefaultAddress.
+                    items:
+                      type: string
+                    type: array
+                  defaultAddress:
+                    description: |-
+                      DefaultAddress is the primary address from the Addresses list.
+                      This is the recommended address to use for S3 API access.
+                    type: string
                   pathStyleAccess:
                     default: false
                     description: |-
-                      Use pathstyle access for the s3 api endpoint.
+                      PathStyleAccess indicates if path-style S3 access is required.
+                      When true, use path-style URLs (https://endpoint/bucket/key).
+                      When false, use virtual-hosted-style URLs (https://bucket.endpoint/key).
                       Defaults to false if not set.
                     type: boolean
                   port:
-                    description: Port for the S3 API endpoint.
+                    description: Port is the HTTPS port for S3 API access.
                     format: int32
                     type: integer
                   s3TenantClassName:
                     default: ""
-                    description: TenantClassName which this S3ApiEndpoint belongs
+                    description: TenantClassName which this S3EndpointConfig belongs
                       to.
                     type: string
-                  s3Urls:
-                    description: urls of the s3 api endpoint.
-                    items:
-                      type: string
-                    type: array
-                  s3VIPs:
-                    description: S3 VIPs to use for potential fw requests.
-                    items:
-                      type: string
-                    type: array
                 type: object
               s3TenantRef:
                 description: Reference to the S3Tenant this account is bounded by.

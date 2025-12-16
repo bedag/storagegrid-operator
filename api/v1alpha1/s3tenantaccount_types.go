@@ -129,6 +129,11 @@ type S3TenantAccountStatus struct {
 	// +optional
 	TenantDeletionPolicy *TenantDeletionPolicy `json:"tenantDeletionPolicy,omitempty"`
 
+	// ObservedGeneration is the most recent generation observed by the controller.
+	// It is used to track whether the controller has processed the latest spec changes.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// Track s3Tenant conditions.
 	// Track s3Tenant conditions.
 	// Conditions is an array of conditions.

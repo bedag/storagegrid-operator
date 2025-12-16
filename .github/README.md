@@ -96,6 +96,33 @@ Currently it supports basic bucket CRUD operations as well as defining a policy 
 - **Webhook Validation**: Built-in validation for resource configurations
 - **Garbage Collection**: Proper cleanup cascade when resources are deleted
 - **Metadata Enrichment**: As NetApp doesn't support tags on tenants, we enrich the tenant description with useful metadata such as the namespace, owner, and custom fields.
+- **Event Observability**: Kubernetes events for state transitions, errors, and significant operations across all controllers
+
+## Event Observability
+
+The operator emits Kubernetes events for state transitions, errors, and significant operations across all controllers. Events provide a user-visible timeline of operations without requiring log access.
+
+**Key characteristics:**
+- 64 unique event types across 5 controllers
+- Immediate emission for real-time visibility
+- State-change emission to prevent spam
+- Separate event streams per resource (no cross-resource propagation)
+
+For detailed information on event architecture and implementation, see [Event Architecture](../docs/architecture/events.md).
+
+### Critical Events
+
+**S3 Endpoint Connectivity** - If bucket policy operations fail, check for:
+- `S3EndpointConnectionFailed`: Cannot reach S3 loadbalancer endpoint
+- `S3EndpointConnectionEstablished`: Connection successful
+
+**Backend Connection** - For tenant operations:
+- `BackendConnectionFailed`: Cannot reach StorageGrid management API
+- `BackendConnectionRestored`: Management API connection restored
+
+**Grid Health** - For overall grid status:
+- `GridUnhealthy`: Too many unavailable nodes
+- `GridHealthRecovered`: Grid has recovered
 
 ## Installation
 
@@ -370,7 +397,7 @@ For issues and questions:
 
 ## Roadmap
 
-- [ ] Add Events
+- [x] Add Events
 - [ ] Implement Annotations to drain buckets and tenants on request
 - [ ] Integrate proper e2e tests - currently unable to test against a real StorageGrid instance due to lack of grid docker license. 
 - [ ] Write proper metrics of CRs created and backend calls

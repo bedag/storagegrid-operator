@@ -530,6 +530,12 @@ spec:
                   grid endpoint of the backend.
                   this is the endpoint to access the StorageGrid management API.
                 type: string
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the most recent generation observed by the controller.
+                  It is used to track whether the controller has processed the latest spec changes.
+                format: int64
+                type: integer
               observedTenantBackendName:
                 default: ""
                 description: ObservedTenantBackendName is the actual name in the backend.

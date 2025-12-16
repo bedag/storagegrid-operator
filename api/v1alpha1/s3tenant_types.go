@@ -45,6 +45,11 @@ type S3TenantStatus struct {
 	// embed common tenant status.
 	CommonTenantStatus `json:",inline"`
 
+	// ObservedGeneration is the most recent generation observed by the controller.
+	// It is used to track whether the controller has processed the latest spec changes.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// Track s3Tenant conditions.
 	// Conditions is an array of conditions.
 	// +patchStrategy=merge

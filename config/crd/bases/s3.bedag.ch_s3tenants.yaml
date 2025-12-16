@@ -366,6 +366,12 @@ spec:
                 items:
                   type: string
                 type: array
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the most recent generation observed by the controller.
+                  It is used to track whether the controller has processed the latest spec changes.
+                format: int64
+                type: integer
               phase:
                 default: Pending
                 description: |-

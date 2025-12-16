@@ -22,9 +22,11 @@ import (
 	"slices"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -39,7 +41,8 @@ import (
 // StorageGridReconciler reconciles a StorageGrid object.
 type StorageGridReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 type sgReconcileContext struct {
@@ -59,6 +62,7 @@ const (
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=storagegrids/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenants,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to.
 // move the current state of the cluster closer to the desired state.
@@ -143,13 +147,27 @@ func (r *StorageGridReconciler) doReconcile(ctx context.Context, rctx *sgReconci
 	err = r.initGridClient(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "GridClientInitError", fmt.Sprintf("Failed to initialize grid client: %v", err))
+		// Check if it's a credentials issue or connection issue
+		if err.Error() != "" {
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventGridConnectionFailed,
+				fmt.Sprintf("Failed to connect to StorageGrid: %v", err))
+		}
 		return err
+	}
+
+	// Check if we're recovering from a connection failure
+	reachableCondition := meta.FindStatusCondition(rctx.SG.Status.Conditions, s3v1alpha1.ConditionTypeReachable)
+	if reachableCondition != nil && reachableCondition.Status == metav1.ConditionFalse {
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventGridConnectionEstablished,
+			fmt.Sprintf("Successfully connected to StorageGrid at %s", rctx.SG.Spec.Endpoint))
 	}
 
 	// make sure regions are fetched and set.
 	err = r.reconcileRegions(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "RegionUpdateError", fmt.Sprintf("Failed to fetch regions: %v", err))
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventRegionsFetchFailed,
+			fmt.Sprintf("Failed to fetch regions: %v", err))
 		return err
 	}
 
@@ -341,6 +359,8 @@ func (r *StorageGridReconciler) initGridClient(ctx context.Context, rctx *sgReco
 	username, password, err := kube.FetchCredentialsFromSecret(ctx, r.Client, rctx.SG.Spec.SecretRef.Namespace, rctx.SG.Spec.SecretRef.Name)
 	if err != nil {
 		log.Error(err, "Failed to fetch grid client credentials")
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventGridCredentialsFailed,
+			fmt.Sprintf("Failed to fetch credentials from secret %s/%s: %v", rctx.SG.Spec.SecretRef.Namespace, rctx.SG.Spec.SecretRef.Name, err))
 		return err
 	}
 
@@ -374,6 +394,8 @@ func (r *StorageGridReconciler) reconcileRegions(ctx context.Context, rctx *sgRe
 	} else {
 		log.V(1).Info("Updating regions", "oldRegions", rctx.SG.Status.Regions, "newRegions", *regions)
 		rctx.SG.Status.Regions = *regions
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventRegionsUpdated,
+			fmt.Sprintf("Updated available regions: %v", *regions))
 	}
 
 	// make sure a default region is set.
@@ -392,7 +414,15 @@ func (r *StorageGridReconciler) reconcileRegions(ctx context.Context, rctx *sgRe
 
 	if rctx.SG.Status.DefaultBucketRegion != defaultRegion {
 		log.V(1).Info(fmt.Sprintf("Updating default region from %s to %s", rctx.SG.Status.DefaultBucketRegion, defaultRegion))
+		old := rctx.SG.Status.DefaultBucketRegion
 		rctx.SG.Status.DefaultBucketRegion = defaultRegion
+		if old != "" {
+			r.emitEvent(rctx, corev1.EventTypeNormal, EventDefaultRegionSet,
+				fmt.Sprintf("Default bucket region changed from %s to %s", old, defaultRegion))
+		} else {
+			r.emitEvent(rctx, corev1.EventTypeNormal, EventDefaultRegionSet,
+				fmt.Sprintf("Default bucket region set to %s", defaultRegion))
+		}
 	}
 
 	return nil
@@ -405,11 +435,22 @@ func (r *StorageGridReconciler) reconcileGridHealth(ctx context.Context, rctx *s
 	isOperative, err := grid.IsOperative(ctx, rctx.GridClient, rctx.SG.Spec.MaxUnavailableNodes)
 	if err != nil {
 		log.Error(err, "Failed to check grid health")
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventGridHealthCheckFailed,
+			fmt.Sprintf("Health check failed: %v", err))
 		return err
 	}
 
+	// Check previous health state
+	reachableCondition := meta.FindStatusCondition(rctx.SG.Status.Conditions, s3v1alpha1.ConditionTypeReachable)
+	wasHealthy := reachableCondition != nil && reachableCondition.Status == metav1.ConditionTrue
+
 	if isOperative {
 		log.V(1).Info("Grid is healthy and operative")
+		// Emit recovery event if grid was previously unhealthy
+		if !wasHealthy && reachableCondition != nil {
+			r.emitEvent(rctx, corev1.EventTypeNormal, EventGridHealthRecovered,
+				"StorageGrid has recovered and is now healthy")
+		}
 	} else {
 		log.V(1).Info("Grid is not healthy or operative, checking for reasons")
 		reasons, err := grid.GetOperativeReason(ctx, rctx.GridClient, rctx.SG.Spec.MaxUnavailableNodes)
@@ -420,9 +461,13 @@ func (r *StorageGridReconciler) reconcileGridHealth(ctx context.Context, rctx *s
 
 		if len(reasons) > 0 {
 			log.V(1).Info("Grid health issues found", "reasons", reasons)
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventGridUnhealthy,
+				fmt.Sprintf("StorageGrid is unhealthy: %v", reasons))
 			return fmt.Errorf("grid is not healthy, reasons: %v", reasons)
 		} else {
 			log.V(1).Info("Grid is considered not healthy but no specific issues found, please check the grid manually")
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventGridUnhealthy,
+				"StorageGrid is unhealthy but no specific issues identified")
 			return fmt.Errorf("grid is not healthy but no specific issues found, please check the grid manually")
 		}
 	}
@@ -441,6 +486,13 @@ func (r *StorageGridReconciler) setCondition(sg *s3v1alpha1.StorageGrid, condTyp
 	}
 
 	meta.SetStatusCondition(&sg.Status.Conditions, condition)
+}
+
+// emitEvent emits a Kubernetes event immediately.
+func (r *StorageGridReconciler) emitEvent(
+	rctx *sgReconcileContext,
+	eventType, reason, message string) {
+	r.Recorder.Event(rctx.SG, eventType, reason, message)
 }
 
 // SetupWithManager sets up the controller with the Manager.

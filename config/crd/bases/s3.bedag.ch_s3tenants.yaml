@@ -34,6 +34,10 @@ spec:
       jsonPath: .status.phase
       name: Phase
       type: string
+    - description: Ready status
+      jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
     - description: Backing S3 Tenant Account
       jsonPath: .status.s3TenantAccountRef.name
       name: Account

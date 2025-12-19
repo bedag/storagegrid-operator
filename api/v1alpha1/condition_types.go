@@ -24,6 +24,7 @@ const (
 	ConditionTypeCreated                  = "Created"
 	ConditionTypeReconcileSucceeded       = "ReconcileSucceeded"
 	ContitionTypeBackingResourceReady     = "BackingResourceReady"
+	ConditionTypeAccountReady             = "AccountReady"
 	ConditionTypeBound                    = "Bound"
 	ConditionTypePending                  = "Pending"
 	ConditionTypeRetained                 = "Retained"

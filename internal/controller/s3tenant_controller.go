@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -200,14 +199,9 @@ func (r *S3TenantReconciler) doReconcile(ctx context.Context, rctx *tenantReconc
 
 	// copy the status from the account to the tenant.
 	err = r.reconcileTenantAccountStatus(ctx, rctx)
-	if err != nil && err.Error() == errorAccountNotPhaseBound {
-		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypePending, metav1.ConditionTrue, "TenantAccountNotPhaseBound", fmt.Sprintf("S3TenantAccount %s is still in state %s", rctx.Account.Name, rctx.Account.Status.Phase))
-		r.emitEvent(rctx, corev1.EventTypeNormal, EventAccountNotReady,
-			fmt.Sprintf("Waiting for S3TenantAccount %s to become ready (current phase: %s)", rctx.Account.Name, rctx.Account.Status.Phase))
-	} else if err != nil {
+	if err != nil {
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantAccountStatusSyncFailed", fmt.Sprintf("Failed to sync tenant account status: %s", err.Error()))
 	}
-	r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypePending, metav1.ConditionFalse, "TenantAccountReady", fmt.Sprintf("S3TenantAccount %s is ready", rctx.Account.Name))
 
 	// examine DeletionTimestamp to determine if object is under deletion.
 	// contrary to other resources we can only now safely handle deletion because we need to ensure that the status of the account is in sync
@@ -263,6 +257,7 @@ func (r *S3TenantReconciler) deriveReadiness(ctx context.Context, s3Tenant *s3v1
 	reconciliation := false
 	backendReady := false
 	backendPending := false
+	accountReady := false
 
 	// message that will show on the ready condition.
 	message := ""
@@ -335,17 +330,38 @@ func (r *S3TenantReconciler) deriveReadiness(ctx context.Context, s3Tenant *s3v1
 		message = strings.TrimSuffix(message, ", Backing resource is pending")
 	}
 
-	if reconciliation && backendReady && !backendPending {
+	// check whether the account is ready.
+	accountCondition := meta.FindStatusCondition(s3Tenant.Status.Conditions, s3v1alpha1.ConditionTypeAccountReady)
+	if accountCondition != nil {
+		if accountCondition.ObservedGeneration == s3Tenant.GetGeneration() {
+			if accountCondition.Status == metav1.ConditionTrue {
+				log.V(1).Info("S3TenantAccount is ready")
+				message += ", Account is ready"
+				accountReady = true
+			} else {
+				log.V(1).Info("S3TenantAccount is not ready")
+				message += ", Account is not ready"
+			}
+		} else {
+			log.V(1).Info("Account condition is not from the current generation, overall ready state is false")
+			message += ", Account condition is not from the current generation"
+		}
+	} else {
+		log.V(1).Info("Account condition not found, overall ready state is false")
+		message += ", Account condition not found"
+	}
+
+	if reconciliation && backendReady && !backendPending && accountReady {
 		log.V(1).Info("S3Tenant is ready")
-		s3Tenant.Status.Phase = "Bound"
+		s3Tenant.Status.Phase = s3v1alpha1.PhaseBound
 		r.setCondition(s3Tenant, s3v1alpha1.ConditionTypeReady, metav1.ConditionTrue, "S3TenantReady", message)
 	} else if reconciliation && backendReady && backendPending {
 		log.V(1).Info("S3Tenant is almost ready, you can perform storage operations, but some background tasks are still running")
-		s3Tenant.Status.Phase = "Pending"
+		s3Tenant.Status.Phase = s3v1alpha1.PhaseBound
 		r.setCondition(s3Tenant, s3v1alpha1.ConditionTypeReady, metav1.ConditionFalse, "S3TenantPending", message)
 	} else {
 		log.V(1).Info("S3Tenant is not ready")
-		s3Tenant.Status.Phase = "Failed"
+		s3Tenant.Status.Phase = s3v1alpha1.PhaseBound
 		r.setCondition(s3Tenant, s3v1alpha1.ConditionTypeReady, metav1.ConditionFalse, "S3TenantNotReady", message)
 	}
 }
@@ -493,18 +509,29 @@ func (r *S3TenantReconciler) reconcileTenantAccountSpec(ctx context.Context, rct
 func (r *S3TenantReconciler) reconcileTenantAccountStatus(ctx context.Context, rctx *tenantReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// if the account is not ready, we cannot update the status.
-	if rctx.Account.Status.Phase != s3v1alpha1.PhaseBound {
-		log.V(1).Info("S3TenantAccount is not bound, skipping status update")
-		return errors.New(errorAccountNotPhaseBound)
-	}
-
-	// copy the common tenant fields from the account to the tenant.
+	// Always copy status from account to tenant, regardless of account phase
 	if !equality.Semantic.DeepEqual(rctx.S3Tenant.Status.CommonTenantStatus, rctx.Account.Status.CommonTenantStatus) {
 		log.V(1).Info("S3TenantAccount status changed, updating S3Tenant status")
 		rctx.S3Tenant.Status.CommonTenantStatus = rctx.Account.Status.CommonTenantStatus
 	} else {
 		log.V(1).Info("S3TenantAccount status did not change, no update needed for S3Tenant status")
+	}
+
+	// Set AccountReady condition based on account phase
+	if rctx.Account.Status.Phase == s3v1alpha1.PhaseBound {
+		log.V(1).Info("S3TenantAccount is bound and ready")
+		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeAccountReady, metav1.ConditionTrue,
+			"AccountReady", fmt.Sprintf("S3TenantAccount %s is ready", rctx.Account.Name))
+		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypePending, metav1.ConditionFalse,
+			"TenantAccountReady", fmt.Sprintf("S3TenantAccount %s is ready", rctx.Account.Name))
+	} else {
+		log.V(1).Info("S3TenantAccount is not bound", "phase", rctx.Account.Status.Phase)
+		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeAccountReady, metav1.ConditionFalse,
+			"AccountNotReady", fmt.Sprintf("S3TenantAccount %s is in phase %s", rctx.Account.Name, rctx.Account.Status.Phase))
+		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypePending, metav1.ConditionTrue,
+			"TenantAccountNotPhaseBound", fmt.Sprintf("S3TenantAccount %s is still in state %s", rctx.Account.Name, rctx.Account.Status.Phase))
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventAccountNotReady,
+			fmt.Sprintf("S3TenantAccount %s is not ready (current phase: %s)", rctx.Account.Name, rctx.Account.Status.Phase))
 	}
 
 	return nil
@@ -581,6 +608,18 @@ func (r *S3TenantReconciler) finalize(ctx context.Context, rctx *tenantReconcile
 	return nil
 }
 
+// shouldKeepOnTenant checks if an annotation should remain on S3Tenant
+// rather than being automatically removed after propagation to S3TenantAccount.
+// all of these annotations either are to be removed by the user or through a dedicated function when implementing.
+func shouldKeepOnTenant(annotationKey string) bool {
+	for _, keepAnnotation := range TenantAnnotationsToKeep {
+		if annotationKey == keepAnnotation {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *S3TenantReconciler) reconcileTenantAnnotations(ctx context.Context, rctx *tenantReconcileContext) error {
 	log := log.FromContext(ctx)
 
@@ -594,11 +633,14 @@ func (r *S3TenantReconciler) reconcileTenantAnnotations(ctx context.Context, rct
 	updatedAnnotations := map[string]string{}
 	for key, value := range rctx.S3Tenant.Annotations {
 		if strings.HasPrefix(key, TenantPrefix) {
+			// Always copy to Account for operational use
 			updatedAnnotations[key] = value
 
-			// remove annotations from tenant.
-			delete(rctx.S3Tenant.Annotations, key)
-			rctx.ObjectUpdated = true
+			// Remove from Tenant UNLESS it's whitelisted to stay
+			if !shouldKeepOnTenant(key) {
+				delete(rctx.S3Tenant.Annotations, key)
+				rctx.ObjectUpdated = true
+			}
 		}
 	}
 

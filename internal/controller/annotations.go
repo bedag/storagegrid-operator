@@ -62,4 +62,14 @@ var (
 	// eg buckets created manually or by another operator.
 	// buckets will be orphaned and the account is left intact.
 	AnnotationIgnoreUnmanagedBuckets = fmt.Sprintf("%s.%s/ignore-unmanaged-buckets", TenantPrefix, Domain)
+
+	// TenantAnnotationsToKeep defines annotations that should remain on S3Tenant
+	// and NOT be automatically removed after propagation to S3TenantAccount.
+	// These typically serve as user-visible safety gates or status indicators.
+	// Each annotation in this list requires documented removal strategy:
+	// - Automatic: removed when resource is deleted
+	// - Explicit: controller logic removes after operation completes
+	TenantAnnotationsToKeep = []string{
+		AnnotationAllowTenantDeletion, // Stays until user removes or resource deleted
+	}
 )

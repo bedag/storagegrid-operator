@@ -14,54 +14,54 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package v1alpha1
 
 import "fmt"
 
 const (
 	// Domain will be used for all annotations.
-	Domain       = "s3.bedag.ch"
-	TenantPrefix = "tenant" // will be forwarded from the s3tenant to the account
-	AdminPrefix  = "admin"  // will not be passed through from tenant to the account
-	BucketPrefix = "bucket"
-	GridPrefix   = "grid"
+	Domain                 = "s3.bedag.ch"
+	AnnotationPrefixTenant = "tenant" // will be forwarded from the s3tenant to the account
+	AnnotationPrefixAdmin  = "admin"  // will not be passed through from tenant to the account
+	AnnotationPrefixBucket = "bucket"
+	AnnotationPrefixGrid   = "grid"
 )
 
 var (
 	// recreate credentials.
-	AnnotationRecreateBucketKeypairs   = fmt.Sprintf("%s.%s/recreate-s3-access-keys", BucketPrefix, Domain)
-	AnnotationRecreateTenantKeypairs   = fmt.Sprintf("%s.%s/recreate-s3-access-keys", TenantPrefix, Domain)
-	AnnotationResetTenantAdminPassword = fmt.Sprintf("%s.%s/reset-admin-password", AdminPrefix, Domain)
+	AnnotationRecreateBucketKeypairs   = fmt.Sprintf("%s.%s/recreate-s3-access-keys", AnnotationPrefixBucket, Domain)
+	AnnotationRecreateTenantKeypairs   = fmt.Sprintf("%s.%s/recreate-s3-access-keys", AnnotationPrefixTenant, Domain)
+	AnnotationResetTenantAdminPassword = fmt.Sprintf("%s.%s/reset-admin-password", AnnotationPrefixAdmin, Domain)
 
 	// import existing s3 tenant into state.
 	// TODO: implement this.
-	AnnotationExistingTenant = fmt.Sprintf("%s.%s/existing-tenant-id", AdminPrefix, Domain)
+	AnnotationExistingTenant = fmt.Sprintf("%s.%s/existing-tenant-id", AnnotationPrefixAdmin, Domain)
 
 	// force a recreation of the tenant.
-	AnnotationRecreateTenant = fmt.Sprintf("%s.%s/recreate-tenant", TenantPrefix, Domain)
+	AnnotationRecreateTenant = fmt.Sprintf("%s.%s/recreate-tenant", AnnotationPrefixTenant, Domain)
 
 	// allow the changing of the S3TenantClassName in a tenant since this can change the api endpoints.
-	AnnotationAllowTenantClassNameChange = fmt.Sprintf("%s.%s/allow-tenant-class-name-change", TenantPrefix, Domain)
+	AnnotationAllowTenantClassNameChange = fmt.Sprintf("%s.%s/allow-tenant-class-name-change", AnnotationPrefixTenant, Domain)
 
 	// allow shrinking of the tenant quota.
 	// TODO: implement this.
-	AnnotationAllowTenantQuotaShrinking = fmt.Sprintf("%s.%s/allow-tenant-quota-shrink", TenantPrefix, Domain)
+	AnnotationAllowTenantQuotaShrinking = fmt.Sprintf("%s.%s/allow-tenant-quota-shrink", AnnotationPrefixTenant, Domain)
 
 	// allow force deletion of the tenant.
 	// TODO: implement this.
-	AnnotationForceDeleteTenant = fmt.Sprintf("%s.%s/force-tenant-delete", TenantPrefix, Domain)
+	AnnotationForceDeleteTenant = fmt.Sprintf("%s.%s/force-tenant-delete", AnnotationPrefixTenant, Domain)
 
 	// allow the deletion of the account.
-	AnnotationAllowTenantDeletion = fmt.Sprintf("%s.%s/allow-tenant-deletetion", TenantPrefix, Domain)
+	AnnotationAllowTenantDeletion = fmt.Sprintf("%s.%s/allow-tenant-deletion", AnnotationPrefixTenant, Domain)
 
 	// Annotation to drain a bucket, deleting all objects stored in it before deleting the bucket itself.
-	AnnotationDrainBucket = fmt.Sprintf("%s.%s/force-drain-bucket", BucketPrefix, Domain)
+	AnnotationDrainBucket = fmt.Sprintf("%s.%s/force-drain-bucket", AnnotationPrefixBucket, Domain)
 
 	// Tenant annotation to ignore buckets on deletion
 	// this annotation only applied to buckets that are not managed by the operator itself.
 	// eg buckets created manually or by another operator.
 	// buckets will be orphaned and the account is left intact.
-	AnnotationIgnoreUnmanagedBuckets = fmt.Sprintf("%s.%s/ignore-unmanaged-buckets", TenantPrefix, Domain)
+	AnnotationIgnoreUnmanagedBuckets = fmt.Sprintf("%s.%s/ignore-unmanaged-buckets", AnnotationPrefixTenant, Domain)
 
 	// TenantAnnotationsToKeep defines annotations that should remain on S3Tenant
 	// and NOT be automatically removed after propagation to S3TenantAccount.

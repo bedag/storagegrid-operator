@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
-	controller "github.com/bedag/storagegrid-operator/internal/controller"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -123,11 +122,11 @@ func (r *S3TenantValidator) ValidateDelete(ctx context.Context, obj runtime.Obje
 	s3tenantlog.Info("validate delete", "name", s3tenant.Name)
 
 	// deletion is blocked until the allow-delete annotation is added.
-	if _, ok := s3tenant.Annotations[controller.AnnotationAllowTenantDeletion]; ok {
+	if _, ok := s3tenant.Annotations[s3v1alpha1.AnnotationAllowTenantDeletion]; ok {
 		return nil, nil
 	}
 
-	return nil, fmt.Errorf("deletion of s3tenant %s is blocked until annotation %s is set, please add this first", s3tenant.Name, controller.AnnotationAllowTenantDeletion)
+	return nil, fmt.Errorf("deletion of s3tenant %s is blocked until annotation %s is set, please add this first", s3tenant.Name, s3v1alpha1.AnnotationAllowTenantDeletion)
 }
 
 func (r *S3TenantValidator) tenantClassExists(ctx context.Context, tenantClassName string) (bool, error) {

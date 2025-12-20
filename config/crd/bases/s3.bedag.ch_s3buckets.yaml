@@ -30,6 +30,18 @@ spec:
       jsonPath: .status.region
       name: Region
       type: string
+    - description: S3 API endpoint address
+      jsonPath: .status.s3EndpointConfig.defaultAddress
+      name: Endpoint
+      type: string
+    - description: Current lifecycle phase
+      jsonPath: .status.phase
+      name: Phase
+      type: string
+    - description: Number of objects in bucket
+      jsonPath: .status.bucketUsage.objectCount
+      name: Objects
+      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: AGE
       type: date
@@ -62,6 +74,17 @@ spec:
                 description: |-
                   specify a s3 bucketpolicy as json to apply to the bucket.
                   check the s3 documentation for the policy json format.
+                type: string
+              drainPollInterval:
+                description: |-
+                  DrainPollInterval overrides the StorageGrid drain polling frequency for this bucket.
+                  When set, replaces the two-tier polling strategy with this single interval.
+                  Use for buckets needing different polling behavior (e.g., huge bucket = 4h+, urgent = 1m).
+                type: string
+              drainStuckThreshold:
+                description: |-
+                  DrainStuckThreshold overrides when to consider this bucket's drain stuck.
+                  Use for buckets with expected slow drain rates (e.g., 24h+ for multi-billion object bucket).
                 type: string
               region:
                 description: region of the S3 Bucket.
@@ -215,8 +238,65 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              drainStatus:
+                description: |-
+                  DrainStatus tracks active drain operation progress.
+                  Only present during active drain. Cleared when drain completes or is cancelled.
+                properties:
+                  initialObjectBytes:
+                    description: InitialObjectBytes is the total bytes when drain
+                      started.
+                    format: int64
+                    type: integer
+                  initialObjectCount:
+                    description: InitialObjectCount is the number of objects when
+                      drain started.
+                    format: int64
+                    type: integer
+                  isDeletingObjects:
+                    description: IsDeletingObjects indicates if StorageGrid is currently
+                      deleting objects.
+                    type: boolean
+                  lastCheckedAt:
+                    description: LastCheckedAt is when we last polled the backend
+                      for status.
+                    format: date-time
+                    type: string
+                  lastProgressAt:
+                    description: LastProgressAt is when object count last decreased
+                      (for stuck detection).
+                    format: date-time
+                    type: string
+                  message:
+                    description: Message provides human-readable status information.
+                    type: string
+                  nextPollInterval:
+                    description: |-
+                      NextPollInterval is when to requeue the next reconcile.
+                      Re-computed on every drain reconciliation based on current config + elapsed time.
+                      Allows config changes to take effect immediately.
+                    type: string
+                  previousObjectCount:
+                    description: PreviousObjectCount is the object count from last
+                      check (to detect progress).
+                    format: int64
+                    type: integer
+                  startedAt:
+                    description: |-
+                      StartedAt marks when the drain operation began.
+                      If nil while IsDeletingObjects=true, indicates orphaned drain (not initiated by operator).
+                    format: date-time
+                    type: string
+                required:
+                - isDeletingObjects
+                - nextPollInterval
+                type: object
               lastAppliedPolicy:
                 description: track last successfully applied policy.
+                type: string
+              phase:
+                default: Pending
+                description: Phase represents the current lifecycle phase of the bucket.
                 type: string
               region:
                 description: The region the bucket is created in.

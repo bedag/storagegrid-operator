@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -24,6 +26,11 @@ import (
 const (
 	DefaultRetentionDuration       = "168h"                     // 7 days
 	DefaultTenantDeletionProcedure = TenantDeletionPolicyRetain // Default policy for tenant deletion
+
+	// Default bucket drain operation intervals
+	DefaultDrainInitialPollInterval     = 3 * time.Minute
+	DefaultDrainLongRunningPollInterval = 30 * time.Minute
+	DefaultDrainStuckThreshold          = 3 * time.Hour
 )
 
 type TenantDeletionPolicyType string
@@ -50,8 +57,18 @@ type StorageGridSpec struct {
 	// The secret containing the credentials for the StorageGrid.
 	SecretRef corev1.ObjectReference `json:"secretRef"`
 
-	// The endpoint of the StorageGrid.
-	Endpoint string `json:"endpoint,omitempty"`
+	// ManagementEndpoint is the StorageGrid admin API endpoint for tenant management,
+	// user creation, quota configuration, and administrative operations.
+	// Example: https://grid-admin.internal.example.com
+	ManagementEndpoint string `json:"managementEndpoint,omitempty"`
+
+	// S3OperationsTenantClass optionally specifies which S3TenantClass the operator uses
+	// for S3 API operations (eg. bucket policies).
+	// If not set, S3 operations use each bucket's tenant-specific S3TenantClass endpoint.
+	// Use this when operator pods cannot reach all tenant-specific endpoints but can
+	// access a specific gateway endpoint (e.g., internal management network).
+	// +optional
+	S3OperationsTenantClass string `json:"s3OperationsTenantClass,omitempty"`
 
 	// Default region for buckets created in the StorageGrid, defaults to the first region in the list.
 	// +optional
@@ -79,6 +96,45 @@ type StorageGridSpec struct {
 	// +kubebuilder:default=1
 	// +optional
 	MaxUnavailableNodes int `json:"maxUnavailableNodes,omitempty"`
+
+	// Operations configures execution parameters for long-running StorageGrid operations.
+	// These settings tune how operations execute, not what operations to perform.
+	// +optional
+	Operations *OperationsConfig `json:"operations,omitempty"`
+}
+
+// OperationsConfig defines operational parameters for StorageGrid operations.
+type OperationsConfig struct {
+	// Drain configures bucket drain operation execution parameters.
+	// Used by all bucket drain operations unless overridden at bucket level.
+	// +optional
+	Drain *DrainConfig `json:"drain,omitempty"`
+
+	// TODO: Future expansion:
+	// - RateLimit for API throttling
+	// - Retry policies
+	// - Observability/metrics configuration
+}
+
+// DrainConfig defines parameters for bucket drain operations.
+type DrainConfig struct {
+	// InitialPollInterval defines how often to check drain progress during
+	// the first hour of operation (when StorageGrid typically makes faster progress).
+	// +kubebuilder:default="3m"
+	// +optional
+	InitialPollInterval *metav1.Duration `json:"initialPollInterval,omitempty"`
+
+	// LongRunningPollInterval defines how often to check drain progress after
+	// the first hour (when operations typically slow down for large buckets).
+	// +kubebuilder:default="30m"
+	// +optional
+	LongRunningPollInterval *metav1.Duration `json:"longRunningPollInterval,omitempty"`
+
+	// StuckThreshold defines how long without progress before considering a drain stuck.
+	// If object count doesn't decrease within this duration, a warning event is emitted.
+	// +kubebuilder:default="3h"
+	// +optional
+	StuckThreshold *metav1.Duration `json:"stuckThreshold,omitempty"`
 }
 
 type TenantDeletionPolicy struct {
@@ -158,7 +214,7 @@ type StorageGridUsage struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,shortName={"sg","sg"}
+// +kubebuilder:resource:scope=Cluster,shortName={"sg","sgs"}
 // +kubebuilder:printcolumn:name="Ready",type="boolean",JSONPath=".status.ready",description="The current readiness state of the StorageGrid"
 // +kubebuilder:printcolumn:name="DeletionPolicy",type="string",JSONPath=".status.defaultTenantDeletionPolicy.policy",description="Deletion policy by default for tenants"
 // +kubebuilder:printcolumn:JSONPath=`.metadata.creationTimestamp`,name=`AGE`,type=date

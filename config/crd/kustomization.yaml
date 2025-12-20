@@ -20,14 +20,10 @@ patches:
 
 # [CERTMANAGER] To enable cert-manager, uncomment all the sections with [CERTMANAGER] prefix.
 # patches here are for enabling the CA injection for each CRD
-- path: patches/cainjection_in_s3tenants.yaml
-# - path: patches/cainjection_in_storagegrids.yaml
 - path: patches/cainjection_in_s3buckets.yaml
-#- path: patches/cainjection_in_s3buckets.yaml
-#- path: patches/cainjection_in_s3tenantclasses.yaml
-#- path: patches/cainjection_in_s3tenants.yaml
-#- path: patches/cainjection_in_storagegrids.yaml
-#- path: patches/cainjection_in_s3tenantaccounts.yaml
+- path: patches/cainjection_in_s3tenants.yaml
+# - path: patches/cainjection_in_s3tenantaccounts.yaml # TODO: implement CA injection patch for S3TenantAccount CRD if required
+# - path: patches/cainjection_in_storagegrids.yaml # TODO: implement CA injection patch for StorageGrid CRD if required
 # +kubebuilder:scaffold:crdkustomizecainjectionpatch
 
 # [WEBHOOK] To enable webhook, uncomment the following section

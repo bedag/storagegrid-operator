@@ -1,4 +1,18 @@
-# The following patch adds a directive for certmanager to inject CA into the CRD
+# CA Injection for S3Bucket CRD
+#
+# This patch instructs cert-manager to inject the Certificate Authority (CA) bundle
+# into the S3Bucket CustomResourceDefinition. This is required when using
+# conversion webhooks for API version migrations.
+#
+# Purpose:
+# - Enables the Kubernetes API server to trust the webhook's TLS certificate
+# - The CA bundle is injected into spec.conversion.webhook.clientConfig.caBundle
+# - Required when cert-manager manages webhook certificates
+#
+# Usage:
+# - Applied automatically during `make manifests` when webhooks are configured
+# - CERTIFICATE_NAMESPACE and CERTIFICATE_NAME are replaced by kustomize
+#
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:

@@ -289,6 +289,109 @@ spec:
   region: "us-east-1"
 ```
 
+#### Bucket Lifecycle Phases
+
+Buckets have the following lifecycle phases:
+
+- **Pending**: Initial state, waiting for StorageGrid confirmation
+- **Ready**: Normal operation, bucket available for object storage
+- **Draining**: Automatically deleting all objects (see Draining Buckets below)
+- **Failed**: Error condition requiring intervention
+- **Deleting**: Finalizer cleanup, removing from StorageGrid
+
+Monitor bucket phase:
+```bash
+kubectl get s3bucket my-bucket -o jsonpath='{.status.phase}'
+```
+
+#### Draining Buckets
+
+Buckets cannot be deleted while they contain objects. Use the drain annotation to automatically delete all objects before bucket deletion:
+
+**Trigger a drain:**
+```bash
+kubectl annotate s3bucket my-bucket bucket.s3.bedag.ch/force-drain-bucket=true
+```
+
+**Monitor drain progress:**
+```bash
+# Watch phase transition to Draining
+kubectl get s3bucket my-bucket -w
+
+# Check detailed drain status
+kubectl get s3bucket my-bucket -o yaml | yq .status.drainStatus
+
+# View drain events
+kubectl describe s3bucket my-bucket
+```
+
+**Cancel an in-progress drain:**
+```bash
+kubectl annotate s3bucket my-bucket bucket.s3.bedag.ch/force-drain-bucket-
+```
+
+**Configure drain behavior:**
+
+Drain polling intervals and thresholds can be customized at the bucket or grid level:
+
+```yaml
+# Grid-level configuration (applies to all buckets)
+# Likely done by the grid administrator
+apiVersion: s3.bedag.ch/v1alpha1
+kind: StorageGrid
+metadata:
+  name: my-storagegrid
+spec:
+  operations:
+    drain:
+      initialPollInterval: "3m"        # Fast polling initially
+      longRunningPollInterval: "30m"   # Slower after 1 hour
+      stuckThreshold: "3h"             # Warning if no progress
+
+---
+# Bucket-level override (highest priority)
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3Bucket
+metadata:
+  name: my-large-bucket
+spec:
+  drainPollInterval: "5m"       # Custom polling interval
+  drainStuckThreshold: "2h"     # Custom stuck detection
+```
+
+**Drain States:**
+- Operator polls StorageGrid for progress every 3-30 minutes
+- Emits events for started, progress, stuck, complete, and cancelled states
+- Automatically removes annotation when drain completes
+- Returns bucket to Ready phase after successful drain
+
+For drain architecture details, see [Drain Operations Architecture](../docs/architecture/drain-operations.md).
+
+#### Deleting Tenants with Buckets
+
+To delete a tenant that has buckets:
+
+1. **Drain all tenant buckets:**
+   ```bash
+   kubectl annotate s3buckets -l tenant=my-tenant bucket.s3.bedag.ch/force-drain-bucket=true
+   ```
+
+2. **Monitor drain progress:**
+   ```bash
+   kubectl get s3buckets -l tenant=my-tenant -w
+   ```
+
+3. **Delete empty buckets or wait for drain completion:**
+   ```bash
+   # Buckets auto-delete after draining if you delete them
+   kubectl delete s3buckets -l tenant=my-tenant
+   ```
+
+4. **Delete the tenant:**
+   ```bash
+   kubectl delete s3tenant my-tenant
+   ```
+
 #### Secrets Created
 
 When the `S3Bucket` is created, the operator will create a corresponding `Secret` in the same namespace containing the S3 access credentials for the bucket. The secret will be named `s3-bucket-<bucket-name>-credentials`.
@@ -455,7 +558,8 @@ For issues and questions:
 ## Roadmap
 
 - [x] Add Events
-- [ ] Implement Annotations to drain buckets and tenants on request
+- [x] Implement bucket drain annotation for automatic object deletion
+- [ ] Implement labels for all resources for easier filtering
 - [ ] Integrate proper e2e tests - currently unable to test against a real StorageGrid instance due to lack of grid docker license. 
 - [ ] Write proper metrics of CRs created and backend calls
 - [ ] Allow the import of existing grid accounts as S3TenantAccount resources

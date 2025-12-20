@@ -323,3 +323,78 @@ func getBucketGroupAndAdminUserName(identifier string) (groupName string, userNa
 	userName = fmt.Sprintf("bucket-admin-%s", identifier)
 	return groupName, userName
 }
+
+// DrainBucket initiates an asynchronous bucket drain operation in StorageGrid.
+// This tells StorageGrid to start deleting all objects in the bucket.
+func DrainBucket(ctx context.Context, bucketName string, tenantClient *TenantClient) error {
+	log := log.FromContext(ctx).WithValues("func", "DrainBucket")
+	log.V(1).Info(fmt.Sprintf("Initiating drain for bucket %s", bucketName))
+
+	// Call SDK: POST /org/containers/{name}/delete-objects with deleteObjects=true
+	status, err := tenantClient.Bucket().Drain(ctx, bucketName)
+	if err != nil {
+		log.Error(err, "Failed to initiate bucket drain")
+		return fmt.Errorf("failed to initiate drain: %w", err)
+	}
+
+	log.V(1).Info("Bucket drain initiated successfully", "isDeletingObjects", *status.IsDeletingObjects)
+	return nil
+}
+
+// DrainStatus represents the current state of a bucket drain operation.
+// This is a grid-layer abstraction over the SDK's BucketDeleteObjectStatus.
+type DrainStatus struct {
+	// IsDeletingObjects indicates whether a drain operation is currently active.
+	IsDeletingObjects bool
+	// InitialObjectCount is the number of objects when drain started (0 if unknown).
+	InitialObjectCount int64
+	// InitialObjectBytes is the total bytes when drain started (0 if unknown).
+	InitialObjectBytes int64
+}
+
+// GetBucketDrainStatus retrieves current drain operation status from StorageGrid.
+// Returns the drain status including whether objects are being deleted and counts.
+func GetBucketDrainStatus(ctx context.Context, bucketName string, tenantClient *TenantClient) (*DrainStatus, error) {
+	log := log.FromContext(ctx).WithValues("func", "GetBucketDrainStatus")
+	log.V(1).Info(fmt.Sprintf("Fetching drain status for bucket %s", bucketName))
+
+	// Call SDK: GET /org/containers/{name}/delete-objects
+	sdkStatus, err := tenantClient.Bucket().DrainStatus(ctx, bucketName)
+	if err != nil {
+		log.Error(err, "Failed to get bucket drain status")
+		return nil, fmt.Errorf("failed to get drain status: %w", err)
+	}
+
+	// Convert SDK type to grid type
+	status := &DrainStatus{
+		IsDeletingObjects:  sdkStatus.IsDeletingObjects != nil && *sdkStatus.IsDeletingObjects,
+		InitialObjectCount: 0,
+		InitialObjectBytes: 0,
+	}
+	if sdkStatus.InitialObjectCount != nil {
+		status.InitialObjectCount = int64(*sdkStatus.InitialObjectCount)
+	}
+	if sdkStatus.InitialObjectBytes != nil {
+		status.InitialObjectBytes = int64(*sdkStatus.InitialObjectBytes)
+	}
+
+	log.V(1).Info(fmt.Sprintf("Drain status fetched: isDeletingObjects=%v, objectCount=%d",
+		status.IsDeletingObjects, status.InitialObjectCount))
+	return status, nil
+}
+
+// CancelBucketDrain cancels an active drain operation.
+func CancelBucketDrain(ctx context.Context, bucketName string, tenantClient *TenantClient) error {
+	log := log.FromContext(ctx).WithValues("func", "CancelBucketDrain")
+	log.V(1).Info(fmt.Sprintf("Cancelling drain for bucket %s", bucketName))
+
+	// Call SDK: POST /org/containers/{name}/delete-objects with deleteObjects=false
+	status, err := tenantClient.Bucket().CancelDrain(ctx, bucketName)
+	if err != nil {
+		log.Error(err, "Failed to cancel bucket drain")
+		return fmt.Errorf("failed to cancel drain: %w", err)
+	}
+
+	log.V(1).Info("Bucket drain cancelled successfully", "isDeletingObjects", *status.IsDeletingObjects)
+	return nil
+}

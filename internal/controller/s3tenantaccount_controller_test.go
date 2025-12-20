@@ -60,7 +60,7 @@ var _ = Describe("S3TenantAccount Controller", func() {
 						Namespace: "default",
 					},
 					Spec: s3v1alpha1.StorageGridSpec{
-						Endpoint: "https://storagegrid.example.com",
+						ManagementEndpoint: "https://storagegrid.example.com",
 						SecretRef: corev1.ObjectReference{
 							Name:      "test-secret",
 							Namespace: "default",

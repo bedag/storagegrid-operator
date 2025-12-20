@@ -47,6 +47,17 @@ Describes the event recording implementation and design decisions:
 
 *Important for understanding observability and troubleshooting workflows.*
 
+#### [Drain Operations](./drain-operations.md)
+Explains the bucket drain functionality and why tenant-level drain was not implemented:
+
+- **Bucket Drain State Machine**: Phase transitions and reconciliation logic
+- **Configuration Precedence**: Bucket > StorageGrid > Defaults
+- **Polling Strategy**: Two-tier approach (fast initially, slower for large buckets)
+- **Status Tracking**: Full observability into drain progress
+- **YAGNI Decision**: Why tenant drain orchestration was deliberately not built
+
+*Essential for understanding bucket deletion workflows and lifecycle management.*
+
 ## 🏗️ Architectural Principles
 
 The StorageGrid Operator is built on several key architectural principles:

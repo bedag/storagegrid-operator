@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -127,6 +128,15 @@ func (r *S3BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// if an error already occurred during reconciliation, we just return that error.
 	}
 
+	// Return with appropriate requeue interval for draining buckets
+	if rctx.Bucket.Status.Phase == s3v1alpha1.BucketPhaseDraining {
+		if rctx.Bucket.Status.DrainStatus != nil {
+			log.V(1).Info("Bucket is draining, requeuing after interval", "interval", rctx.Bucket.Status.DrainStatus.NextPollInterval.Duration)
+			return ctrl.Result{RequeueAfter: rctx.Bucket.Status.DrainStatus.NextPollInterval.Duration}, err
+		}
+		log.Error(fmt.Errorf("bucket phase is Draining but DrainStatus is nil"), "Inconsistent drain state")
+	}
+
 	log.V(1).Info("Reconciliation completed successfully")
 	return ctrl.Result{Requeue: rctx.DoRequeue}, err
 }
@@ -134,8 +144,14 @@ func (r *S3BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "doReconcile")
 
+	// Set initial phase if not set
+	if rctx.Bucket.Status.Phase == "" {
+		rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhasePending
+	}
+
 	// Fetch and validate S3Tenant.
 	if err := r.reconcileS3TenantReference(ctx, rctx); err != nil {
+		rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseFailed
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantNotFound", err.Error())
 		r.setCondition(rctx.Bucket, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionFalse, "TenantNotFound", err.Error())
 		return err
@@ -145,6 +161,7 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 
 	// Validate tenant readiness.
 	if err := r.reconcileTenantReadiness(ctx, rctx); err != nil {
+		rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhasePending
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantNotReady", err.Error())
 		r.setCondition(rctx.Bucket, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionFalse, "TenantNotReady", err.Error())
 		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketTenantNotReady,
@@ -156,6 +173,7 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 
 	// Initialize tenant client.
 	if err := r.reconcileTenantClient(ctx, rctx); err != nil {
+		rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseFailed
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantClientInitFailed", err.Error())
 		r.setCondition(rctx.Bucket, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionFalse, "TenantClientInitFailed", err.Error())
 		return err
@@ -199,6 +217,14 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 		// Don't fail reconciliation for usage errors, just log.
 	}
 
+	// Reconcile bucket drain operations (requires bucket usage to be up-to-date).
+	if err := r.reconcileDrain(ctx, rctx); err != nil {
+		log.Error(err, "Failed to reconcile bucket drain")
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketDrainReconcileFailed", err.Error())
+		// Return error to ensure drain issues are addressed.
+		return err
+	}
+
 	if err := r.initS3Client(ctx, rctx); err != nil {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "S3ClientInitFailed", err.Error())
 		return err
@@ -211,7 +237,10 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 		// Don't return error, continue with other reconciliation.
 	}
 
-	// Set final ready condition.
+	// Set final ready condition and phase (unless draining).
+	if rctx.Bucket.Status.Phase != s3v1alpha1.BucketPhaseDraining {
+		rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseReady
+	}
 	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReady, metav1.ConditionTrue, "BucketReady", "Bucket is created and ready to use")
 
 	return nil
@@ -388,6 +417,9 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 
 	log.V(1).Info("Bucket created successfully", "bucketName", rctx.Bucket.Status.BucketName)
 
+	// Set phase to Ready after successful creation
+	rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseReady
+
 	log.V(1).Info("Bucket creation completed successfully")
 	rctx.DoRequeue = true // Requeue for further processing
 	return nil
@@ -459,13 +491,13 @@ func (r *S3BucketReconciler) reconcileBucketS3Credentials(ctx context.Context, r
 	// check if annotations exist and exit if unset.
 	if rctx.Bucket.Annotations != nil {
 		// if annotation is not set to "true", we start recreation.
-		if rctx.Bucket.Annotations[AnnotationRecreateBucketKeypairs] == "true" {
+		if rctx.Bucket.Annotations[s3v1alpha1.AnnotationRecreateBucketKeypairs] == "true" {
 			err := r.createS3AdminKeypair(ctx, rctx, true)
 			if err != nil {
 				return fmt.Errorf("failed to recreate S3 admin keypair: %w", err)
 			}
 			// Remove annotation.
-			delete(rctx.Bucket.Annotations, AnnotationRecreateBucketKeypairs)
+			delete(rctx.Bucket.Annotations, s3v1alpha1.AnnotationRecreateBucketKeypairs)
 			rctx.ObjectUpdated = true
 			return nil
 		}
@@ -557,27 +589,73 @@ func (r *S3BucketReconciler) initS3Client(ctx context.Context, rctx *bucketRecon
 		return fmt.Errorf("failed to fetch S3 credentials: %w", err)
 	}
 
-	// Initialize S3 client using default address.
-	var endpointURL string
-	if rctx.Bucket.Status.S3EndpointConfig != nil && len(rctx.Bucket.Status.S3EndpointConfig.Addresses) > 0 {
-		endpointURL = fmt.Sprintf("https://%s:%d", rctx.Bucket.Status.S3EndpointConfig.DefaultAddress, rctx.Bucket.Status.S3EndpointConfig.Port)
-	} else {
-		return fmt.Errorf("no S3 endpoint configuration available in bucket status")
+	// Resolve which S3 endpoint to use
+	endpointConfig, tenantClassName, err := r.resolveS3Endpoint(ctx, rctx)
+	if err != nil {
+		return err
 	}
-	s3client, err := s3.InitS3Client(ctx, endpointURL, accessKey, secretKey, rctx.Bucket.Status.Region, *rctx.Bucket.Status.S3EndpointConfig.PathStyleAccess)
+
+	endpointURL := fmt.Sprintf("https://%s:%d", endpointConfig.DefaultAddress, endpointConfig.Port)
+	s3client, err := s3.InitS3Client(ctx, endpointURL, accessKey, secretKey, rctx.Bucket.Status.Region, *endpointConfig.PathStyleAccess)
 	if err != nil {
 		log.Error(err, "Failed to initialize S3 client")
 		r.emitEvent(rctx, corev1.EventTypeWarning, EventS3EndpointConnectionFailed,
-			fmt.Sprintf("Failed to connect to S3 endpoint %s: %v (check network access to loadbalancer)", endpointURL, err))
+			fmt.Sprintf("Failed to connect to S3 endpoint %s (%s): %v (check network access)", endpointURL, tenantClassName, err))
 		return fmt.Errorf("failed to initialize S3 client: %w", err)
 	}
 
 	rctx.S3Client = s3client
 	r.emitEvent(rctx, corev1.EventTypeNormal, EventS3EndpointConnectionEstablished,
-		fmt.Sprintf("Successfully connected to S3 endpoint %s", endpointURL))
+		fmt.Sprintf("Successfully connected to S3 endpoint %s (%s)", endpointURL, tenantClassName))
 
-	log.V(1).Info("S3 client initialized successfully")
+	log.V(1).Info("S3 client initialized successfully", "endpoint", endpointURL, "source", tenantClassName)
 	return nil
+}
+
+// resolveS3Endpoint determines which S3 endpoint configuration to use for bucket operations.
+// Returns the endpoint config and the name of the tenantclass used as source.
+// Priority: StorageGrid.S3OperationsTenantClass > Bucket's tenant endpoint
+func (r *S3BucketReconciler) resolveS3Endpoint(ctx context.Context, rctx *bucketReconcileContext) (*s3v1alpha1.S3EndpointConfig, string, error) {
+	log := log.FromContext(ctx).WithValues("function", "resolveS3Endpoint")
+
+	// Fetch StorageGrid to check for S3OperationsTenantClass
+	storageGrid := &s3v1alpha1.StorageGrid{}
+	sgName := rctx.S3Tenant.Spec.StorageGridRef.Name
+	if err := r.Get(ctx, client.ObjectKey{Name: sgName}, storageGrid); err != nil {
+		log.Error(err, "Failed to fetch StorageGrid for S3 endpoint resolution")
+		return nil, "", fmt.Errorf("failed to fetch StorageGrid: %w", err)
+	}
+
+	// Option 1: Use grid-wide S3OperationsTenantClass if configured
+	if storageGrid.Spec.S3OperationsTenantClass != "" {
+		tenantClass := &s3v1alpha1.S3TenantClass{}
+		if err := r.Get(ctx, client.ObjectKey{Name: storageGrid.Spec.S3OperationsTenantClass}, tenantClass); err != nil {
+			log.Error(err, "Failed to fetch S3OperationsTenantClass")
+			return nil, "", fmt.Errorf("failed to fetch S3OperationsTenantClass %s: %w", storageGrid.Spec.S3OperationsTenantClass, err)
+		}
+
+		tenantClassName := storageGrid.Spec.S3OperationsTenantClass
+		log.V(1).Info("Using S3OperationsTenantClass endpoint for S3 operations", "tenantClass", storageGrid.Spec.S3OperationsTenantClass)
+
+		if len(tenantClass.Status.S3EndpointConfig.Addresses) == 0 {
+			return nil, "", fmt.Errorf("S3OperationsTenantClass %s has no endpoint addresses configured", storageGrid.Spec.S3OperationsTenantClass)
+		}
+
+		return tenantClass.Status.S3EndpointConfig, tenantClassName, nil
+	}
+
+	// Option 2: Use bucket's tenant-specific endpoint (default)
+	if rctx.S3Tenant.Status.S3EndpointConfig == nil {
+		return nil, "", fmt.Errorf("tenant %s has no S3EndpointConfig in status", rctx.S3Tenant.Name)
+	}
+	tenantClassName := rctx.S3Tenant.Status.S3EndpointConfig.S3TenantClassName
+	log.V(1).Info("Using tenantclass from bucket's tenant for S3 operations", "tenantClass", tenantClassName)
+
+	if rctx.Bucket.Status.S3EndpointConfig == nil || len(rctx.Bucket.Status.S3EndpointConfig.Addresses) == 0 {
+		return nil, "", fmt.Errorf("no S3 endpoint configuration available from %s", tenantClassName)
+	}
+
+	return rctx.Bucket.Status.S3EndpointConfig, tenantClassName, nil
 }
 
 func (r *S3BucketReconciler) reconcileBucketPolicy(ctx context.Context, rctx *bucketReconcileContext) error {
@@ -647,6 +725,9 @@ func (r *S3BucketReconciler) finalize(ctx context.Context, rctx *bucketReconcile
 	log := log.FromContext(ctx).WithValues("function", "finalize")
 	log.V(1).Info("Finalizing S3Bucket")
 
+	// Set phase to Deleting
+	rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseDeleting
+
 	if err := r.reconcileBucketUsage(ctx, rctx); err != nil {
 		log.Error(err, "Failed to reconcile bucket usage during finalization")
 		// Continue with finalization even if usage reconciliation fails.
@@ -692,6 +773,280 @@ func (r *S3BucketReconciler) finalize(ctx context.Context, rctx *bucketReconcile
 
 	log.V(1).Info("Finalization completed successfully")
 	return nil
+}
+
+// reconcileDrain is the main drain state machine that handles bucket draining operations.
+// It checks for the drain annotation and manages transitions between drain states.
+func (r *S3BucketReconciler) reconcileDrain(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileDrain")
+
+	// Get current backend drain status
+	backendStatus, err := grid.GetBucketDrainStatus(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient)
+	if err != nil {
+		log.Error(err, "Failed to check backend drain status")
+		return fmt.Errorf("failed to check backend drain status: %w", err)
+	}
+
+	// Check for orphaned drain (backend draining but no StartedAt in our status)
+	if backendStatus.IsDeletingObjects &&
+		(rctx.Bucket.Status.DrainStatus == nil || rctx.Bucket.Status.DrainStatus.StartedAt == nil) {
+		return r.cancelOrphanedDrain(ctx, rctx, backendStatus)
+	}
+
+	// Check if user wants to drain (annotation present)
+	_, wantsDrain := rctx.Bucket.Annotations[s3v1alpha1.AnnotationDrainBucket]
+
+	// Check if bucket is currently draining
+	isDraining := rctx.Bucket.Status.DrainStatus != nil
+
+	// State machine transitions
+	switch {
+	// we want to drain and it isn't draining yet, and there are objects to delete.
+	case wantsDrain && !isDraining && rctx.Bucket.Status.BucketUsage.ObjectCount > 0:
+		// START: User added annotation, bucket has objects, not draining yet
+		return r.initiateDrain(ctx, rctx)
+
+		// we are draining, we want to drain, and there are still objects to delete.
+	case isDraining && wantsDrain && rctx.Bucket.Status.BucketUsage.ObjectCount > 0:
+		// POLLING: Active drain with objects remaining
+		return r.pollDrainProgress(ctx, rctx, backendStatus)
+
+		// we are draining, but user removed the annotation.
+	case isDraining && !wantsDrain:
+		// CANCEL: User removed annotation while draining
+		return r.cancelDrain(ctx, rctx)
+
+		// we are draining, no objects remain.
+	case isDraining && rctx.Bucket.Status.BucketUsage.ObjectCount == 0:
+		// COMPLETE: Drain finished successfully
+		return r.completeDrain(ctx, rctx)
+	}
+
+	return nil
+}
+
+// initiateDrain starts a new drain operation on the bucket.
+func (r *S3BucketReconciler) initiateDrain(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "initiateDrain")
+	log.Info("Initiating bucket drain", "bucket", rctx.Bucket.Status.BucketName)
+
+	// Call backend to start drain
+	if err := grid.DrainBucket(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient); err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketDrainFailed,
+			fmt.Sprintf("Failed to start drain: %v", err))
+		return fmt.Errorf("failed to initiate drain: %w", err)
+	}
+
+	// Get status after initiation
+	status, err := grid.GetBucketDrainStatus(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient)
+	if err != nil {
+		return fmt.Errorf("failed to get drain status after initiation: %w", err)
+	}
+
+	now := metav1.Now()
+	rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseDraining
+
+	// Compute initial poll interval (respects current spec + grid config)
+	nextPollInterval := r.computeNextPollInterval(ctx, rctx, time.Duration(0))
+
+	rctx.Bucket.Status.DrainStatus = &s3v1alpha1.BucketDrainStatus{
+		StartedAt:           &now,
+		IsDeletingObjects:   status.IsDeletingObjects,
+		InitialObjectCount:  status.InitialObjectCount,
+		InitialObjectBytes:  status.InitialObjectBytes,
+		LastCheckedAt:       &now,
+		LastProgressAt:      &now,
+		PreviousObjectCount: int64(rctx.Bucket.Status.BucketUsage.ObjectCount),
+		Message:             fmt.Sprintf("Drain started: %d objects to delete", status.InitialObjectCount),
+		NextPollInterval:    metav1.Duration{Duration: nextPollInterval},
+	}
+
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketDrainingStarted,
+		fmt.Sprintf("Started draining %d objects (%s)",
+			status.InitialObjectCount, humanizeBytes(status.InitialObjectBytes)))
+
+	return nil
+}
+
+// pollDrainProgress checks the progress of an ongoing drain operation.
+func (r *S3BucketReconciler) pollDrainProgress(ctx context.Context, rctx *bucketReconcileContext, backendStatus *grid.DrainStatus) error {
+	log := log.FromContext(ctx).WithValues("function", "pollDrainProgress")
+	now := metav1.Now()
+
+	// Update poll timestamp
+	rctx.Bucket.Status.DrainStatus.LastCheckedAt = &now
+	rctx.Bucket.Status.DrainStatus.IsDeletingObjects = backendStatus.IsDeletingObjects
+
+	// Recompute next poll interval (picks up config changes, handles two-tier polling)
+	elapsed := time.Since(rctx.Bucket.Status.DrainStatus.StartedAt.Time)
+	nextPollInterval := r.computeNextPollInterval(ctx, rctx, elapsed)
+	rctx.Bucket.Status.DrainStatus.NextPollInterval = metav1.Duration{Duration: nextPollInterval}
+
+	currentCount := int64(rctx.Bucket.Status.BucketUsage.ObjectCount)
+	previousCount := rctx.Bucket.Status.DrainStatus.PreviousObjectCount
+
+	// Check for progress
+	if currentCount < previousCount {
+		deleted := previousCount - currentCount
+		log.V(1).Info("Drain making progress",
+			"deleted", deleted,
+			"remaining", currentCount)
+
+		rctx.Bucket.Status.DrainStatus.LastProgressAt = &now
+		rctx.Bucket.Status.DrainStatus.PreviousObjectCount = currentCount
+		rctx.Bucket.Status.DrainStatus.Message = fmt.Sprintf("Draining: %d objects remaining", currentCount)
+
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketDrainingProgress,
+			fmt.Sprintf("Drain progress: deleted %d objects, %d remaining", deleted, currentCount))
+	} else {
+		// No progress - check if stuck
+		// check how long since last progress
+		stuckElapsed := now.Time.Sub(rctx.Bucket.Status.DrainStatus.LastProgressAt.Time)
+		stuckThreshold := r.getStuckThreshold(ctx, rctx)
+
+		if stuckElapsed > stuckThreshold {
+			log.Info("Drain appears stuck", "noProgressFor", stuckElapsed)
+			rctx.Bucket.Status.DrainStatus.Message = fmt.Sprintf("Warning: No progress for %v", stuckElapsed.Round(time.Minute))
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketDrainingStuck,
+				fmt.Sprintf("No progress for %v, %d objects still remain", stuckElapsed.Round(time.Minute), currentCount))
+		}
+	}
+
+	return nil
+}
+
+// completeDrain cleans up after a successful drain operation.
+func (r *S3BucketReconciler) completeDrain(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "completeDrain")
+	log.Info("Drain completed successfully", "bucket", rctx.Bucket.Status.BucketName)
+
+	elapsed := time.Since(rctx.Bucket.Status.DrainStatus.StartedAt.Time)
+
+	// Clean up drain status completely
+	rctx.Bucket.Status.DrainStatus = nil
+	rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseReady
+
+	// Remove annotation
+	delete(rctx.Bucket.Annotations, s3v1alpha1.AnnotationDrainBucket)
+	rctx.ObjectUpdated = true
+
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketDrainingComplete,
+		fmt.Sprintf("Drain completed in %v", elapsed.Round(time.Minute)))
+
+	return nil
+}
+
+// cancelDrain cancels an ongoing drain operation.
+func (r *S3BucketReconciler) cancelDrain(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "cancelDrain")
+	log.Info("Cancelling drain operation", "bucket", rctx.Bucket.Status.BucketName)
+
+	if err := grid.CancelBucketDrain(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient); err != nil {
+		log.Error(err, "Failed to cancel drain on backend")
+		return fmt.Errorf("failed to cancel drain: %w", err)
+	}
+
+	// Clean up drain status
+	rctx.Bucket.Status.DrainStatus = nil
+	rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseReady
+
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketDrainingCancelled,
+		"Drain operation cancelled by user")
+
+	return nil
+}
+
+// cancelOrphanedDrain cancels drain operations not initiated by the operator.
+func (r *S3BucketReconciler) cancelOrphanedDrain(ctx context.Context, rctx *bucketReconcileContext, backendStatus *grid.DrainStatus) error {
+	log := log.FromContext(ctx).WithValues("function", "detectOrphanedDrain")
+	log.Info("Detected orphaned drain operation (backend draining without operator initiation)")
+
+	// Cancel the orphaned drain
+	if err := grid.CancelBucketDrain(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient); err != nil {
+		log.Error(err, "Failed to cancel orphaned drain")
+		return fmt.Errorf("failed to cancel orphaned drain: %w", err)
+	}
+
+	r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketOrphanedDrain,
+		"Detected and cancelled drain operation not initiated by operator")
+
+	return nil
+}
+
+// computeNextPollInterval calculates the next poll interval based on current config and elapsed time.
+// Called on every drain reconciliation to pick up config changes and handle two-tier polling.
+func (r *S3BucketReconciler) computeNextPollInterval(ctx context.Context, rctx *bucketReconcileContext, elapsed time.Duration) time.Duration {
+	// Bucket-level override takes precedence (single interval, no two-tier)
+	if rctx.Bucket.Spec.DrainPollInterval != nil {
+		return rctx.Bucket.Spec.DrainPollInterval.Duration
+	}
+
+	// Fetch StorageGrid config for grid-level defaults
+	sg := &s3v1alpha1.StorageGrid{}
+	sgName := rctx.S3Tenant.Spec.StorageGridRef.Name
+	if err := r.Get(ctx, client.ObjectKey{Name: sgName}, sg); err != nil {
+		// Fallback to hardcoded defaults
+		if elapsed < 1*time.Hour {
+			return s3v1alpha1.DefaultDrainInitialPollInterval
+		}
+		return s3v1alpha1.DefaultDrainLongRunningPollInterval
+	}
+
+	// Extract grid-level intervals with defaults
+	initialInterval := s3v1alpha1.DefaultDrainInitialPollInterval
+	longRunningInterval := s3v1alpha1.DefaultDrainLongRunningPollInterval
+
+	if sg.Spec.Operations != nil && sg.Spec.Operations.Drain != nil {
+		if sg.Spec.Operations.Drain.InitialPollInterval != nil {
+			initialInterval = sg.Spec.Operations.Drain.InitialPollInterval.Duration
+		}
+		if sg.Spec.Operations.Drain.LongRunningPollInterval != nil {
+			longRunningInterval = sg.Spec.Operations.Drain.LongRunningPollInterval.Duration
+		}
+	}
+
+	// Two-tier polling: switch after 1 hour
+	if elapsed < 1*time.Hour {
+		return initialInterval
+	}
+	return longRunningInterval
+}
+
+// getStuckThreshold returns the threshold for detecting stuck drains.
+// Fetches from bucket spec override or StorageGrid config.
+func (r *S3BucketReconciler) getStuckThreshold(ctx context.Context, rctx *bucketReconcileContext) time.Duration {
+	// Bucket-level override takes precedence
+	if rctx.Bucket.Spec.DrainStuckThreshold != nil {
+		return rctx.Bucket.Spec.DrainStuckThreshold.Duration
+	}
+
+	// Fetch from StorageGrid config
+	sg := &s3v1alpha1.StorageGrid{}
+	sgName := rctx.S3Tenant.Spec.StorageGridRef.Name
+	if err := r.Get(ctx, client.ObjectKey{Name: sgName}, sg); err != nil {
+		return s3v1alpha1.DefaultDrainStuckThreshold
+	}
+
+	if sg.Spec.Operations != nil && sg.Spec.Operations.Drain != nil &&
+		sg.Spec.Operations.Drain.StuckThreshold != nil {
+		return sg.Spec.Operations.Drain.StuckThreshold.Duration
+	}
+
+	return s3v1alpha1.DefaultDrainStuckThreshold
+}
+
+// humanizeBytes converts bytes to human-readable format.
+func humanizeBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 func (r *S3BucketReconciler) setCondition(bucket *s3v1alpha1.S3Bucket, condType string, status metav1.ConditionStatus, reason string, message string) {

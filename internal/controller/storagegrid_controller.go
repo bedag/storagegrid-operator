@@ -159,7 +159,7 @@ func (r *StorageGridReconciler) doReconcile(ctx context.Context, rctx *sgReconci
 	reachableCondition := meta.FindStatusCondition(rctx.SG.Status.Conditions, s3v1alpha1.ConditionTypeReachable)
 	if reachableCondition != nil && reachableCondition.Status == metav1.ConditionFalse {
 		r.emitEvent(rctx, corev1.EventTypeNormal, EventGridConnectionEstablished,
-			fmt.Sprintf("Successfully connected to StorageGrid at %s", rctx.SG.Spec.Endpoint))
+			fmt.Sprintf("Successfully connected to StorageGrid at %s", rctx.SG.Spec.ManagementEndpoint))
 	}
 
 	// make sure regions are fetched and set.
@@ -366,7 +366,7 @@ func (r *StorageGridReconciler) initGridClient(ctx context.Context, rctx *sgReco
 
 	// initialize client for grid.
 	log.V(1).Info("Initializing grid client if not initialized")
-	client, err := grid.InitGridClient(username, password, rctx.SG.Spec.Endpoint)
+	client, err := grid.InitGridClient(username, password, rctx.SG.Spec.ManagementEndpoint)
 	if err != nil {
 		log.Error(err, "Failed to initialize grid client")
 		return err

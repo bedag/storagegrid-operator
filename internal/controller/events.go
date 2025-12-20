@@ -145,4 +145,14 @@ const (
 	// Region Events
 	EventBucketRegionValidationFailed = "RegionValidationFailed"
 	EventBucketRegionSet              = "RegionSet"
+
+	// Bucket Drain Events
+	EventBucketDrainingStarted   = "BucketDrainingStarted"
+	EventBucketDrainingProgress  = "BucketDrainingProgress"
+	EventBucketDrainingComplete  = "BucketDrainingComplete"
+	EventBucketDrainingStuck     = "BucketDrainingStuck"
+	EventBucketDrainingCancelled = "BucketDrainingCancelled"
+	EventBucketDrainFailed       = "BucketDrainFailed"
+	EventBucketOrphanedDrain     = "BucketOrphanedDrainDetected"
+	EventBucketAlreadyEmpty      = "BucketAlreadyEmpty"
 )

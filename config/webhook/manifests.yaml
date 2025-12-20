@@ -66,6 +66,7 @@ webhooks:
     operations:
     - CREATE
     - UPDATE
+    - DELETE
     resources:
     - s3buckets
   sideEffects: None
@@ -110,4 +111,24 @@ webhooks:
     - DELETE
     resources:
     - s3tenantaccounts
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-s3-bedag-ch-v1alpha1-storagegrid
+  failurePolicy: Fail
+  name: vstoragegrid.kb.io
+  rules:
+  - apiGroups:
+    - s3.bedag.ch
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - storagegrids
   sideEffects: None

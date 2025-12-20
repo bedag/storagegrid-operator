@@ -28,8 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	controller "github.com/bedag/storagegrid-operator/internal/controller"
-
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
 )
 
@@ -75,7 +73,7 @@ func (r *S3TenantAccountDefaulter) Default(ctx context.Context, obj runtime.Obje
 	if s3tenantAccount.Annotations == nil {
 		s3tenantAccount.Annotations = map[string]string{}
 	}
-	s3tenantAccount.Annotations[controller.AnnotationAllowTenantClassNameChange] = "true"
+	s3tenantAccount.Annotations[s3v1alpha1.AnnotationAllowTenantClassNameChange] = "true"
 
 	return nil
 }
@@ -136,8 +134,8 @@ func (r *S3TenantAccountValidator) ValidateDelete(ctx context.Context, obj runti
 	s3tenantAccountlog.Info("validate delete", "name", s3tenantAccount.Name)
 
 	// deletion is blocked until the allow-delete annotation is added.
-	if _, ok := s3tenantAccount.Annotations[controller.AnnotationAllowTenantDeletion]; !ok {
-		return nil, fmt.Errorf("deletion of s3tenant %s is blocked until annotation %s is set, please add this first", s3tenantAccount.Name, controller.AnnotationAllowTenantDeletion)
+	if _, ok := s3tenantAccount.Annotations[s3v1alpha1.AnnotationAllowTenantDeletion]; !ok {
+		return nil, fmt.Errorf("deletion of s3tenant %s is blocked until annotation %s is set, please add this first", s3tenantAccount.Name, s3v1alpha1.AnnotationAllowTenantDeletion)
 	}
 
 	// make sure no tenant is still bound to this account.

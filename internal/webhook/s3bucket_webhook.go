@@ -62,7 +62,7 @@ func (r *S3BucketValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
 // change verbs to "verbs=create;update;delete" if you want to enable deletion validation.
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
-// +kubebuilder:webhook:path=/validate-s3-bedag-ch-v1alpha1-s3bucket,mutating=false,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=s3buckets,verbs=create;update,versions=v1alpha1,name=vs3bucket.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-s3-bedag-ch-v1alpha1-s3bucket,mutating=false,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=s3buckets,verbs=create;update;delete,versions=v1alpha1,name=vs3bucket.kb.io,admissionReviewVersions=v1
 
 var _ webhook.CustomValidator = &S3BucketValidator{}
 
@@ -120,6 +120,19 @@ func (r *S3BucketValidator) ValidateDelete(ctx context.Context, obj runtime.Obje
 	}
 
 	s3bucketlog.Info("validate delete", "name", s3bucket.Name)
+
+	// Check if bucket has objects and provide helpful guidance
+	if s3bucket.Status.BucketUsage.ObjectCount > 0 {
+		warning := fmt.Sprintf(
+			"Bucket contains %d objects. "+
+				"Deletion will be blocked by finalizer until bucket is empty. "+
+				"To drain objects automatically, add annotation: kubectl annotate s3bucket %s %s=true",
+			s3bucket.Status.BucketUsage.ObjectCount,
+			s3bucket.Name,
+			s3v1alpha1.AnnotationDrainBucket,
+		)
+		return admission.Warnings{warning}, nil
+	}
 
 	return nil, nil
 }

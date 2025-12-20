@@ -234,6 +234,12 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "StorageGrid")
 		os.Exit(1)
 	}
+	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
+		if err = (&s3webhook.StorageGridValidator{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "StorageGrid")
+			os.Exit(1)
+		}
+	}
 	if err = (&controller.S3BucketReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),

@@ -421,7 +421,7 @@ func (r *S3TenantReconciler) generateTenantAccount(s3Tenant *s3v1alpha1.S3Tenant
 			Name: accountName,
 			// make sure annotation is added to allow class change.
 			Annotations: map[string]string{
-				AnnotationAllowTenantClassNameChange: "true",
+				s3v1alpha1.AnnotationAllowTenantClassNameChange: "true",
 			},
 		},
 		Spec: s3v1alpha1.S3TenantAccountSpec{
@@ -582,7 +582,7 @@ func (r *S3TenantReconciler) finalize(ctx context.Context, rctx *tenantReconcile
 
 	// if annotation is set to ignore unmanaged buckets only linkedBuckets are considered.
 	ignoreUnmanaged := false
-	if val, exists := rctx.S3Tenant.Annotations[AnnotationIgnoreUnmanagedBuckets]; exists && strings.EqualFold(val, "true") {
+	if val, exists := rctx.S3Tenant.Annotations[s3v1alpha1.AnnotationIgnoreUnmanagedBuckets]; exists && strings.EqualFold(val, "true") {
 		ignoreUnmanaged = true
 	}
 
@@ -612,7 +612,7 @@ func (r *S3TenantReconciler) finalize(ctx context.Context, rctx *tenantReconcile
 // rather than being automatically removed after propagation to S3TenantAccount.
 // all of these annotations either are to be removed by the user or through a dedicated function when implementing.
 func shouldKeepOnTenant(annotationKey string) bool {
-	for _, keepAnnotation := range TenantAnnotationsToKeep {
+	for _, keepAnnotation := range s3v1alpha1.TenantAnnotationsToKeep {
 		if annotationKey == keepAnnotation {
 			return true
 		}
@@ -632,7 +632,7 @@ func (r *S3TenantReconciler) reconcileTenantAnnotations(ctx context.Context, rct
 	// filter away all annotations that start with the tenant prefix.
 	updatedAnnotations := map[string]string{}
 	for key, value := range rctx.S3Tenant.Annotations {
-		if strings.HasPrefix(key, TenantPrefix) {
+		if strings.HasPrefix(key, s3v1alpha1.AnnotationPrefixTenant) {
 			// Always copy to Account for operational use
 			updatedAnnotations[key] = value
 

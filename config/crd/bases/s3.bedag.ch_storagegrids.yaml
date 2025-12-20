@@ -13,7 +13,7 @@ spec:
     plural: storagegrids
     shortNames:
     - sg
-    - sg
+    - sgs
     singular: storagegrid
   scope: Cluster
   versions:
@@ -93,8 +93,11 @@ spec:
                     - message: retentionDuration must not exceed 30 days
                       rule: duration(self) <= duration('720h')
                 type: object
-              endpoint:
-                description: The endpoint of the StorageGrid.
+              managementEndpoint:
+                description: |-
+                  ManagementEndpoint is the StorageGrid admin API endpoint for tenant management,
+                  user creation, quota configuration, and administrative operations.
+                  Example: https://grid-admin.internal.example.com
                 type: string
               maxUnavailableNodes:
                 default: 1
@@ -102,6 +105,44 @@ spec:
                   Amount of nodes (default: 1) that can be unavailable before the StorageGrid is considered not ready.
                   This is a safeguard to prevent operations when the StorageGrid is not fully available.
                 type: integer
+              operations:
+                description: |-
+                  Operations configures execution parameters for long-running StorageGrid operations.
+                  These settings tune how operations execute, not what operations to perform.
+                properties:
+                  drain:
+                    description: |-
+                      Drain configures bucket drain operation execution parameters.
+                      Used by all bucket drain operations unless overridden at bucket level.
+                    properties:
+                      initialPollInterval:
+                        default: 3m
+                        description: |-
+                          InitialPollInterval defines how often to check drain progress during
+                          the first hour of operation (when StorageGrid typically makes faster progress).
+                        type: string
+                      longRunningPollInterval:
+                        default: 30m
+                        description: |-
+                          LongRunningPollInterval defines how often to check drain progress after
+                          the first hour (when operations typically slow down for large buckets).
+                        type: string
+                      stuckThreshold:
+                        default: 3h
+                        description: |-
+                          StuckThreshold defines how long without progress before considering a drain stuck.
+                          If object count doesn't decrease within this duration, a warning event is emitted.
+                        type: string
+                    type: object
+                type: object
+              s3OperationsTenantClass:
+                description: |-
+                  S3OperationsTenantClass optionally specifies which S3TenantClass the operator uses
+                  for S3 API operations (eg. bucket policies).
+                  If not set, S3 operations use each bucket's tenant-specific S3TenantClass endpoint.
+                  Use this when operator pods cannot reach all tenant-specific endpoints but can
+                  access a specific gateway endpoint (e.g., internal management network).
+                type: string
               secretRef:
                 description: The secret containing the credentials for the StorageGrid.
                 properties:

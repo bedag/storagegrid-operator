@@ -888,10 +888,10 @@ func (r *S3TenantAccountReconciler) reconcileGridEndpoint(ctx context.Context, r
 
 	if rctx.Account.Status.GridEndpoint == "" {
 		log.V(1).Info("Grid endpoint is not set, setting it to the StorageGrid endpoint")
-		rctx.Account.Status.GridEndpoint = rctx.SG.Spec.Endpoint
-	} else if rctx.Account.Status.GridEndpoint != rctx.SG.Spec.Endpoint {
-		log.V(1).Info("Grid endpoint has changed, updating from %s to %s", rctx.Account.Status.GridEndpoint, rctx.SG.Spec.Endpoint)
-		rctx.Account.Status.GridEndpoint = rctx.SG.Spec.Endpoint
+		rctx.Account.Status.GridEndpoint = rctx.SG.Spec.ManagementEndpoint
+	} else if rctx.Account.Status.GridEndpoint != rctx.SG.Spec.ManagementEndpoint {
+		log.V(1).Info("Grid endpoint has changed, updating from %s to %s", rctx.Account.Status.GridEndpoint, rctx.SG.Spec.ManagementEndpoint)
+		rctx.Account.Status.GridEndpoint = rctx.SG.Spec.ManagementEndpoint
 	}
 }
 
@@ -918,7 +918,7 @@ func (r *S3TenantAccountReconciler) initGridClient(ctx context.Context, rctx *ac
 	}
 
 	log.V(1).Info("Initializing grid client if not initialized")
-	client, err := grid.InitGridClient(username, password, rctx.SG.Spec.Endpoint)
+	client, err := grid.InitGridClient(username, password, rctx.SG.Spec.ManagementEndpoint)
 	if err != nil {
 		log.Error(err, "Failed to initialize grid client")
 		return err
@@ -983,14 +983,14 @@ func (r *S3TenantAccountReconciler) reconcileRecreateAnnotation(ctx context.Cont
 		return nil
 	}
 
-	if _, ok := rctx.Account.Annotations[AnnotationRecreateTenant]; ok {
+	if _, ok := rctx.Account.Annotations[s3v1alpha1.AnnotationRecreateTenant]; ok {
 		log.V(1).Info("Recreate tenant annotation found, recreating tenant")
 
 		// remove tenant created condition to allow re-creation.
 		meta.RemoveStatusCondition(&rctx.Account.Status.Conditions, s3v1alpha1.ConditionTypeCreated)
 
 		// remove the annotation.
-		delete(rctx.Account.Annotations, AnnotationRecreateTenant)
+		delete(rctx.Account.Annotations, s3v1alpha1.AnnotationRecreateTenant)
 		log.V(1).Info("Successfully recreated credentials and removed annotation")
 
 		rctx.ObjectUpdated = true
@@ -1029,7 +1029,7 @@ func (r *S3TenantAccountReconciler) reconcileCreate(ctx context.Context, rctx *a
 	// update status as needed.
 	rctx.Account.Status.ObservedTenantBackendName = rctx.Account.Status.DesiredTenantBackendName
 	rctx.Account.Status.TenantID = tenantID
-	rctx.Account.Status.TenantManagerURL = fmt.Sprintf("%s?accountId=%s", rctx.SG.Spec.Endpoint, tenantID)
+	rctx.Account.Status.TenantManagerURL = fmt.Sprintf("%s?accountId=%s", rctx.SG.Spec.ManagementEndpoint, tenantID)
 
 	return nil
 }
@@ -1319,14 +1319,14 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantClass(ctx context.Context, 
 	if rctx.Account.Status.S3EndpointConfig.S3TenantClassName != rctx.Account.Spec.S3TenantClassName {
 		// first verify that the annotation is set to allow changing the tenant class name.
 		if rctx.Account.Annotations == nil {
-			return fmt.Errorf("S3TenantClassName is set to %s, but annotation %s to allow change is not set, not updating", rctx.Account.Spec.S3TenantClassName, AnnotationAllowTenantClassNameChange)
+			return fmt.Errorf("S3TenantClassName is set to %s, but annotation %s to allow change is not set, not updating", rctx.Account.Spec.S3TenantClassName, s3v1alpha1.AnnotationAllowTenantClassNameChange)
 		}
-		val, ok := rctx.Account.Annotations[AnnotationAllowTenantClassNameChange]
+		val, ok := rctx.Account.Annotations[s3v1alpha1.AnnotationAllowTenantClassNameChange]
 		if !ok {
-			return fmt.Errorf("S3TenantClassName is set to %s, but annotation %s to allow change is not set, not updating", rctx.Account.Spec.S3TenantClassName, AnnotationAllowTenantClassNameChange)
+			return fmt.Errorf("S3TenantClassName is set to %s, but annotation %s to allow change is not set, not updating", rctx.Account.Spec.S3TenantClassName, s3v1alpha1.AnnotationAllowTenantClassNameChange)
 		}
 		if val != "true" {
-			return fmt.Errorf("S3TenantClassName is set to %s, but annotation %s to allow change is %s instead of true, not updating", rctx.Account.Spec.S3TenantClassName, AnnotationAllowTenantClassNameChange, val)
+			return fmt.Errorf("S3TenantClassName is set to %s, but annotation %s to allow change is %s instead of true, not updating", rctx.Account.Spec.S3TenantClassName, s3v1alpha1.AnnotationAllowTenantClassNameChange, val)
 		}
 
 		// if the annotation is set accordingly we can update the tenant class name.
@@ -1335,7 +1335,7 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantClass(ctx context.Context, 
 
 		// reprotect the S3TenantClassName by setting the annotation.
 		log.V(1).Info("Removing annotation to protect S3TenantClassName from further changes")
-		delete(rctx.Account.Annotations, AnnotationAllowTenantClassNameChange)
+		delete(rctx.Account.Annotations, s3v1alpha1.AnnotationAllowTenantClassNameChange)
 		rctx.ObjectUpdated = true
 	}
 
@@ -1372,7 +1372,7 @@ func (r *S3TenantAccountReconciler) reconcileTenantAdminCredentials(ctx context.
 	log.V(1).Info("Admin credentials secret exists, checking if reset was requested")
 
 	// if the annotation is set to recreate the tenant keypairs a new keypair needs to be created.
-	if rctx.Account.Annotations[AnnotationResetTenantAdminPassword] == "true" {
+	if rctx.Account.Annotations[s3v1alpha1.AnnotationResetTenantAdminPassword] == "true" {
 		log.Info("Recreating tenant admin credentials due to annotation")
 
 		// trigger recreation of the S3 admin keypair.
@@ -1382,7 +1382,7 @@ func (r *S3TenantAccountReconciler) reconcileTenantAdminCredentials(ctx context.
 			return err
 		}
 
-		delete(rctx.Account.Annotations, AnnotationResetTenantAdminPassword)
+		delete(rctx.Account.Annotations, s3v1alpha1.AnnotationResetTenantAdminPassword)
 		rctx.ObjectUpdated = true
 	}
 
@@ -1456,7 +1456,7 @@ func (r *S3TenantAccountReconciler) reconcileS3Credentials(ctx context.Context, 
 
 	// if the annotation is set to recreate the tenant keypairs a new keypair needs to be created.
 	if rctx.Account.Annotations != nil {
-		if rctx.Account.Annotations[AnnotationRecreateTenantKeypairs] == "true" {
+		if rctx.Account.Annotations[s3v1alpha1.AnnotationRecreateTenantKeypairs] == "true" {
 			log.Info("Recreating S3 admin keypair due to annotation")
 
 			// trigger recreation of the S3 admin keypair.
@@ -1466,7 +1466,7 @@ func (r *S3TenantAccountReconciler) reconcileS3Credentials(ctx context.Context, 
 				return err
 			}
 
-			delete(rctx.Account.Annotations, AnnotationRecreateTenantKeypairs)
+			delete(rctx.Account.Annotations, s3v1alpha1.AnnotationRecreateTenantKeypairs)
 			rctx.ObjectUpdated = true
 		}
 	}

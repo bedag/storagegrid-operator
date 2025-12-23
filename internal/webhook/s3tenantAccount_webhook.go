@@ -47,36 +47,16 @@ func (r *S3TenantAccountValidator) SetupWebhookWithManager(mgr ctrl.Manager) err
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(&s3v1alpha1.S3TenantAccount{}).
 		WithValidator(r).
-		WithDefaulter(&S3TenantAccountDefaulter{}).
 		Complete()
 }
 
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
 // +kubebuilder:webhook:path=/validate-s3-bedag-ch-v1alpha1-s3tenantaccount,mutating=false,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=s3tenantaccounts,verbs=create;update;delete,versions=v1alpha1,name=vs3tenantaccount.kb.io,admissionReviewVersions=v1
-// +kubebuilder:webhook:path=/mutate-s3-bedag-ch-v1alpha1-s3tenantaccount,mutating=true,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=s3tenantaccounts,verbs=create,versions=v1alpha1,name=vs3tenantaccount.kb.io,admissionReviewVersions=v1
 
 var _ webhook.CustomValidator = &S3TenantAccountValidator{}
 
 type S3TenantAccountDefaulter struct{}
-
-// Default implements webhook.Defaulter so a webhook will be registered for the type.
-func (r *S3TenantAccountDefaulter) Default(ctx context.Context, obj runtime.Object) error {
-	s3tenantAccount, ok := obj.(*s3v1alpha1.S3TenantAccount)
-	if !ok {
-		return fmt.Errorf("object is not an S3TenantAccount")
-	}
-
-	s3tenantAccountlog.Info("running defaulter", "name", s3tenantAccount.Name)
-
-	// make sure to initially add the annotation to allow class change.
-	if s3tenantAccount.Annotations == nil {
-		s3tenantAccount.Annotations = map[string]string{}
-	}
-	s3tenantAccount.Annotations[s3v1alpha1.AnnotationAllowTenantClassNameChange] = "true"
-
-	return nil
-}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantAccountValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {

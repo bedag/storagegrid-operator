@@ -24,25 +24,6 @@ webhooks:
     resources:
     - s3tenants
   sideEffects: None
-- admissionReviewVersions:
-  - v1
-  clientConfig:
-    service:
-      name: webhook-service
-      namespace: system
-      path: /mutate-s3-bedag-ch-v1alpha1-s3tenantaccount
-  failurePolicy: Fail
-  name: vs3tenantaccount.kb.io
-  rules:
-  - apiGroups:
-    - s3.bedag.ch
-    apiVersions:
-    - v1alpha1
-    operations:
-    - CREATE
-    resources:
-    - s3tenantaccounts
-  sideEffects: None
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration

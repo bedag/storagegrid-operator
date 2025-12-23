@@ -31,4 +31,7 @@ const (
 	ConditionTypeRetainThenDelete         = "RetainThenDelete"
 	ConditionTypeDeletionTimestampReached = "DeletionTimestampReached"
 	ConditionTypeConfigurationSynced      = "ConfigurationSynced"
+	ConditionTypeOwnershipConflict        = "OwnershipConflict"
+	ConditionTypeOwnershipLost            = "OwnershipLost"
+	ConditionTypeSpecDrift                = "SpecDrift"
 )

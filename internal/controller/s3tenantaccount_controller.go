@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -241,32 +242,40 @@ func (r *S3TenantAccountReconciler) doReconcile(ctx context.Context, rctx *accou
 	// make sure proper tenantclass is set before creation.
 	// update the tenantlass for network access.
 	err = r.reconcileS3TenantClass(ctx, rctx)
-	if err != nil {
-		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantClassReconcileFailed", fmt.Sprintf("Failed to reconcile S3TenantClass: %s", err.Error()))
-		return err
-	}
 
-	// check for the resourcecreated condition.
-	// the condition will only be set if the tenant was created successfully.
-	// or if the annotation to recreate the tenant was set.
+	// check for recreate annotation
 	err = r.reconcileRecreateAnnotation(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "RecreateAnnotationReconcileFailed", fmt.Sprintf("Failed on reconciling recreate annotation: %s", err.Error()))
 		return err
 	}
 
-	if meta.FindStatusCondition(rctx.Account.Status.Conditions, s3v1alpha1.ConditionTypeCreated) == nil {
+	// Check if tenant has been created or imported
+	createdCondition := meta.FindStatusCondition(rctx.Account.Status.Conditions, s3v1alpha1.ConditionTypeCreated)
+
+	if createdCondition == nil {
+		// Tenant not yet created - check for import annotation first
+		if importTenantID := rctx.Account.Annotations[s3v1alpha1.AnnotationImportTenant]; importTenantID != "" {
+			err := r.reconcileImport(ctx, rctx, importTenantID)
+			if err != nil {
+				r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "ImportFailed", fmt.Sprintf("Failed to import tenant: %s", err.Error()))
+				return err
+			}
+			// Import handles its own status updates, conditions, and requeue
+			return nil
+		}
+
+		// Create new tenant
 		err := r.reconcileCreate(ctx, rctx)
 		if err != nil {
 			r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "CreateFailed", fmt.Sprintf("Failed to create tenant: %s", err.Error()))
 			return err
 		}
 
-		// update status and condition already.
-
-		rctx.DoRequeue = true // we need to requeue to ensure the status is updated
 		return nil
 	}
+
+	// Always sync status from backend (works for both owned and non-owned tenants)
 
 	// initialize tenant client and fetch the tenant from the backend.
 	err = r.initTenantClient(ctx, rctx)
@@ -277,41 +286,53 @@ func (r *S3TenantAccountReconciler) doReconcile(ctx context.Context, rctx *accou
 
 	err = r.fetchTenant(ctx, rctx)
 	if err != nil {
-		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantClientInitFailed", fmt.Sprintf("Failed to fetch tenant from backend due to %s", err.Error()))
+		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantFetchFailed", fmt.Sprintf("Failed to fetch tenant from backend due to %s", err.Error()))
 		return err
-	} else {
-		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "TenantClientInitSucceeded", "Initialized tenant client successfully")
 	}
 
+	// Sync read-only status
+	r.reconcileRegions(ctx, rctx)
+
+	err = r.reconcileTenantUsage(ctx, rctx)
+	if err != nil {
+		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantUsageFailed", fmt.Sprintf("Failed to fetch current tenant usage due to %s", err.Error()))
+	}
+
+	r.evaluateQuotaConditions(ctx, rctx)
+
+	// check ownership of the tenant.
+	err = r.verifyOwnership(ctx, rctx)
+	if err != nil {
+		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "OwnershipVerificationFailed", fmt.Sprintf("Failed to verify ownership: %s", err.Error()))
+		return err
+	}
+
+	// make sure to stop here if we don't own the backend resource.
+	if !rctx.Account.Status.OwnsBackendResource {
+		// make sure to warn if the user tries to edit the spec in read-only mode.
+		r.detectAndWarnSpecChanges(ctx, rctx)
+
+		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue,
+			"ReadOnlySync", "Status synced from backend (read-only mode)")
+		return nil
+	}
+
+	// we own the backend resource - perform full reconciliation.
 	err = r.reconcileTenantDescription(ctx, rctx)
 	if err != nil {
-		// no need to stop reconciliation here, just set the condition.
-		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantDescriptionReconcileFailed", fmt.Sprintf("Failed to reconcile tenant description: %s", err.Error()))
+		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "StorageQuotaReconcileFailed", fmt.Sprintf("Failed to reconcile storage quota: %s", err.Error()))
 	}
 
 	err = r.reconcileTenantNameUpdate(ctx, rctx)
 	if err != nil {
 		// no need to stop reconciliation here, just set the condition.
-		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantNameUpdateFailed", fmt.Sprintf("Failed to update tenant name: %s", err.Error()))
-	}
-
-	// make sure the regions are up to date.
-	r.reconcileRegions(ctx, rctx)
-
-	// check usage and quota configuration.
-	err = r.reconcileStorageQuota(ctx, rctx)
-	if err != nil {
-		// no need to stop reconciliation here, just set the condition.
-		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "StorageQuotaReconcileFailed", fmt.Sprintf("Failed to reconcile storage quota: %s", err.Error()))
-	}
-
-	err = r.reconcileTenantUsage(ctx, rctx)
-	if err != nil {
-		// no need to stop reconciliation here, just set the condition.
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantUsageReconcileFailed", fmt.Sprintf("Failed to reconcile tenant usage: %s", err.Error()))
 	}
 
-	r.evaluateQuotaConditions(ctx, rctx)
+	err = r.reconcileStorageQuota(ctx, rctx)
+	if err != nil {
+		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "StorageQuotaReconcileFailed", fmt.Sprintf("Failed to reconcile storage quota: %s", err.Error()))
+	}
 
 	// reconcile tenant admin credentials.
 	err = r.reconcileTenantAdminCredentials(ctx, rctx)
@@ -837,8 +858,15 @@ func (r *S3TenantAccountReconciler) reconcileTenantDescription(ctx context.Conte
 
 	// combine default fields for the description.
 	description := map[string]string{
+		// USER FIELDS
+		"user_description": *rctx.Account.Spec.Description,
+
+		// OPERATOR MANAGED FIELDS
+		"managed_by":           "storagegrid-operator",
+		"cr_uid":               string(rctx.Account.UID),
+		"cr_name":              rctx.Account.Name,
 		"kubernetes_namespace": namespace,
-		"user_description":     *rctx.Account.Spec.Description,
+		"last_reconciled":      time.Now().Format(time.RFC3339),
 	}
 
 	// add any additional metadata specified by the user.
@@ -1030,6 +1058,9 @@ func (r *S3TenantAccountReconciler) reconcileCreate(ctx context.Context, rctx *a
 	rctx.Account.Status.ObservedTenantBackendName = rctx.Account.Status.DesiredTenantBackendName
 	rctx.Account.Status.TenantID = tenantID
 	rctx.Account.Status.TenantManagerURL = fmt.Sprintf("%s?accountId=%s", rctx.SG.Spec.ManagementEndpoint, tenantID)
+
+	// set reque to true
+	rctx.DoRequeue = true
 
 	return nil
 }
@@ -1621,6 +1652,252 @@ func (r *S3TenantAccountReconciler) mapTenantClassToAccounts(ctx context.Context
 	}
 
 	return requests
+}
+
+// reconcileImport handles the import of an existing tenant from the backend.
+// It fetches the tenant by ID, checks ownership, adopts it if safe, and handles
+// all status updates, credential creation, and metadata updates.
+// Similar to reconcileCreate, it's a complete operation that handles the import flow.
+func (r *S3TenantAccountReconciler) reconcileImport(ctx context.Context, rctx *accountReconcileContext, tenantID string) error {
+	log := log.FromContext(ctx)
+
+	log.Info("Starting tenant import", "tenantID", tenantID)
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantCreating,
+		fmt.Sprintf("Importing existing tenant with ID %s", tenantID))
+
+	// Fetch tenant by ID from backend
+	tenant, err := grid.FetchTenant(ctx, tenantID, rctx.GridClient)
+	if err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventTenantImportFailed,
+			fmt.Sprintf("Failed to fetch tenant %s: %v", tenantID, err))
+		return fmt.Errorf("failed to fetch tenant %s for import: %w", tenantID, err)
+	}
+
+	// Parse existing metadata from tenant description
+	metadata := parseMetadataFromDescription(*tenant.Description)
+	currentOwnerUID := metadata["cr_uid"]
+	currentOwnerName := metadata["cr_name"]
+
+	// Ownership decision logic
+	if currentOwnerUID == "" {
+		// Unmanaged tenant - safe to adopt
+		log.Info("Importing unmanaged tenant",
+			"tenantID", tenantID,
+			"tenantName", tenant.Name)
+
+		return r.adoptTenant(ctx, rctx, tenant)
+	}
+
+	if currentOwnerUID == string(rctx.Account.UID) {
+		// Already ours - import is idempotent
+		log.Info("Tenant already owned by this CR - import successful",
+			"tenantID", tenantID)
+
+		rctx.Account.Status.OwnsBackendResource = true
+		r.syncTenantStatus(ctx, rctx, tenant)
+
+		// Remove import annotation (operation complete)
+		delete(rctx.Account.Annotations, s3v1alpha1.AnnotationImportTenant)
+		rctx.ObjectUpdated = true
+
+		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeCreated, metav1.ConditionTrue,
+			"TenantImported", "Tenant already owned by this CR")
+
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantImported,
+			fmt.Sprintf("Tenant %s already owned by this CR", *tenant.Name))
+
+		rctx.DoRequeue = true
+		return nil
+	}
+
+	// Ownership conflict - different CR owns this tenant
+	forceAdopt := rctx.Account.Annotations[s3v1alpha1.AnnotationForceAdoptTenant] == "true"
+
+	if !forceAdopt {
+		// Import in read-only mode
+		log.Info("Importing tenant owned by another CR - read-only mode",
+			"tenantID", tenantID,
+			"ownerCR", currentOwnerName,
+			"ownerUID", currentOwnerUID)
+
+		rctx.Account.Status.OwnsBackendResource = false
+		r.syncTenantStatus(ctx, rctx, tenant)
+
+		// Set condition to inform user
+		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeOwnershipConflict, metav1.ConditionTrue,
+			"ImportedReadOnly",
+			fmt.Sprintf("Imported in read-only mode - tenant owned by CR '%s' (UID: %s)", currentOwnerName, currentOwnerUID))
+
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantImported,
+			fmt.Sprintf("Imported tenant %s in read-only mode - owned by %s", *tenant.Name, currentOwnerName))
+
+		// Remove import annotation (operation complete)
+		delete(rctx.Account.Annotations, s3v1alpha1.AnnotationImportTenant)
+		rctx.ObjectUpdated = true
+
+		rctx.DoRequeue = true
+		return nil
+	}
+
+	// Force adoption requested
+	log.Info("Force adopting tenant from another CR",
+		"tenantID", tenantID,
+		"previousOwner", currentOwnerName,
+		"previousOwnerUID", currentOwnerUID)
+
+	r.emitEvent(rctx, corev1.EventTypeWarning, EventOwnershipForced,
+		fmt.Sprintf("Force adopting tenant from %s (UID: %s)", currentOwnerName, currentOwnerUID))
+
+	return r.adoptTenant(ctx, rctx, tenant)
+}
+
+// adoptTenant takes ownership of an existing tenant.
+// It updates metadata, rotates credentials, and marks the tenant as owned.
+func (r *S3TenantAccountReconciler) adoptTenant(ctx context.Context, rctx *accountReconcileContext, tenant *grid.Tenant) error {
+	log := log.FromContext(ctx)
+
+	log.Info("Adopting tenant", "tenantID", tenant.Id, "tenantName", tenant.Name)
+
+	// Sync basic status from backend
+	r.syncTenantStatus(ctx, rctx, tenant)
+
+	// Cache tenant for this reconciliation
+	rctx.BackendTenant = tenant
+
+	// Mark as owned
+	rctx.Account.Status.OwnsBackendResource = true
+
+	// Update tenant metadata with our ownership
+	if err := r.reconcileTenantDescription(ctx, rctx); err != nil {
+		return fmt.Errorf("failed to update tenant metadata: %w", err)
+	}
+
+	// Rotate credentials for security
+	log.Info("Rotating tenant admin credentials")
+	if err := r.createTenantAdminCredentials(ctx, rctx, true); err != nil {
+		log.Error(err, "Failed to rotate admin credentials during import")
+		// Not fatal - continue
+	}
+
+	log.Info("Creating initial S3 admin keypair")
+	if err := r.createS3AdminKeypair(ctx, rctx, true); err != nil {
+		log.Error(err, "Failed to create S3 keypair during import")
+		// Not fatal - continue
+	}
+
+	// Remove import annotation (operation complete)
+	delete(rctx.Account.Annotations, s3v1alpha1.AnnotationImportTenant)
+	rctx.ObjectUpdated = true
+
+	// Remove force-adopt if present
+	delete(rctx.Account.Annotations, s3v1alpha1.AnnotationForceAdoptTenant)
+
+	// Set condition
+	r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeCreated, metav1.ConditionTrue,
+		"TenantImported",
+		fmt.Sprintf("Successfully imported tenant %s", tenant.Id))
+
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantImported,
+		fmt.Sprintf("Successfully imported tenant %s (%s)", *tenant.Name, tenant.Id))
+
+	// Continue with normal reconciliation
+	rctx.DoRequeue = true
+	return nil
+}
+
+// syncTenantStatus updates status fields from the backend tenant.
+func (r *S3TenantAccountReconciler) syncTenantStatus(ctx context.Context, rctx *accountReconcileContext, tenant *grid.Tenant) {
+	rctx.Account.Status.TenantID = tenant.Id
+	rctx.Account.Status.ObservedTenantBackendName = tenant.Name
+	rctx.Account.Status.DesiredTenantBackendName = tenant.Name
+	rctx.Account.Status.TenantManagerURL = fmt.Sprintf("%s?accountId=%s",
+		rctx.SG.Spec.ManagementEndpoint, tenant.Id)
+}
+
+// verifyOwnership checks if this CR still owns the backend tenant.
+// Sets OwnsBackendResource status field and emits events if ownership changes.
+func (r *S3TenantAccountReconciler) verifyOwnership(ctx context.Context, rctx *accountReconcileContext) error {
+	log := log.FromContext(ctx)
+
+	// Parse current metadata
+	metadata := parseMetadataFromDescription(*rctx.S3Tenant.Spec.Description)
+	currentOwnerUID := metadata["cr_uid"]
+
+	// Check if we still own it
+	if currentOwnerUID != string(rctx.Account.UID) {
+		// Ownership lost or never had it
+
+		if rctx.Account.Status.OwnsBackendResource {
+			// We previously owned it - ownership was taken
+			log.Info("Ownership lost - switching to read-only mode",
+				"newOwner", metadata["cr_name"],
+				"newOwnerUID", currentOwnerUID)
+
+			r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeOwnershipLost, metav1.ConditionTrue,
+				"OwnershipTransferred",
+				fmt.Sprintf("Tenant ownership transferred to %s", metadata["cr_name"]))
+
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventOwnershipLost,
+				fmt.Sprintf("Tenant now managed by %s - operating in read-only mode", metadata["cr_name"]))
+		}
+
+		rctx.Account.Status.OwnsBackendResource = false
+		log.Info("Operating in read-only mode - no mutations will be applied to backend")
+		return nil // Not an error, just read-only mode
+	}
+
+	// Check if we didn't own it before
+	if !rctx.Account.Status.OwnsBackendResource {
+		// Ownership regained
+		log.Info("Ownership verified - assuming full management")
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventOwnershipRegained,
+			"Ownership verified - assuming tenant management")
+	}
+
+	rctx.Account.Status.OwnsBackendResource = true
+	log.Info("Ownership verified - full management mode")
+	return nil
+}
+
+// detectAndWarnSpecChanges checks if the spec was modified while not owning the tenant.
+// Emits warnings and conditions to inform users their changes won't be applied.
+func (r *S3TenantAccountReconciler) detectAndWarnSpecChanges(ctx context.Context, rctx *accountReconcileContext) {
+	log := log.FromContext(ctx)
+
+	// Check if spec changed (generation incremented but we can't apply)
+	if rctx.Account.Generation != rctx.Account.Status.ObservedGeneration {
+		log.Info("Spec changes detected while in read-only mode - changes will not be applied to backend",
+			"generation", rctx.Account.Generation,
+			"observedGeneration", rctx.Account.Status.ObservedGeneration)
+
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventSpecChangeIgnored,
+			"Spec changes detected but ignored - tenant owned by another CR. Changes will not be applied to backend.")
+
+		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeSpecDrift, metav1.ConditionTrue,
+			"ReadOnlyMode",
+			"Spec changes detected but not applied - not the owning CR")
+
+		// Update observed generation to mark we've seen these changes
+		rctx.Account.Status.ObservedGeneration = rctx.Account.Generation
+	}
+}
+
+// parseMetadataFromDescription extracts key-value metadata from tenant description.
+// Description format: "key:value \nkey:value \n..."
+func parseMetadataFromDescription(description string) map[string]string {
+	metadata := make(map[string]string)
+
+	lines := strings.Split(description, "\n")
+	for _, line := range lines {
+		parts := strings.SplitN(strings.TrimSpace(line), ":", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			value := strings.TrimSpace(parts[1])
+			metadata[key] = value
+		}
+	}
+
+	return metadata
 }
 
 // SetupWithManager sets up the controller with the Manager.

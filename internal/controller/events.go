@@ -23,12 +23,21 @@ const (
 	EventTenantCreating     = "TenantCreating"
 	EventTenantCreated      = "TenantCreated"
 	EventTenantCreateFailed = "TenantCreateFailed"
+	EventTenantImported     = "TenantImported"
+	EventTenantImportFailed = "TenantImportFailed"
 	EventTenantUpdating     = "TenantUpdating"
 	EventTenantUpdated      = "TenantUpdated"
 	EventTenantUpdateFailed = "TenantUpdateFailed"
 	EventTenantDeleting     = "TenantDeleting"
 	EventTenantDeleted      = "TenantDeleted"
 	EventTenantDeleteFailed = "TenantDeleteFailed"
+
+	// Ownership Management Events
+	EventOwnershipConflict = "OwnershipConflict"
+	EventOwnershipForced   = "OwnershipForced"
+	EventOwnershipLost     = "OwnershipLost"
+	EventOwnershipRegained = "OwnershipRegained"
+	EventSpecChangeIgnored = "SpecChangeIgnored"
 
 	// Backend Connection Events
 	EventBackendConnectionFailed   = "BackendConnectionFailed"

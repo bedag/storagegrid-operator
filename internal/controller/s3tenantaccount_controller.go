@@ -781,10 +781,10 @@ func (r *S3TenantAccountReconciler) reconcileTenantName(ctx context.Context, rct
 	// use resource name as default tenant name.
 	tenantName := rctx.Account.Name
 	// use spec name if set and if not use s3tenant name if available.
-	if rctx.S3Tenant.Name != "" {
-		tenantName = rctx.S3Tenant.Name
-	} else if rctx.Account.Spec.Name != "" {
+	if rctx.Account.Spec.Name != "" {
 		tenantName = rctx.Account.Spec.Name
+	} else if rctx.S3Tenant.Name != "" {
+		tenantName = rctx.S3Tenant.Name
 	}
 
 	// combine prefix and name if prefix is set.

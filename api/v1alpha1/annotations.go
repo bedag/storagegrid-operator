@@ -35,7 +35,7 @@ var (
 
 	// import existing s3 tenant into state.
 	// TODO: implement this.
-	AnnotationExistingTenant = fmt.Sprintf("%s.%s/existing-tenant-id", AnnotationPrefixAdmin, Domain)
+	AnnotationImportTenant = fmt.Sprintf("%s.%s/import-tenant-id", AnnotationPrefixAdmin, Domain)
 
 	// force a recreation of the tenant.
 	AnnotationRecreateTenant = fmt.Sprintf("%s.%s/recreate-tenant", AnnotationPrefixTenant, Domain)

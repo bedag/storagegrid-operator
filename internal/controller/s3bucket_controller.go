@@ -790,7 +790,7 @@ func (r *S3BucketReconciler) reconcileDrain(ctx context.Context, rctx *bucketRec
 	// Check for orphaned drain (backend draining but no StartedAt in our status)
 	if backendStatus.IsDeletingObjects &&
 		(rctx.Bucket.Status.DrainStatus == nil || rctx.Bucket.Status.DrainStatus.StartedAt == nil) {
-		return r.cancelOrphanedDrain(ctx, rctx, backendStatus)
+		return r.cancelOrphanedDrain(ctx, rctx)
 	}
 
 	// Check if user wants to drain (annotation present)
@@ -957,7 +957,7 @@ func (r *S3BucketReconciler) cancelDrain(ctx context.Context, rctx *bucketReconc
 }
 
 // cancelOrphanedDrain cancels drain operations not initiated by the operator.
-func (r *S3BucketReconciler) cancelOrphanedDrain(ctx context.Context, rctx *bucketReconcileContext, backendStatus *grid.DrainStatus) error {
+func (r *S3BucketReconciler) cancelOrphanedDrain(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "detectOrphanedDrain")
 	log.Info("Detected orphaned drain operation (backend draining without operator initiation)")
 

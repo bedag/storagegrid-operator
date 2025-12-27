@@ -168,12 +168,6 @@ type CommonTenantStatus struct {
 	// Contains addresses to access your buckets and objects.
 	// +kubebuilder:default:={}
 	S3EndpointConfig *S3EndpointConfig `json:"s3EndpointConfig,omitempty"`
-
-	// OwnsBackendResource indicates whether this CR currently owns the backend tenant.
-	// If false, the operator operates in read-only mode to prevent conflicts with other operators.
-	// For S3Tenant, this value is copied from the bound S3TenantAccount's status.
-	// +optional
-	OwnsBackendResource bool `json:"ownsBackendResource,omitempty"`
 }
 
 type QuotaStatus struct {

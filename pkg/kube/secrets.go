@@ -128,3 +128,28 @@ func createSecret(ctx context.Context, k8sClient client.Client, secretName strin
 
 	return nil
 }
+
+// DeleteSecret deletes a secret from the specified namespace.
+func DeleteSecret(ctx context.Context, k8sClient client.Client, namespace string, secretName string) error {
+	log := log.FromContext(ctx).WithValues("func", "DeleteSecret")
+	log.V(1).Info("Deleting secret", "name", secretName, "namespace", namespace)
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: namespace,
+		},
+	}
+
+	if err := k8sClient.Delete(ctx, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.V(1).Info("Secret already deleted", "name", secretName, "namespace", namespace)
+			return nil
+		}
+		log.Error(err, "Failed to delete secret", "name", secretName, "namespace", namespace)
+		return err
+	}
+
+	log.V(1).Info("Secret deleted successfully", "name", secretName, "namespace", namespace)
+	return nil
+}

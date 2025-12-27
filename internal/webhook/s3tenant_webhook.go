@@ -107,6 +107,12 @@ func (r *S3TenantValidator) ValidateUpdate(ctx context.Context, oldObj runtime.O
 	if !ok {
 		return nil, fmt.Errorf("object is not an S3Tenant")
 	}
+
+	// oldTenant, ok := oldObj.(*s3v1alpha1.S3Tenant)
+	// if !ok {
+	// 	return nil, fmt.Errorf("old object is not an S3Tenant")
+	// }
+
 	s3tenantlog.Info("validate update", "name", s3tenant.Name)
 
 	return nil, nil

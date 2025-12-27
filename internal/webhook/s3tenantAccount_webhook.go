@@ -67,6 +67,16 @@ func (r *S3TenantAccountValidator) ValidateCreate(ctx context.Context, obj runti
 
 	s3tenantAccountlog.Info("validate create", "name", s3tenantAccount.Name)
 
+	// Validate import requirements
+	if s3tenantAccount.Annotations != nil {
+		if importTenantID, hasImport := s3tenantAccount.Annotations[s3v1alpha1.AnnotationImportTenant]; hasImport {
+			// Import requires root secret reference
+			if s3tenantAccount.Spec.RootSecretRef == nil || s3tenantAccount.Spec.RootSecretRef.Name == "" {
+				return nil, fmt.Errorf("import requires spec.rootSecretRef to be specified: root credentials for tenant '%s' must be provided in a pre-existing secret (cannot be rotated via API)", importTenantID)
+			}
+		}
+	}
+
 	// Check if the TenantAccountClass exists.
 	exists, err := r.tenantClassExists(ctx, s3tenantAccount.Spec.S3TenantClassName)
 	if err != nil {
@@ -88,7 +98,27 @@ func (r *S3TenantAccountValidator) ValidateUpdate(ctx context.Context, oldObj ru
 		return nil, fmt.Errorf("object is not an S3TenantAccount")
 	}
 
+	oldAccount, ok := oldObj.(*s3v1alpha1.S3TenantAccount)
+	if !ok {
+		return nil, fmt.Errorf("old object is not an S3TenantAccount")
+	}
+
 	s3tenantAccountlog.Info("validate update", "name", s3tenantAccount.Name)
+
+	// Block import annotation on update - import is only allowed during creation
+	if s3tenantAccount.Annotations != nil {
+		if _, hasImport := s3tenantAccount.Annotations[s3v1alpha1.AnnotationImportTenant]; hasImport {
+
+			// Check if annotation was just added (not present in old object)
+			oldHasImport := false
+			if oldAccount.Annotations != nil {
+				_, oldHasImport = oldAccount.Annotations[s3v1alpha1.AnnotationImportTenant]
+			}
+			if !oldHasImport {
+				return nil, fmt.Errorf("import annotation '%s' can only be set during creation, not on updates", s3v1alpha1.AnnotationImportTenant)
+			}
+		}
+	}
 
 	// Check if the TenantAccountClass exists.
 	exists, err := r.tenantClassExists(ctx, s3tenantAccount.Spec.S3TenantClassName)
@@ -112,6 +142,13 @@ func (r *S3TenantAccountValidator) ValidateDelete(ctx context.Context, obj runti
 	}
 
 	s3tenantAccountlog.Info("validate delete", "name", s3tenantAccount.Name)
+
+	// Block import annotation on delete
+	if s3tenantAccount.Annotations != nil {
+		if _, hasImport := s3tenantAccount.Annotations[s3v1alpha1.AnnotationImportTenant]; hasImport {
+			return nil, fmt.Errorf("cannot delete S3TenantAccount with import annotation '%s'. Remove the annotation first", s3v1alpha1.AnnotationImportTenant)
+		}
+	}
 
 	// deletion is blocked until the allow-delete annotation is added.
 	if _, ok := s3tenantAccount.Annotations[s3v1alpha1.AnnotationAllowTenantDeletion]; !ok {

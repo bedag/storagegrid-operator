@@ -58,8 +58,7 @@ type tenantReconcileContext struct {
 }
 
 const (
-	tenantFinalizer           = "kubernetes.io/foregroundDeletion"
-	errorAccountNotPhaseBound = "backing S3TenantAccount is not in phase Bound"
+	tenantFinalizer = "kubernetes.io/foregroundDeletion"
 )
 
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenants,verbs=get;list;watch;create;update;patch;delete

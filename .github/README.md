@@ -322,6 +322,7 @@ metadata:
   namespace: storagegrid-operator-system  # Operator namespace, not application namespace
 type: Opaque
 stringData:
+  username: "root"                       # Always "root"
   password: "existing-root-password"  # Must be the actual root password from the backing StorageGrid *tenant*
 ```
 

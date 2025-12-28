@@ -239,6 +239,8 @@ spec:
                     storageQuota: "1Gi"
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
+            required:
+            - storageQuota
             type: object
           status:
             default: {}

@@ -92,6 +92,7 @@ type CommonTenantSpec struct {
 	// should be specified using a quantity string (e.g., "512Mi", "1Gi").
 	// Example:
 	//   storageQuota: "1Gi"
+	// +kubebuilder:validation:Required
 	StorageQuota *resource.Quantity `json:"storageQuota,omitempty"`
 
 	// StorageGrid reference.

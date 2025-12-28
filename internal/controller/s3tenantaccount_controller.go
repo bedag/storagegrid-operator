@@ -302,8 +302,6 @@ func (r *S3TenantAccountReconciler) doReconcile(ctx context.Context, rctx *accou
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantUsageFailed", fmt.Sprintf("Failed to fetch current tenant usage due to %s", err.Error()))
 	}
 
-	r.evaluateQuotaConditions(ctx, rctx)
-
 	err = r.reconcileTenantDescription(ctx, rctx)
 	if err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "StorageQuotaReconcileFailed", fmt.Sprintf("Failed to reconcile storage quota: %s", err.Error()))
@@ -319,6 +317,8 @@ func (r *S3TenantAccountReconciler) doReconcile(ctx context.Context, rctx *accou
 	if err != nil {
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "StorageQuotaReconcileFailed", fmt.Sprintf("Failed to reconcile storage quota: %s", err.Error()))
 	}
+
+	r.evaluateQuotaConditions(ctx, rctx)
 
 	// reconcile tenant admin credentials.
 	err = r.reconcileTenantAdminCredentials(ctx, rctx)
@@ -1721,18 +1721,11 @@ func (r *S3TenantAccountReconciler) reconcileImport(ctx context.Context, rctx *a
 		return err
 	}
 
-	// Verify root secret exists in namespace
-	// Error if not found
-	rootSecret := &corev1.Secret{}
-	secretKey := client.ObjectKey{
-		Name:      rctx.Account.Spec.RootSecretRef.Name,
-		Namespace: rctx.Account.Namespace,
-	}
-	if err := r.Get(ctx, secretKey, rootSecret); err != nil {
-		r.emitEvent(rctx, corev1.EventTypeWarning, EventTenantImportFailed,
-			fmt.Sprintf("Root secret '%s' not found: %v", rctx.Account.Spec.RootSecretRef.Name, err))
-		return fmt.Errorf("root secret '%s' not found in namespace '%s': %w",
-			rctx.Account.Spec.RootSecretRef.Name, rctx.Account.Namespace, err)
+	// Verify root secret works by initializing a tenant client
+	err := r.initTenantClient(ctx, rctx)
+	if err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventTenantImportFailed, fmt.Sprintf("Unable to initialize client: %v", err))
+		return fmt.Errorf("Unable to initialize tenant client: %v", err)
 	}
 
 	// Fetch tenant by ID from backend

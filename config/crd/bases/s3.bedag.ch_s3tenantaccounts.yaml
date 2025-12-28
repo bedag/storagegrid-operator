@@ -390,6 +390,8 @@ spec:
                     - message: retentionDuration must not exceed 30 days
                       rule: duration(self) <= duration('720h')
                 type: object
+            required:
+            - storageQuota
             type: object
           status:
             default: {}

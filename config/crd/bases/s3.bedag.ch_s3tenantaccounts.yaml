@@ -18,8 +18,8 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - description: The name of the tenant in the backend
-      jsonPath: .status.s3TenantRef.name
+    - description: The s3 Tenant this account is bound to
+      jsonPath: .spec.s3TenantRef.name
       name: S3Tenant
       type: string
     - description: The name of the tenant in the backend
@@ -41,6 +41,10 @@ spec:
     - description: The class of the tenant account
       jsonPath: .status.s3EndpointConfig.s3TenantClassName
       name: TenantClass
+      type: string
+    - description: Deletion policy for this tenant
+      jsonPath: .status.tenantDeletionPolicy.policy
+      name: DeletionPolicy
       type: string
     - description: Current phase of the tenant account
       jsonPath: .status.phase

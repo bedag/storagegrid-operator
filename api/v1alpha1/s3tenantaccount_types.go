@@ -145,12 +145,13 @@ type S3TenantAccountStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="S3Tenant",type="string",JSONPath=".status.s3TenantRef.name",description="The name of the tenant in the backend"
+// +kubebuilder:printcolumn:name="S3Tenant",type="string",JSONPath=".spec.s3TenantRef.name",description="The s3 Tenant this account is bound to"
 // +kubebuilder:printcolumn:name="TenantBackendName",type="string",JSONPath=".status.observedTenantBackendName",description="The name of the tenant in the backend"
 // +kubebuilder:printcolumn:name="StorageGrid",type="string",JSONPath=".spec.storageGridRef.name",description="The StorageGrid this tenant account belongs to"
 // +kubebuilder:printcolumn:name="Capacity",type="string",JSONPath=".status.quota.limit",description="Configured capacity of the tenant"
 // +kubebuilder:printcolumn:name="Default Address",type="string",JSONPath=".status.s3EndpointConfig.defaultAddress",description="Default S3 address"
 // +kubebuilder:printcolumn:name="TenantClass",type="string",JSONPath=".status.s3EndpointConfig.s3TenantClassName",description="The class of the tenant account"
+// +kubebuilder:printcolumn:name="DeletionPolicy",type="string",JSONPath=".status.tenantDeletionPolicy.policy",description="Deletion policy for this tenant"
 // +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Current phase of the tenant account"
 // +kubebuilder:printcolumn:JSONPath=`.metadata.creationTimestamp`,name=`AGE`,type=date
 // +kubebuilder:resource:scope=Cluster,shortName={"s3accs","s3acc"}

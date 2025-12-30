@@ -411,6 +411,10 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantReference(ctx context.Conte
 				log.Error(err, fmt.Sprintf("Failed to retrieve S3Tenant %s from API", rctx.Account.Status.S3TenantRef.Name))
 				return err
 			}
+		} else if !rctx.S3Tenant.DeletionTimestamp.IsZero() {
+			// S3Tenant exists but is being deleted (has deletion timestamp)
+			log.V(1).Info("S3Tenant is being deleted (has deletion timestamp), treating as deleted")
+			r.reconcileDeletedTenant(ctx, rctx)
 		}
 
 		return nil
@@ -441,6 +445,13 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantReference(ctx context.Conte
 			// any other error is a real error, we cannot proceed.
 			return err
 		}
+	}
+
+	// Check if the S3Tenant is being deleted (has deletion timestamp)
+	if !rctx.S3Tenant.DeletionTimestamp.IsZero() {
+		log.V(1).Info("S3Tenant is being deleted (has deletion timestamp), treating as deleted")
+		r.reconcileDeletedTenant(ctx, rctx)
+		return nil
 	}
 
 	// once fetched, we need to always update the S3TenantRef in the account status.
@@ -1595,7 +1606,10 @@ func (r *S3TenantAccountReconciler) finalize(ctx context.Context, rctx *accountR
 		r.emitEvent(rctx, corev1.EventTypeNormal, "TenantRetaining",
 			fmt.Sprintf("Retaining tenant %s in StorageGrid - removing operator ownership metadata", rctx.Account.Status.TenantID))
 
-		if err := grid.UpdateDescription(ctx, "", rctx.BackendTenant, rctx.GridClient); err != nil {
+		// add timestamp to description to indicate when it was retained.
+		description := fmt.Sprintf("Tenant %s removed from Kubernetes on %s", rctx.Account.Name, time.Now().Format(time.RFC3339))
+
+		if err := grid.UpdateDescription(ctx, description, rctx.BackendTenant, rctx.GridClient); err != nil {
 			log.Error(err, "Failed to remove ownership metadata")
 			r.emitEvent(rctx, corev1.EventTypeWarning, "TenantRetainFailed",
 				fmt.Sprintf("Failed to remove ownership metadata: %v", err))

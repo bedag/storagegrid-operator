@@ -28,6 +28,14 @@ import (
 type S3TenantSpec struct {
 	// embed the common tenant spec.
 	CommonTenantSpec `json:",inline"`
+
+	// S3TenantAccountRef is an optional reference to an existing S3TenantAccount to claim.
+	// When specified, the S3Tenant will claim the referenced S3TenantAccount instead of creating a new one.
+	// This field is immutable once set.
+	// Similar to PersistentVolumeClaim's volumeName, this allows claiming existing accounts.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="s3TenantAccountRef is immutable"
+	S3TenantAccountRef *corev1.LocalObjectReference `json:"s3TenantAccountRef,omitempty"`
 }
 
 // S3TenantStatus defines the observed state of S3Tenant.

@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
+	"github.com/bedag/storagegrid-operator/internal/controller"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -98,6 +99,24 @@ func (r *S3TenantValidator) ValidateCreate(ctx context.Context, obj runtime.Obje
 		return nil, fmt.Errorf("TenantClass %s does not exist", s3tenant.Spec.S3TenantClassName)
 	}
 
+	// If claiming an existing account, validate the claim
+	if s3tenant.Spec.S3TenantAccountRef != nil {
+		// Fetch the account to validate the claim
+		account := &s3v1alpha1.S3TenantAccount{}
+		err := r.k8sClient.Get(ctx, client.ObjectKey{Name: s3tenant.Spec.S3TenantAccountRef.Name}, account)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil, fmt.Errorf("S3TenantAccount %s does not exist", s3tenant.Spec.S3TenantAccountRef.Name)
+			}
+			return nil, fmt.Errorf("failed to get S3TenantAccount %s: %w", s3tenant.Spec.S3TenantAccountRef.Name, err)
+		}
+
+		// Use shared validation function
+		if err := controller.ValidateAccountClaim(ctx, r.k8sClient, s3tenant, account); err != nil {
+			return nil, fmt.Errorf("account claim validation failed: %w", err)
+		}
+	}
+
 	return nil, nil
 }
 
@@ -107,11 +126,6 @@ func (r *S3TenantValidator) ValidateUpdate(ctx context.Context, oldObj runtime.O
 	if !ok {
 		return nil, fmt.Errorf("object is not an S3Tenant")
 	}
-
-	// oldTenant, ok := oldObj.(*s3v1alpha1.S3Tenant)
-	// if !ok {
-	// 	return nil, fmt.Errorf("old object is not an S3Tenant")
-	// }
 
 	s3tenantlog.Info("validate update", "name", s3tenant.Name)
 

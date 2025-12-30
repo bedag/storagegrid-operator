@@ -60,8 +60,12 @@ const (
 	EventAccountCreating      = "AccountCreating"
 	EventAccountCreated       = "AccountCreated"
 	EventAccountCreateFailed  = "AccountCreateFailed"
+	EventAccountClaiming      = "AccountClaiming"
+	EventAccountClaimed       = "AccountClaimed"
+	EventAccountClaimFailed   = "AccountClaimFailed"
 	EventAccountBound         = "AccountBound"
 	EventAccountBindingFailed = "AccountBindingFailed"
+	EventAccountUnbound       = "AccountUnbound"
 	EventAccountNotReady      = "AccountNotReady"
 
 	// Configuration Management Events

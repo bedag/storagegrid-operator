@@ -387,20 +387,20 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantReference(ctx context.Conte
 
 	// get the S3Tenant reference from the account.
 	if rctx.Account.Spec.S3TenantRef == nil {
-		log.V(1).Info("No S3Tenant reference found in account, was it deleted?")
+		log.V(1).Info("No S3Tenant reference found in account spec")
 
 		// if the spec is missing it can be either:.
 		// 1. the S3Tenant was never created and the account is used in isolation
 		// 2. the referenced S3Tenant was deleted
 		if rctx.Account.Status.S3TenantRef == nil {
-			// -> 1. the status is also nil, we can assume that the S3Tenant was never created or already deleted
+			// -> 1. Both spec and status are nil - account is available for binding
 			r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeBound, metav1.ConditionFalse, "S3TenantNotBound", "No S3 Tenant is binding this account")
-			log.V(1).Info("No pending S3Tenant reference found in account status, nothing to do")
+			log.V(1).Info("Account is available for binding (no spec or status reference)")
 			return nil
 		}
 
-		// -> 2. the status is not nil, we can assume that the S3Tenant was deleted
-		log.V(1).Info(fmt.Sprintf("Found reference to S3Tenant %s in account status, trying to fetch it", rctx.Account.Status.S3TenantRef.Name))
+		// -> 2. Spec is nil but status has reference - the S3Tenant was deleted
+		log.V(1).Info(fmt.Sprintf("Found reference to S3Tenant %s in account status but not in spec, tenant was deleted", rctx.Account.Status.S3TenantRef.Name))
 		// use the S3TenantRef from the status to fetch the S3Tenant.
 		if err := r.Get(ctx, types.NamespacedName{Name: rctx.Account.Status.S3TenantRef.Name, Namespace: rctx.Account.Status.S3TenantRef.Namespace}, rctx.S3Tenant); err != nil {
 			// if we cannot find the s3tenant it was probably deleted.
@@ -416,14 +416,24 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantReference(ctx context.Conte
 		return nil
 	}
 
-	r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeBound, metav1.ConditionTrue, "S3TenantBound", fmt.Sprintf("Bound by S3 Tenant %s", rctx.Account.Spec.S3TenantRef.Name))
-
 	// if the S3TenantRef is set, we need to fetch the S3Tenant.
 	if err := r.Get(ctx, types.NamespacedName{Name: rctx.Account.Spec.S3TenantRef.Name, Namespace: rctx.Account.Spec.S3TenantRef.Namespace}, rctx.S3Tenant); err != nil {
-		log.Error(err, fmt.Sprintf("Failed to retrieve S3Tenant %s from API", rctx.Account.Spec.S3TenantRef.Name))
+		log.Info(fmt.Sprintf("Failed to retrieve S3Tenant %s from API", rctx.Account.Spec.S3TenantRef.Name))
 
-		// this means that the referenced s3tenant was probably deleted.
 		if client.IgnoreNotFound(err) == nil {
+			// Check if status is also nil.
+			// The status should only be nil if:
+			// The account was pre-bound by an admin (setting spec but not status)
+			// meaning we can ignore this error for now, as the S3Tenant might not be created yet.
+			if rctx.Account.Status.S3TenantRef == nil {
+				log.V(1).Info("Spec.S3TenantRef is set but status not yet bound - account available for claiming")
+				r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeBound, metav1.ConditionFalse, "S3TenantNotBound", fmt.Sprintf("Account pre-bound to S3Tenant %s, awaiting binding", rctx.Account.Spec.S3TenantRef.Name))
+				return nil
+			}
+
+			// If we cannot find the s3tenant and we do have a status reference,
+			// We assume it was likely deleted
+			// This should actually never happen - but we handle it gracefully just in case.
 			log.V(1).Info("Referenced S3Tenant not found, was it deleted?")
 			r.reconcileDeletedTenant(ctx, rctx)
 			return nil
@@ -444,6 +454,11 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantReference(ctx context.Conte
 			APIVersion: rctx.S3Tenant.APIVersion,
 		}
 
+		// Clear retention state since we're binding to a tenant
+		meta.RemoveStatusCondition(&rctx.Account.Status.Conditions, s3v1alpha1.ConditionTypeRetained)
+		meta.RemoveStatusCondition(&rctx.Account.Status.Conditions, s3v1alpha1.ConditionTypeRetainThenDelete)
+		meta.RemoveStatusCondition(&rctx.Account.Status.Conditions, s3v1alpha1.ConditionTypeDeletionTimestampReached)
+
 		// make sure no deletion timestamp is configured from any old bindings.
 		if rctx.Account.Status.DeletionTimestamp != nil {
 			log.V(1).Info("Clearing deletion timestamp from account, S3Tenant is bound")
@@ -452,6 +467,10 @@ func (r *S3TenantAccountReconciler) reconcileS3TenantReference(ctx context.Conte
 
 		log.V(1).Info(fmt.Sprintf("Successfully retrieved S3Tenant %s", rctx.S3Tenant.Name))
 	}
+
+	// Both spec and status are set - account is bound
+	log.V(1).Info(fmt.Sprintf("Account bound to S3Tenant %s", rctx.Account.Spec.S3TenantRef.Name))
+	r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeBound, metav1.ConditionTrue, "S3TenantBound", fmt.Sprintf("Bound by S3 Tenant %s", rctx.Account.Spec.S3TenantRef.Name))
 
 	return nil
 }
@@ -470,6 +489,8 @@ func (r *S3TenantAccountReconciler) reconcileDeletedTenant(ctx context.Context, 
 		// retain policy is set, we need to set the S3TenantRef to nil on do nothing else.
 		log.V(1).Info("Tenant deletion policy is set to retain, setting S3TenantRef to nil and doing nothing")
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeRetained, metav1.ConditionTrue, "TenantRetained", "S3Tenant was deleted, but account is retained due to deletion policy")
+		// Clear bound condition since tenant is being unbound
+		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeBound, metav1.ConditionFalse, "S3TenantNotBound", "S3Tenant was deleted, account is now unbound")
 		rctx.Account.Status.S3TenantRef = nil
 		rctx.Account.Spec.S3TenantRef = nil // also set the spec to nil to avoid confusion
 		rctx.ObjectUpdated = true
@@ -477,6 +498,8 @@ func (r *S3TenantAccountReconciler) reconcileDeletedTenant(ctx context.Context, 
 		// retain then delete policy is set, we need to set the S3TenantRef to nil and delete the account.
 		log.V(1).Info("Tenant deletion policy is set to retain then delete, setting S3TenantRef to nil aswell as setting the deletion timestamp on the account")
 
+		// Clear bound condition since tenant is being unbound
+		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeBound, metav1.ConditionFalse, "S3TenantNotBound", "S3Tenant was deleted, account is now unbound")
 		rctx.Account.Status.S3TenantRef = nil
 		retentionDuration := rctx.Account.Status.TenantDeletionPolicy.RetentionDuration
 		rctx.Account.Spec.S3TenantRef = nil // also set the spec to nil to avoid confusion
@@ -1656,9 +1679,9 @@ func (r *S3TenantAccountReconciler) mapTenantClassToAccounts(ctx context.Context
 
 	// Create reconciliation requests for each affected account
 	requests := make([]ctrl.Request, len(accounts.Items))
-	for i, acc := range accounts.Items {
+	for i := range accounts.Items {
 		requests[i] = ctrl.Request{
-			NamespacedName: types.NamespacedName{Name: acc.Name},
+			NamespacedName: types.NamespacedName{Name: accounts.Items[i].Name},
 		}
 	}
 
@@ -1725,7 +1748,7 @@ func (r *S3TenantAccountReconciler) reconcileImport(ctx context.Context, rctx *a
 	err := r.initTenantClient(ctx, rctx)
 	if err != nil {
 		r.emitEvent(rctx, corev1.EventTypeWarning, EventTenantImportFailed, fmt.Sprintf("Unable to initialize client: %v", err))
-		return fmt.Errorf("Unable to initialize tenant client: %v", err)
+		return fmt.Errorf("Unable to initialize tenant client: %w", err)
 	}
 
 	// Fetch tenant by ID from backend

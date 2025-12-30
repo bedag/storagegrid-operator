@@ -392,11 +392,13 @@ func (r *S3TenantReconciler) claimExistingAccount(ctx context.Context, rctx *ten
 		return fmt.Errorf("failed to get S3TenantAccount %s: %w", accountName, err)
 	}
 
-	// Check if spec is already set to this tenant (using name+namespace for stability)
+	// Check if spec is already fully claimed by this exact tenant (all fields must match)
 	alreadyClaimed := false
 	if account.Spec.S3TenantRef != nil {
 		if account.Spec.S3TenantRef.Name == rctx.S3Tenant.Name &&
-			account.Spec.S3TenantRef.Namespace == rctx.S3Tenant.Namespace {
+			account.Spec.S3TenantRef.Namespace == rctx.S3Tenant.Namespace &&
+			account.Spec.S3TenantRef.Kind == rctx.S3Tenant.Kind &&
+			account.Spec.S3TenantRef.UID == rctx.S3Tenant.UID {
 			alreadyClaimed = true
 			log.V(1).Info("Account already claimed by this tenant", "accountName", accountName)
 		}

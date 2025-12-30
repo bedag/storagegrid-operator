@@ -1133,17 +1133,20 @@ func (r *S3TenantAccountReconciler) reconcileSecretRefs(ctx context.Context, rct
 		"platformNamespace", platformSecretNamespace,
 		"baseName", secretBaseName)
 
-	// Update secret references in status.
+	// Update secret references in status. Old secrets are deleted inline if reference changes.
+	// Root secret stays in platform namespace (no change on binding).
 	r.updateSecretRef(ctx, &rctx.Account.Status.RootSecretRef,
 		rctx.Account.Spec.RootSecretRef,
 		platformSecretNamespace,
 		fmt.Sprintf("%s-root-credentials", rctx.Account.Name))
 
+	// Admin credentials - namespace changes on binding/unbinding.
 	r.updateSecretRef(ctx, &rctx.Account.Status.AdminSecretRef,
 		rctx.Account.Spec.AdminSecretRef,
 		userSecretNamespace,
 		fmt.Sprintf("%s-admin-credentials", secretBaseName))
 
+	// S3 admin keys - namespace changes on binding/unbinding.
 	r.updateSecretRef(ctx, &rctx.Account.Status.S3AdminKeysSecretRef,
 		rctx.Account.Spec.S3AdminKeysSecretRef,
 		userSecretNamespace,
@@ -1203,6 +1206,7 @@ func (r *S3TenantAccountReconciler) determineSecretBaseName(ctx context.Context,
 	return rctx.Account.Name
 }
 
+// updateSecretRef updates a secret reference and deletes the old secret if the reference changes.
 func (r *S3TenantAccountReconciler) updateSecretRef(
 	ctx context.Context,
 	statusRef **corev1.ObjectReference,
@@ -1212,7 +1216,7 @@ func (r *S3TenantAccountReconciler) updateSecretRef(
 	log := log.FromContext(ctx).WithValues("function", "updateSecretRef")
 
 	var name string
-	if specRef != nil && specRef.Name != "" { // Need to check if specRef is not nil first
+	if specRef != nil && specRef.Name != "" {
 		name = specRef.Name
 		log.V(1).Info("Using secret name from spec",
 			"name", name,
@@ -1237,18 +1241,28 @@ func (r *S3TenantAccountReconciler) updateSecretRef(
 			"name", newRef.Name,
 			"namespace", newRef.Namespace)
 		*statusRef = newRef
-	} else if (*statusRef).Name != newRef.Name || (*statusRef).Namespace != newRef.Namespace {
-		log.Info("Updating secret reference",
+		return
+	}
+
+	if (*statusRef).Name != newRef.Name || (*statusRef).Namespace != newRef.Namespace {
+		// Delete old secret before updating reference.
+		log.Info("Secret reference changed, deleting old secret",
 			"oldName", (*statusRef).Name,
 			"oldNamespace", (*statusRef).Namespace,
 			"newName", newRef.Name,
 			"newNamespace", newRef.Namespace)
+		if err := kube.DeleteSecret(ctx, r.Client, (*statusRef).Namespace, (*statusRef).Name); err != nil {
+			log.Error(err, "Failed to delete old secret",
+				"name", (*statusRef).Name,
+				"namespace", (*statusRef).Namespace)
+		}
 		*statusRef = newRef
-	} else {
-		log.V(1).Info("Secret reference unchanged",
-			"name", newRef.Name,
-			"namespace", newRef.Namespace)
+		return
 	}
+
+	log.V(1).Info("Secret reference unchanged",
+		"name", newRef.Name,
+		"namespace", newRef.Namespace)
 }
 
 func (r *S3TenantAccountReconciler) reconcileStorageQuota(ctx context.Context, rctx *accountReconcileContext) error {
@@ -1475,7 +1489,7 @@ func (r *S3TenantAccountReconciler) createTenantAdminCredentials(ctx context.Con
 	// Always use S3Tenant as owner if it exists (user-facing secret).
 	// Otherwise fall back to Account (platform-managed scenario).
 	var owner metav1.Object
-	if rctx.Account.Spec.S3TenantRef != nil {
+	if rctx.Account.Status.S3TenantRef != nil {
 		owner = rctx.S3Tenant
 	} else {
 		owner = rctx.Account
@@ -1558,7 +1572,7 @@ func (r *S3TenantAccountReconciler) createS3AdminKeypair(ctx context.Context, rc
 
 	// if tenantref is set use this as owner instead.
 	var owner metav1.Object
-	if rctx.Account.Spec.S3TenantRef != nil {
+	if rctx.Account.Status.S3TenantRef != nil {
 		owner = rctx.S3Tenant
 	} else {
 		owner = rctx.Account

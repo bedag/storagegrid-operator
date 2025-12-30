@@ -29,7 +29,6 @@ const (
 	PhaseFailed           Phase = "Failed"
 	PhaseDeleting         Phase = "Deleting"
 	PhaseInProgress       Phase = "InProgress"
-	PhaseRetaining        Phase = "Retaining"
 	PhaseRetainThenDelete Phase = "RetainThenDelete"
 	PhaseBound            Phase = "Bound"
 )

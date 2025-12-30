@@ -268,33 +268,44 @@ These secrets can be used by your applications for administrative access to the 
 
 #### How does the operator manage tenants?
 
-When you create an `S3Tenant`, the operator will create a corresponding `S3TenantAccount` in the cluster scope. This resource manages the actual tenant account in StorageGrid and handles all interactions with the backend.
+When you create an `S3Tenant`, the operator can either:
+1. **Create a new S3TenantAccount** automatically (default behavior)
+2. **Claim an existing S3TenantAccount** using `spec.s3TenantAccountRef` (see Claiming section below)
 
-The `S3TenantAccount` will additionally store the root of the tenant in a `Secret` in the `storagegrid-operator-system` namespace. This secret is named `s3-tenant-<tenant-name>-root-credentials` and will be used by the operator to manage the tenant account.
+The `S3TenantAccount` manages the actual tenant account in StorageGrid and handles all interactions with the backend. It stores the root credentials in a `Secret` in the `storagegrid-operator-system` namespace, named `s3-tenant-<tenant-name>-root-credentials`.
 
-On the `S3TenantAccount` you can additionally set the `admin.s3.bedag.ch/reset-admin-password` annotation to force a reset of the admin password used by the user on the next reconciliation.
+On the `S3TenantAccount` you can additionally set the `admin.s3.bedag.ch/reset-admin-password` annotation to force a reset of the admin password on the next reconciliation.
 
 #### Tenant Deletion Policies
 
-The `S3TenantAccount` supports deletion policies (configured via `status.tenantDeletionPolicy`) that control what happens to the StorageGrid tenant when the account is deleted:
+The `S3TenantAccount` supports deletion policies (configured via `status.tenantDeletionPolicy`) that control what happens to the StorageGrid tenant when the S3Tenant is deleted:
 
 - **`Delete`**: Completely removes the tenant from StorageGrid backend (default for new accounts)
-- **`Retain`**: Removes operator ownership metadata (the description) only, leaving the tenant in StorageGrid available for re-import or other use
+- **`Retain`**: Unbinds the S3Tenant but keeps the S3TenantAccount available for re-claiming. The account emits events and conditions to indicate it was retained. Transitions back to `PhaseReady`.
 - **`RetainThenDelete`**: Retains for a configured duration, then deletes
 
-When using **`Retain` policy**, the operator:
+**When using `Retain` policy for claimed accounts:**
+1. The S3Tenant is deleted
+2. The S3TenantAccount's `spec.s3TenantRef` is cleared (unbinding)
+3. The account is reset to PhaseReady
+4. The account becomes available for claiming by a new S3Tenant
+5. Operator-managed secrets remain intact (unlike full tenant deletion)
+6. The tenant in StorageGrid continues operating normally
+
+This enables workflows like:
+- Safely testing tenant claiming without risk of data loss
+- Moving S3Tenant resources between namespaces while keeping the same backend account
+- Temporarily removing namespace-scoped access while preserving the account
+- Re-binding accounts to different S3Tenant resources
+
+**When using `Retain` policy for imported accounts:**
 1. Removes all operator-managed secrets (root, admin, S3 keys)
 2. Clears ownership metadata (`managed_by`, `cr_uid`, `cr_name`, `kubernetes_namespace`) from the tenant description
 3. Preserves user-provided description and custom metadata fields
 4. Leaves the tenant intact in StorageGrid, making it available for re-import
 
-This enables workflows like:
-- Safely testing operator management without risk of data loss
-- Moving tenant management between clusters
-- Temporarily removing Kubernetes management while preserving the backend tenant
-
 > [!TIP]
-> Use `Retain` policy when you want to delete the Kubernetes resource but keep the StorageGrid tenant for later re-import or manual management.
+> Use `Retain` policy when you want to delete the S3Tenant but keep the S3TenantAccount available for re-claiming, or when you want to preserve an imported tenant for re-import.
 
 ### 3.1 Importing Existing Tenants
 
@@ -306,7 +317,7 @@ If you have existing tenants in StorageGrid that were created outside of the ope
 
 1. **Tenant ID**: Find the existing tenant's ID from StorageGrid Admin UI or API
 2. **Root Credentials**: The root user password must be known and provided in a pre-created Secret (StorageGrid API limitation - cannot be rotated programmatically)
-3. **No owned in desciprtion**: Check the tenant description in StorageGrid to ensure it's not already managed by another operator instance (look for `cr_uid` field)
+3. **No existing ownership**: Check the tenant description in StorageGrid to ensure it's not already managed by another operator instance (look for `cr_uid` field)
 
 #### Import Process
 
@@ -339,14 +350,15 @@ spec:
   storageGridRef:
     name: my-storagegrid
   s3TenantClassName: default
+  storageQuota: 100Gi # this will override any current settings - be aware of that
   rootSecretRef:
     name: existing-tenant-root  # REQUIRED for imports - references the pre-created secret
   description: "Imported from existing StorageGrid tenant"
 ```
 
-**Step 3: (Optional) Create S3Tenant to claim the imported account**
+**Step 3: (Optional) Claim the imported account with an S3Tenant**
 
-After the S3TenantAccount is successfully imported, you can create an S3Tenant to provide namespace-scoped access:
+After the S3TenantAccount is successfully imported and becomes available (Phase: Ready), you can create an S3Tenant to claim it for namespace-scoped access:
 
 ```yaml
 apiVersion: s3.bedag.ch/v1alpha1
@@ -358,9 +370,124 @@ spec:
   storageGridRef:
     name: my-storagegrid
   s3TenantClassName: default
+  storageQuota: 100Gi  # Must be >= account quota
   s3TenantAccountRef:
     name: imported-tenant-account  # References the imported S3TenantAccount
 ```
+
+#### Claiming Existing Accounts
+
+The claiming pattern (similar to PersistentVolume/PersistentVolumeClaim) allows namespace-scoped S3Tenant resources to bind to cluster-scoped S3TenantAccount resources. This works for both imported accounts and pre-created accounts.
+
+**Two Ways to Claim:**
+
+**Option A - S3Tenant Claims Available Account:**
+```yaml
+# 1. Create S3TenantAccount (cluster-scoped, created by platform team)
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3TenantAccount
+metadata:
+  name: shared-tenant-account
+spec:
+  storageGridRef:
+    name: my-storagegrid
+  s3TenantClassName: premium
+  storageQuota: 500Gi
+  # No s3TenantRef - account is available for claiming
+
+---
+# 2. S3Tenant claims the account (namespace-scoped, created by app team)
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3Tenant
+metadata:
+  name: my-tenant
+  namespace: app-namespace
+spec:
+  storageGridRef:
+    name: my-storagegrid
+  s3TenantClassName: premium
+  storageQuota: 500Gi
+  s3TenantAccountRef:
+    name: shared-tenant-account  # Claim by name
+```
+
+**Option B - S3TenantAccount Pre-Binds to S3Tenant:**
+```yaml
+# 1. Create S3TenantAccount pre-bound to a specific tenant
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3TenantAccount
+metadata:
+  name: reserved-account
+spec:
+  storageGridRef:
+    name: my-storagegrid
+  s3TenantClassName: premium
+  storageQuota: 500Gi
+  s3TenantRef:  # Pre-bind to specific tenant
+    name: my-tenant
+    namespace: app-namespace
+
+---
+# 2. S3Tenant can only claim if it matches pre-binding
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3Tenant
+metadata:
+  name: my-tenant
+  namespace: app-namespace
+spec:
+  storageGridRef:
+    name: my-storagegrid
+  s3TenantClassName: premium
+  storageQuota: 500Gi
+  s3TenantAccountRef:
+    name: reserved-account  # Must match pre-binding
+```
+
+#### Claiming Validation Rules
+
+When an S3Tenant attempts to claim an S3TenantAccount, the following validations are enforced:
+
+1. **Not Already Bound**: Account must not be bound to a different tenant
+2. **Pre-Binding Match**: If account has `spec.s3TenantRef` set, the claiming tenant must match (name + namespace)
+3. **Same StorageGrid**: Both must reference the same StorageGrid instance
+4. **Quota Compatibility**: Tenant quota must be >= account quota
+5. **Class Match**: Both must reference the same S3TenantClass
+6. **Immutability**: Once set, `spec.s3TenantAccountRef` on the S3Tenant cannot be changed
+
+#### Account Lifecycle States
+
+S3TenantAccount resources progress through these phases:
+
+- **PhaseReady**: Account exists in StorageGrid but is not bound to any S3Tenant (available for claiming)
+- **PhaseBound**: Account is actively bound to an S3Tenant (spec and status refs are set)
+- **PhaseRetainThenDelete**: S3Tenant was deleted with RetainThenDelete policy, waiting for retention period to expire
+- **PhaseDeleting**: Account is being deleted from StorageGrid
+
+**State Transitions:**
+```
+Available (PhaseReady) 
+  ↓ (S3Tenant claims via s3TenantAccountRef)
+Bound (PhaseBound)
+  ↓ (S3Tenant deleted with Retain policy)
+Available (PhaseReady)  [ConditionTypeRetained = True for observability]
+```
+
+**Note:** When an S3Tenant is deleted with Retain policy, the account returns directly to PhaseReady (unbound and available). The `ConditionTypeRetained` condition remains True to indicate the account came from a deleted tenant, providing an audit trail.
+
+**Important Notes on Deletion:**
+
+- **Deleting an S3Tenant** (namespace-scoped):
+  - If using **Retain** policy: Unbinds from S3TenantAccount but leaves the account available for re-claiming
+  - If using **Delete** policy: Also deletes the bound S3TenantAccount and the tenant in StorageGrid
+  - The deletion policy is determined by the S3TenantAccount's configuration
+
+- **Deleting an S3TenantAccount** (cluster-scoped):
+  - If the account is bound (PhaseBound), deletion is blocked until the S3Tenant is deleted first
+  - If the account is available (PhaseReady), it can be deleted directly
+  - Deletes the tenant from StorageGrid according to its deletion policy
+
+> [!WARNING]
+> You cannot delete a bound S3TenantAccount directly. You must first delete the claiming S3Tenant, which will unbind the account (if using Retain policy) or delete both resources (if using Delete policy).
 
 #### Import Behavior
 

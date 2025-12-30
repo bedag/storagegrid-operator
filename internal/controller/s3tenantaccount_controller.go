@@ -670,11 +670,10 @@ func (r *S3TenantAccountReconciler) derivePhase(ctx context.Context, rctx *accou
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReady, metav1.ConditionFalse, "S3TenantAccountReady", message)
 	}
 
-	// The retention conditions override the phase of the account.
-	if retain {
-		log.V(1).Info("S3Tenant is retained, setting phase to Retained")
-		rctx.Account.Status.Phase = s3v1alpha1.PhaseRetaining
-	} else if retainThenDelete {
+	// Handle retention-related phase transitions.
+	// Note: Retain policy doesn't override the phase - account returns to PhaseReady when unbound.
+	// The ConditionTypeRetained provides observability that it came from a deleted tenant.
+	if retainThenDelete {
 		log.V(1).Info("S3Tenant is retained then deleted, setting phase to RetainingThenDeleting")
 		rctx.Account.Status.Phase = s3v1alpha1.PhaseRetainThenDelete
 		// on retain then delete we have to make sure it is requeued when the deletion timestamp is reached for deletion.
@@ -682,8 +681,6 @@ func (r *S3TenantAccountReconciler) derivePhase(ctx context.Context, rctx *accou
 	} else if deletion {
 		log.V(1).Info("S3Tenant deletion timestamp reached, setting phase to Deleting")
 		rctx.Account.Status.Phase = s3v1alpha1.PhaseDeleting
-	} else {
-		log.V(1).Info("No retention conditions met, phase remains unchanged")
 	}
 }
 

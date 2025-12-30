@@ -1784,7 +1784,7 @@ func (r *S3TenantAccountReconciler) reconcileImport(ctx context.Context, rctx *a
 
 // as descriptions can be edited manually outside of the operator we need to verify
 // that this tenant is still owned by us.
-// this should be called early on in every reconciliation to ensure we do not accidentally take over tenants
+// this should be called early on in every reconciliation to ensure we do not accidentally take over tenants.
 func (r *S3TenantAccountReconciler) reconcileOwnership(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
@@ -1794,7 +1794,7 @@ func (r *S3TenantAccountReconciler) reconcileOwnership(ctx context.Context, rctx
 	// we try to be really careful here to avoid taking over tenants managed by other CRs.
 	ownsResource, currentOwnerName, currentOwnerUID, metadata := r.checkOwnership(ctx, rctx)
 
-	// Hard error if owned by different CR
+	// Hard error if owned by different CR.
 	if currentOwnerUID != "" && !ownsResource {
 		namespace := metadata["kubernetes_namespace"]
 
@@ -1832,7 +1832,7 @@ func (r *S3TenantAccountReconciler) reconcileOwnership(ctx context.Context, rctx
 }
 
 // checkOwnership verifies ownership based on metadata in the backend tenant description.
-// Returns: (ownsResource bool, currentOwnerName string, currentOwnerUID string, metadata map[string]string)
+// Returns: (ownsResource bool, currentOwnerName string, currentOwnerUID string, metadata map[string]string).
 func (r *S3TenantAccountReconciler) checkOwnership(ctx context.Context, rctx *accountReconcileContext) (bool, string, string, map[string]string) {
 	log := log.FromContext(ctx)
 

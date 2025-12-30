@@ -241,7 +241,7 @@ spec:
               drainStatus:
                 description: |-
                   DrainStatus tracks active drain operation progress.
-                  Only present during active drain. Cleared when drain completes or is cancelled.
+                  Only present during active drain. Cleared when drain completes or is canceled.
                 properties:
                   initialObjectBytes:
                     description: InitialObjectBytes is the total bytes when drain
@@ -251,7 +251,7 @@ spec:
                   initialObjectCount:
                     description: InitialObjectCount is the number of objects when
                       drain started.
-                    format: int64
+                    format: int32
                     type: integer
                   isDeletingObjects:
                     description: IsDeletingObjects indicates if StorageGrid is currently

@@ -108,7 +108,6 @@ func (r *S3TenantAccountValidator) ValidateUpdate(ctx context.Context, oldObj ru
 	// Block import annotation on update - import is only allowed during creation
 	if s3tenantAccount.Annotations != nil {
 		if _, hasImport := s3tenantAccount.Annotations[s3v1alpha1.AnnotationImportTenant]; hasImport {
-
 			// Check if annotation was just added (not present in old object)
 			oldHasImport := false
 			if oldAccount.Annotations != nil {

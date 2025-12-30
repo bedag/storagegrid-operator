@@ -23,7 +23,9 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -59,7 +61,15 @@ var _ = Describe("S3Bucket Controller", func() {
 						Name:      tenantName,
 						Namespace: "default",
 					},
-					Spec: s3v1alpha1.S3TenantSpec{},
+					Spec: s3v1alpha1.S3TenantSpec{
+						CommonTenantSpec: s3v1alpha1.CommonTenantSpec{
+							StorageGridRef: corev1.LocalObjectReference{
+								Name: "test-storagegrid",
+							},
+							S3TenantClassName: "default",
+							StorageQuota:      &[]resource.Quantity{resource.MustParse("1Gi")}[0],
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, tenant)).To(Succeed())
 				// Update status to Bound phase
@@ -106,19 +116,17 @@ var _ = Describe("S3Bucket Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &S3BucketReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(100),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
-			// Without a real StorageGrid backend and bound tenant, we expect an error
-			// The important thing is that it doesn't panic and handles dependencies
+			// Without a real StorageGrid backend, we expect an error
+			// The important thing is that it doesn't panic and handles dependencies correctly
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("tenant"))
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
 		})
 	})
 })

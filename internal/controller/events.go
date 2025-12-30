@@ -19,7 +19,7 @@ package controller
 // Event reasons for S3TenantAccount controller.
 // These events reflect platform-level operations on the backing StorageGrid tenant.
 const (
-	// Tenant Lifecycle Events
+	// Tenant Lifecycle Events.
 	EventTenantCreating     = "TenantCreating"
 	EventTenantCreated      = "TenantCreated"
 	EventTenantCreateFailed = "TenantCreateFailed"
@@ -32,23 +32,23 @@ const (
 	EventTenantDeleted      = "TenantDeleted"
 	EventTenantDeleteFailed = "TenantDeleteFailed"
 
-	// Ownership Management Events
+	// Ownership Management Events.
 	EventOwnershipConflict = "OwnershipConflict"
 
-	// Backend Connection Events
+	// Backend Connection Events.
 	EventBackendConnectionFailed   = "BackendConnectionFailed"
 	EventBackendConnectionRestored = "BackendConnectionRestored"
 
-	// Quota Events
+	// Quota Events.
 	EventQuotaWarning  = "QuotaWarning"  // Usage at 80% threshold
 	EventQuotaExceeded = "QuotaExceeded" // Usage exceeded quota
 	EventQuotaNormal   = "QuotaNormal"   // Usage back under threshold
 
-	// Credential Events
+	// Credential Events.
 	EventCredentialsRotated        = "CredentialsRotated"
 	EventCredentialsRotationFailed = "CredentialsRotationFailed"
 
-	// Deletion Policy Events
+	// Deletion Policy Events.
 	EventDeletionPolicyApplied = "DeletionPolicyApplied"
 	EventDeletionPolicyFailed  = "DeletionPolicyFailed"
 )
@@ -56,7 +56,7 @@ const (
 // Event reasons for S3Tenant controller.
 // These events reflect user-facing operations and account binding.
 const (
-	// Account Binding Events
+	// Account Binding Events.
 	EventAccountCreating      = "AccountCreating"
 	EventAccountCreated       = "AccountCreated"
 	EventAccountCreateFailed  = "AccountCreateFailed"
@@ -68,13 +68,13 @@ const (
 	EventAccountUnbound       = "AccountUnbound"
 	EventAccountNotReady      = "AccountNotReady"
 
-	// Configuration Management Events
+	// Configuration Management Events.
 	EventConfigurationChanged = "ConfigurationChanged"
 	EventConfigurationPending = "ConfigurationPending"
 	EventConfigurationApplied = "ConfigurationApplied"
 	EventConfigurationFailed  = "ConfigurationFailed"
 
-	// Tenant Status Events
+	// Tenant Status Events.
 	EventTenantReady    = "TenantReady"
 	EventTenantNotReady = "TenantNotReady"
 )
@@ -82,12 +82,12 @@ const (
 // Event reasons for S3TenantClass controller.
 // These events reflect gateway endpoint management and tenant allowlist operations.
 const (
-	// Gateway Management Events
+	// Gateway Management Events.
 	EventGatewayFetchFailed       = "GatewayFetchFailed"
 	EventGatewayStatusRefreshed   = "GatewayStatusRefreshed"
 	EventEndpointNotInCertificate = "EndpointNotInCertificate"
 
-	// Tenant Allowlist Management Events
+	// Tenant Allowlist Management Events.
 	EventTenantAddedToAllowlist     = "TenantAddedToAllowlist"
 	EventTenantRemovedFromAllowlist = "TenantRemovedFromAllowlist"
 	EventAllowlistUpdateFailed      = "AllowlistUpdateFailed"
@@ -96,17 +96,17 @@ const (
 // Event reasons for StorageGrid controller.
 // These events reflect grid connectivity, health monitoring, and configuration discovery.
 const (
-	// Connection & Authentication Events
+	// Connection & Authentication Events.
 	EventGridConnectionFailed      = "GridConnectionFailed"
 	EventGridConnectionEstablished = "GridConnectionEstablished"
 	EventGridCredentialsFailed     = "GridCredentialsFailed"
 
-	// Health Monitoring Events
+	// Health Monitoring Events.
 	EventGridHealthCheckFailed = "GridHealthCheckFailed"
 	EventGridUnhealthy         = "GridUnhealthy"
 	EventGridHealthRecovered   = "GridHealthRecovered"
 
-	// Configuration Events
+	// Configuration Events.
 	EventRegionsUpdated     = "RegionsUpdated"
 	EventRegionsFetchFailed = "RegionsFetchFailed"
 	EventDefaultRegionSet   = "DefaultRegionSet"
@@ -115,7 +115,7 @@ const (
 // Event reasons for S3Bucket controller.
 // These events reflect bucket lifecycle, policy management, and S3 endpoint access.
 const (
-	// Bucket Lifecycle Events
+	// Bucket Lifecycle Events.
 	EventBucketCreating     = "BucketCreating"
 	EventBucketCreated      = "BucketCreated"
 	EventBucketCreateFailed = "BucketCreateFailed"
@@ -124,44 +124,44 @@ const (
 	EventBucketDeleteFailed = "BucketDeleteFailed"
 	EventBucketNotEmpty     = "BucketNotEmpty"
 
-	// Tenant Dependency Events
+	// Tenant Dependency Events.
 	EventBucketTenantNotReady = "TenantNotReady"
 	EventBucketTenantReady    = "TenantReady"
 
-	// Bucket Credentials Events
+	// Bucket Credentials Events.
 	EventBucketCredentialsCreated        = "CredentialsCreated"
 	EventBucketCredentialsRotated        = "CredentialsRotated"
 	EventBucketCredentialsRotationFailed = "CredentialsRotationFailed"
 
-	// Bucket Policy Events
+	// Bucket Policy Events.
 	EventBucketPolicyApplied      = "PolicyApplied"
 	EventBucketPolicyRemoved      = "PolicyRemoved"
 	EventBucketPolicyApplyFailed  = "PolicyApplyFailed"
 	EventBucketPolicyRemoveFailed = "PolicyRemoveFailed"
 
-	// Admin User Management Events
+	// Admin User Management Events.
 	EventBucketAdminUserCreated      = "AdminUserCreated"
 	EventBucketAdminUserCreateFailed = "AdminUserCreateFailed"
 
-	// S3 Endpoint Access Events
+	// S3 Endpoint Access Events.
 	EventS3EndpointConnectionEstablished = "S3EndpointConnectionEstablished"
 	EventS3EndpointConnectionFailed      = "S3EndpointConnectionFailed"
 
-	// Usage Monitoring Events
+	// Usage Monitoring Events.
 	EventBucketUsageUpdated     = "UsageUpdated"
 	EventBucketUsageFetchFailed = "UsageFetchFailed"
 
-	// Region Events
+	// Region Events.
 	EventBucketRegionValidationFailed = "RegionValidationFailed"
 	EventBucketRegionSet              = "RegionSet"
 
-	// Bucket Drain Events
-	EventBucketDrainingStarted   = "BucketDrainingStarted"
-	EventBucketDrainingProgress  = "BucketDrainingProgress"
-	EventBucketDrainingComplete  = "BucketDrainingComplete"
-	EventBucketDrainingStuck     = "BucketDrainingStuck"
-	EventBucketDrainingCancelled = "BucketDrainingCancelled"
-	EventBucketDrainFailed       = "BucketDrainFailed"
-	EventBucketOrphanedDrain     = "BucketOrphanedDrainDetected"
-	EventBucketAlreadyEmpty      = "BucketAlreadyEmpty"
+	// Bucket Drain Events.
+	EventBucketDrainingStarted  = "BucketDrainingStarted"
+	EventBucketDrainingProgress = "BucketDrainingProgress"
+	EventBucketDrainingComplete = "BucketDrainingComplete"
+	EventBucketDrainingStuck    = "BucketDrainingStuck"
+	EventBucketDrainingCanceled = "BucketDrainingCanceled"
+	EventBucketDrainFailed      = "BucketDrainFailed"
+	EventBucketOrphanedDrain    = "BucketOrphanedDrainDetected"
+	EventBucketAlreadyEmpty     = "BucketAlreadyEmpty"
 )

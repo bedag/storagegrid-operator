@@ -33,7 +33,7 @@ import (
 // 2. If account has pre-binding (spec.s3TenantRef), it must match the claiming tenant
 // 3. Both must reference the same StorageGrid
 // 4. Tenant quota must be >= account quota (minimum requirement)
-// 5. TenantClass must match exactly
+// 5. TenantClass must match exactly.
 func ValidateAccountClaim(ctx context.Context, k8sClient client.Client, tenant *s3v1alpha1.S3Tenant, account *s3v1alpha1.S3TenantAccount) error {
 	// Rule 1: Check if account is already bound to a different tenant
 	if account.Status.S3TenantRef != nil {

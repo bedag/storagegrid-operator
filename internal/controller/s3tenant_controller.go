@@ -197,10 +197,7 @@ func (r *S3TenantReconciler) doReconcile(ctx context.Context, rctx *tenantReconc
 	}
 
 	// copy the status from the account to the tenant.
-	err = r.reconcileTenantAccountStatus(ctx, rctx)
-	if err != nil {
-		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantAccountStatusSyncFailed", fmt.Sprintf("Failed to sync tenant account status: %s", err.Error()))
-	}
+	r.reconcileTenantAccountStatus(ctx, rctx)
 
 	// examine DeletionTimestamp to determine if object is under deletion.
 	// contrary to other resources we can only now safely handle deletion because we need to ensure that the status of the account is in sync
@@ -599,7 +596,7 @@ func (r *S3TenantReconciler) reconcileTenantAccountSpec(ctx context.Context, rct
 	return nil
 }
 
-func (r *S3TenantReconciler) reconcileTenantAccountStatus(ctx context.Context, rctx *tenantReconcileContext) error {
+func (r *S3TenantReconciler) reconcileTenantAccountStatus(ctx context.Context, rctx *tenantReconcileContext) {
 	log := log.FromContext(ctx)
 
 	// Always copy status from account to tenant, regardless of account phase
@@ -626,8 +623,6 @@ func (r *S3TenantReconciler) reconcileTenantAccountStatus(ctx context.Context, r
 		r.emitEvent(rctx, corev1.EventTypeWarning, EventAccountNotReady,
 			fmt.Sprintf("S3TenantAccount %s is not ready (current phase: %s)", rctx.Account.Name, rctx.Account.Status.Phase))
 	}
-
-	return nil
 }
 
 func (r *S3TenantReconciler) reconcileLinkedBuckets(ctx context.Context, rctx *tenantReconcileContext) error {

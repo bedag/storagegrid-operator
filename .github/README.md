@@ -533,7 +533,7 @@ spec:
 
 **Drain States:**
 - Operator polls StorageGrid for progress every 3-30 minutes
-- Emits events for started, progress, stuck, complete, and cancelled states
+- Emits events for started, progress, stuck, complete, and canceled states
 - Automatically removes annotation when drain completes
 - Returns bucket to Ready phase after successful drain
 

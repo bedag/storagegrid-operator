@@ -347,7 +347,7 @@ type DrainStatus struct {
 	// IsDeletingObjects indicates whether a drain operation is currently active.
 	IsDeletingObjects bool
 	// InitialObjectCount is the number of objects when drain started (0 if unknown).
-	InitialObjectCount int64
+	InitialObjectCount int32
 	// InitialObjectBytes is the total bytes when drain started (0 if unknown).
 	InitialObjectBytes int64
 }
@@ -372,10 +372,10 @@ func GetBucketDrainStatus(ctx context.Context, bucketName string, tenantClient *
 		InitialObjectBytes: 0,
 	}
 	if sdkStatus.InitialObjectCount != nil {
-		status.InitialObjectCount = int64(*sdkStatus.InitialObjectCount)
+		status.InitialObjectCount = *sdkStatus.InitialObjectCount
 	}
 	if sdkStatus.InitialObjectBytes != nil {
-		status.InitialObjectBytes = int64(*sdkStatus.InitialObjectBytes)
+		status.InitialObjectBytes = *sdkStatus.InitialObjectBytes
 	}
 
 	log.V(1).Info(fmt.Sprintf("Drain status fetched: isDeletingObjects=%v, objectCount=%d",
@@ -386,7 +386,7 @@ func GetBucketDrainStatus(ctx context.Context, bucketName string, tenantClient *
 // CancelBucketDrain cancels an active drain operation.
 func CancelBucketDrain(ctx context.Context, bucketName string, tenantClient *TenantClient) error {
 	log := log.FromContext(ctx).WithValues("func", "CancelBucketDrain")
-	log.V(1).Info(fmt.Sprintf("Cancelling drain for bucket %s", bucketName))
+	log.V(1).Info(fmt.Sprintf("Canceling drain for bucket %s", bucketName))
 
 	// Call SDK: POST /org/containers/{name}/delete-objects with deleteObjects=false
 	status, err := tenantClient.Bucket().CancelDrain(ctx, bucketName)
@@ -395,6 +395,6 @@ func CancelBucketDrain(ctx context.Context, bucketName string, tenantClient *Ten
 		return fmt.Errorf("failed to cancel drain: %w", err)
 	}
 
-	log.V(1).Info("Bucket drain cancelled successfully", "isDeletingObjects", *status.IsDeletingObjects)
+	log.V(1).Info("Bucket drain canceled successfully", "isDeletingObjects", *status.IsDeletingObjects)
 	return nil
 }

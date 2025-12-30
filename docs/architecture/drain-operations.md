@@ -24,7 +24,7 @@ stateDiagram-v2
     Pending --> Ready: Bucket exists in StorageGrid
     Ready --> Draining: Annotation added\n(objects > 0)
     Draining --> Ready: Drain complete\n(objects == 0)
-    Draining --> Ready: Annotation removed\n(drain cancelled)
+    Draining --> Ready: Annotation removed\n(drain canceled)
     Ready --> Deleting: kubectl delete\n(objects == 0)
     Draining --> Failed: Drain error
     Failed --> Ready: Error resolved
@@ -190,8 +190,8 @@ The controller emits events for all drain state transitions providing real-time 
 | `BucketDrainingProgress` | Normal | Progress update, objects deleted |
 | `BucketDrainingStuck` | Warning | No progress for threshold period |
 | `BucketDrainingComplete` | Normal | Drain finished successfully |
-| `BucketDrainingCancelled` | Normal | User cancelled drain |
-| `BucketOrphanedDrain` | Warning | Detected and cancelled drain not initiated by operator |
+| `BucketDrainingCanceled` | Normal | User canceled drain |
+| `BucketOrphanedDrain` | Warning | Detected and canceled drain not initiated by operator |
 | `BucketAlreadyEmpty` | Normal | Drain annotation added but no objects to delete | Implements two-tier polling (fast initially, slower for large buckets)
 
 ```go

@@ -404,6 +404,7 @@ func (r *S3TenantClassReconciler) reconcilePreferredEndpoints(ctx context.Contex
 	// Discover all endpoints from gateway certificate SANs.
 	discoveredURLs := grid.GetS3Endpoints(rctx.Gateway)
 	discoveredVIPs := grid.GetVIPs(rctx.Gateway)
+	//nolint:gocritic // ignore slice append linter for clarity.
 	allDiscovered := append(discoveredURLs, discoveredVIPs...)
 
 	var finalEndpoints []string

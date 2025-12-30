@@ -29,7 +29,6 @@ const (
 	PhaseFailed           Phase = "Failed"
 	PhaseDeleting         Phase = "Deleting"
 	PhaseInProgress       Phase = "InProgress"
-	PhaseRetaining        Phase = "Retaining"
 	PhaseRetainThenDelete Phase = "RetainThenDelete"
 	PhaseBound            Phase = "Bound"
 )
@@ -92,6 +91,7 @@ type CommonTenantSpec struct {
 	// should be specified using a quantity string (e.g., "512Mi", "1Gi").
 	// Example:
 	//   storageQuota: "1Gi"
+	// +kubebuilder:validation:Required
 	StorageQuota *resource.Quantity `json:"storageQuota,omitempty"`
 
 	// StorageGrid reference.

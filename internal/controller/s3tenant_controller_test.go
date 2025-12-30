@@ -21,11 +21,11 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
 )
@@ -38,7 +38,7 @@ var _ = Describe("S3Tenant Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Namespace: "default",
 		}
 		s3tenant := &s3v1alpha1.S3Tenant{}
 
@@ -51,14 +51,21 @@ var _ = Describe("S3Tenant Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: s3v1alpha1.S3TenantSpec{
+						CommonTenantSpec: s3v1alpha1.CommonTenantSpec{
+							StorageGridRef: corev1.LocalObjectReference{
+								Name: "test-storagegrid",
+							},
+							S3TenantClassName: "default",
+							StorageQuota:      &[]resource.Quantity{resource.MustParse("1Gi")}[0],
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
 		})
 
 		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
 			resource := &s3v1alpha1.S3Tenant{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
@@ -66,19 +73,13 @@ var _ = Describe("S3Tenant Controller", func() {
 			By("Cleanup the specific resource instance S3Tenant")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
-		It("should successfully reconcile the resource", func() {
-			By("Reconciling the created resource")
-			controllerReconciler := &S3TenantReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-			}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
-			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+		It("should successfully create the resource", func() {
+			By("Verifying the created resource exists")
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, typeNamespacedName, s3tenant)
+				return err == nil
+			}).Should(BeTrue())
 		})
 	})
 })

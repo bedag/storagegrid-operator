@@ -27,7 +27,7 @@ const (
 	DefaultRetentionDuration       = "168h"                     // 7 days
 	DefaultTenantDeletionProcedure = TenantDeletionPolicyRetain // Default policy for tenant deletion
 
-	// Default bucket drain operation intervals
+	// Default bucket drain operation intervals.
 	DefaultDrainInitialPollInterval     = 3 * time.Minute
 	DefaultDrainLongRunningPollInterval = 30 * time.Minute
 	DefaultDrainStuckThreshold          = 3 * time.Hour
@@ -62,10 +62,10 @@ type StorageGridSpec struct {
 	// Example: https://grid-admin.internal.example.com
 	ManagementEndpoint string `json:"managementEndpoint,omitempty"`
 
-	// S3OperationsTenantClass optionally specifies which S3TenantClass the operator uses
+	// S3OperationsTenantClass optionally specifies which S3TenantClass the operator uses.
 	// for S3 API operations (eg. bucket policies).
 	// If not set, S3 operations use each bucket's tenant-specific S3TenantClass endpoint.
-	// Use this when operator pods cannot reach all tenant-specific endpoints but can
+	// Use this when operator pods cannot reach all tenant-specific endpoints but can.
 	// access a specific gateway endpoint (e.g., internal management network).
 	// +optional
 	S3OperationsTenantClass string `json:"s3OperationsTenantClass,omitempty"`
@@ -76,8 +76,8 @@ type StorageGridSpec struct {
 
 	// Controls whether tenant names should be prefixed in the backend.
 	// Possible values:
-	// - "Disabled": (default) No prefixing
-	// - "Namespace": Namespace is added as a prefix (e.g., "namespace-tenant")
+	// - "Disabled": (default) No prefixing.
+	// - "Namespace": Namespace is added as a prefix (e.g., "namespace-tenant").
 	// +kubebuilder:validation:Enum=Disabled;Namespace
 	// +kubebuilder:default="Disabled"
 	TenantPrefix TenantPrefix `json:"tenantPrefix,omitempty"`
@@ -111,14 +111,14 @@ type OperationsConfig struct {
 	Drain *DrainConfig `json:"drain,omitempty"`
 
 	// TODO: Future expansion:
-	// - RateLimit for API throttling
-	// - Retry policies
-	// - Observability/metrics configuration
+	// - RateLimit for API throttling.
+	// - Retry policies.
+	// - Observability/metrics configuration.
 }
 
 // DrainConfig defines parameters for bucket drain operations.
 type DrainConfig struct {
-	// InitialPollInterval defines how often to check drain progress during
+	// InitialPollInterval defines how often to check drain progress during.
 	// the first hour of operation (when StorageGrid typically makes faster progress).
 	// +kubebuilder:default="3m"
 	// +optional

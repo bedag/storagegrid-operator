@@ -47,36 +47,16 @@ func (r *S3TenantAccountValidator) SetupWebhookWithManager(mgr ctrl.Manager) err
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(&s3v1alpha1.S3TenantAccount{}).
 		WithValidator(r).
-		WithDefaulter(&S3TenantAccountDefaulter{}).
 		Complete()
 }
 
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
 // +kubebuilder:webhook:path=/validate-s3-bedag-ch-v1alpha1-s3tenantaccount,mutating=false,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=s3tenantaccounts,verbs=create;update;delete,versions=v1alpha1,name=vs3tenantaccount.kb.io,admissionReviewVersions=v1
-// +kubebuilder:webhook:path=/mutate-s3-bedag-ch-v1alpha1-s3tenantaccount,mutating=true,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=s3tenantaccounts,verbs=create,versions=v1alpha1,name=vs3tenantaccount.kb.io,admissionReviewVersions=v1
 
 var _ webhook.CustomValidator = &S3TenantAccountValidator{}
 
 type S3TenantAccountDefaulter struct{}
-
-// Default implements webhook.Defaulter so a webhook will be registered for the type.
-func (r *S3TenantAccountDefaulter) Default(ctx context.Context, obj runtime.Object) error {
-	s3tenantAccount, ok := obj.(*s3v1alpha1.S3TenantAccount)
-	if !ok {
-		return fmt.Errorf("object is not an S3TenantAccount")
-	}
-
-	s3tenantAccountlog.Info("running defaulter", "name", s3tenantAccount.Name)
-
-	// make sure to initially add the annotation to allow class change.
-	if s3tenantAccount.Annotations == nil {
-		s3tenantAccount.Annotations = map[string]string{}
-	}
-	s3tenantAccount.Annotations[s3v1alpha1.AnnotationAllowTenantClassNameChange] = "true"
-
-	return nil
-}
 
 // ValidateCreate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3TenantAccountValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
@@ -86,6 +66,16 @@ func (r *S3TenantAccountValidator) ValidateCreate(ctx context.Context, obj runti
 	}
 
 	s3tenantAccountlog.Info("validate create", "name", s3tenantAccount.Name)
+
+	// Validate import requirements
+	if s3tenantAccount.Annotations != nil {
+		if importTenantID, hasImport := s3tenantAccount.Annotations[s3v1alpha1.AnnotationImportTenant]; hasImport {
+			// Import requires root secret reference
+			if s3tenantAccount.Spec.RootSecretRef == nil || s3tenantAccount.Spec.RootSecretRef.Name == "" {
+				return nil, fmt.Errorf("import requires spec.rootSecretRef to be specified: root credentials for tenant '%s' must be provided in a pre-existing secret (cannot be rotated via API)", importTenantID)
+			}
+		}
+	}
 
 	// Check if the TenantAccountClass exists.
 	exists, err := r.tenantClassExists(ctx, s3tenantAccount.Spec.S3TenantClassName)
@@ -108,7 +98,26 @@ func (r *S3TenantAccountValidator) ValidateUpdate(ctx context.Context, oldObj ru
 		return nil, fmt.Errorf("object is not an S3TenantAccount")
 	}
 
+	oldAccount, ok := oldObj.(*s3v1alpha1.S3TenantAccount)
+	if !ok {
+		return nil, fmt.Errorf("old object is not an S3TenantAccount")
+	}
+
 	s3tenantAccountlog.Info("validate update", "name", s3tenantAccount.Name)
+
+	// Block import annotation on update - import is only allowed during creation
+	if s3tenantAccount.Annotations != nil {
+		if _, hasImport := s3tenantAccount.Annotations[s3v1alpha1.AnnotationImportTenant]; hasImport {
+			// Check if annotation was just added (not present in old object)
+			oldHasImport := false
+			if oldAccount.Annotations != nil {
+				_, oldHasImport = oldAccount.Annotations[s3v1alpha1.AnnotationImportTenant]
+			}
+			if !oldHasImport {
+				return nil, fmt.Errorf("import annotation '%s' can only be set during creation, not on updates", s3v1alpha1.AnnotationImportTenant)
+			}
+		}
+	}
 
 	// Check if the TenantAccountClass exists.
 	exists, err := r.tenantClassExists(ctx, s3tenantAccount.Spec.S3TenantClassName)
@@ -132,6 +141,13 @@ func (r *S3TenantAccountValidator) ValidateDelete(ctx context.Context, obj runti
 	}
 
 	s3tenantAccountlog.Info("validate delete", "name", s3tenantAccount.Name)
+
+	// Block import annotation on delete
+	if s3tenantAccount.Annotations != nil {
+		if _, hasImport := s3tenantAccount.Annotations[s3v1alpha1.AnnotationImportTenant]; hasImport {
+			return nil, fmt.Errorf("cannot delete S3TenantAccount with import annotation '%s'. Remove the annotation first", s3v1alpha1.AnnotationImportTenant)
+		}
+	}
 
 	// deletion is blocked until the allow-delete annotation is added.
 	if _, ok := s3tenantAccount.Annotations[s3v1alpha1.AnnotationAllowTenantDeletion]; !ok {

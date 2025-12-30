@@ -58,8 +58,7 @@ type tenantReconcileContext struct {
 }
 
 const (
-	tenantFinalizer           = "kubernetes.io/foregroundDeletion"
-	errorAccountNotPhaseBound = "backing S3TenantAccount is not in phase Bound"
+	tenantFinalizer = "kubernetes.io/foregroundDeletion"
 )
 
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenants,verbs=get;list;watch;create;update;patch;delete
@@ -198,10 +197,7 @@ func (r *S3TenantReconciler) doReconcile(ctx context.Context, rctx *tenantReconc
 	}
 
 	// copy the status from the account to the tenant.
-	err = r.reconcileTenantAccountStatus(ctx, rctx)
-	if err != nil {
-		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantAccountStatusSyncFailed", fmt.Sprintf("Failed to sync tenant account status: %s", err.Error()))
-	}
+	r.reconcileTenantAccountStatus(ctx, rctx)
 
 	// examine DeletionTimestamp to determine if object is under deletion.
 	// contrary to other resources we can only now safely handle deletion because we need to ensure that the status of the account is in sync
@@ -367,6 +363,91 @@ func (r *S3TenantReconciler) deriveReadiness(ctx context.Context, s3Tenant *s3v1
 }
 
 func (r *S3TenantReconciler) reconcileTenantAccountReference(ctx context.Context, rctx *tenantReconcileContext) (err error) {
+	// Route to either claim existing account or create new account based on spec
+	if rctx.S3Tenant.Spec.S3TenantAccountRef != nil {
+		// User wants to claim an existing account
+		return r.claimExistingAccount(ctx, rctx)
+	}
+
+	// Default behavior: create a new account with generated name
+	return r.createNewAccount(ctx, rctx)
+}
+
+func (r *S3TenantReconciler) claimExistingAccount(ctx context.Context, rctx *tenantReconcileContext) error {
+	log := log.FromContext(ctx)
+	accountName := rctx.S3Tenant.Spec.S3TenantAccountRef.Name
+
+	log.V(1).Info("Attempting to claim existing S3TenantAccount", "accountName", accountName)
+
+	// Fetch the account
+	account := &s3v1alpha1.S3TenantAccount{}
+	if err := r.Get(ctx, types.NamespacedName{Name: accountName}, account); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			log.Error(err, "S3TenantAccount not found for claiming", "accountName", accountName)
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventAccountClaimFailed,
+				fmt.Sprintf("S3TenantAccount %s not found", accountName))
+			return fmt.Errorf("S3TenantAccount %s not found: %w", accountName, err)
+		}
+		log.Error(err, "Failed to get S3TenantAccount", "accountName", accountName)
+		return fmt.Errorf("failed to get S3TenantAccount %s: %w", accountName, err)
+	}
+
+	// Check if spec is already set to this tenant (using name+namespace for stability)
+	alreadyClaimed := false
+	if account.Spec.S3TenantRef != nil {
+		if account.Spec.S3TenantRef.Name == rctx.S3Tenant.Name &&
+			account.Spec.S3TenantRef.Namespace == rctx.S3Tenant.Namespace {
+			alreadyClaimed = true
+			log.V(1).Info("Account already claimed by this tenant", "accountName", accountName)
+		}
+	}
+
+	// If not already claimed, set the spec to claim the account
+	if !alreadyClaimed {
+		log.V(1).Info("Setting spec.S3TenantRef to claim account", "accountName", accountName)
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventAccountClaiming,
+			fmt.Sprintf("Claiming S3TenantAccount %s", accountName))
+
+		// Validate the claim before proceeding
+		if err := ValidateAccountClaim(ctx, r.Client, rctx.S3Tenant, account); err != nil {
+			log.Error(err, "Account claim validation failed", "accountName", accountName)
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventAccountClaimFailed,
+				fmt.Sprintf("Claim validation failed: %v", err))
+			return fmt.Errorf("account claim validation failed: %w", err)
+		}
+
+		// Update account spec to claim it
+		account.Spec.S3TenantRef = &corev1.ObjectReference{
+			Name:      rctx.S3Tenant.Name,
+			Kind:      rctx.S3Tenant.Kind,
+			Namespace: rctx.S3Tenant.Namespace,
+			UID:       rctx.S3Tenant.UID,
+		}
+
+		if err := r.Update(ctx, account); err != nil {
+			log.Error(err, "Failed to update account spec for claiming", "accountName", accountName)
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventAccountClaimFailed,
+				fmt.Sprintf("Failed to update account spec: %v", err))
+			return fmt.Errorf("failed to update account spec for claiming: %w", err)
+		}
+
+		log.V(1).Info("Successfully set spec.S3TenantRef for claiming", "accountName", accountName)
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventAccountClaimed,
+			fmt.Sprintf("Successfully claimed S3TenantAccount %s", accountName))
+
+		rctx.DoRequeue = true // requeue to let account controller process the binding
+	}
+
+	// Update reconcile context and status to reference the claimed account
+	rctx.Account = account
+	if err := r.updateTenantStatusReference(ctx, rctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *S3TenantReconciler) createNewAccount(ctx context.Context, rctx *tenantReconcileContext) error {
 	log := log.FromContext(ctx)
 
 	// check if the tenant account already exists.
@@ -396,20 +477,29 @@ func (r *S3TenantReconciler) reconcileTenantAccountReference(ctx context.Context
 			log.Error(err, fmt.Sprintf("Failed to get S3TenantAccount %s", accountName))
 			return fmt.Errorf("failed to get S3TenantAccount %s: %w", accountName, err)
 		}
-	} else {
-		log.V(1).Info(fmt.Sprintf("S3TenantAccount %s exists", accountName))
-		// if the account exists, we need to update the reference in the tenant.
-		reference := &corev1.ObjectReference{
-			Name:       rctx.Account.Name,
-			Kind:       rctx.Account.Kind,
-			UID:        rctx.Account.UID,
-			APIVersion: rctx.Account.APIVersion,
-		}
+	}
 
-		if !equality.Semantic.DeepEqual(rctx.S3Tenant.Status.S3TenantAccountRef, reference) {
-			log.V(1).Info(fmt.Sprintf("Updating S3TenantAccount reference in S3Tenant %s", rctx.S3Tenant.Name))
-			rctx.S3Tenant.Status.S3TenantAccountRef = reference
-		}
+	// Update reconcile context and status to reference the created account
+	if err := r.updateTenantStatusReference(ctx, rctx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *S3TenantReconciler) updateTenantStatusReference(ctx context.Context, rctx *tenantReconcileContext) error {
+	log := log.FromContext(ctx)
+
+	reference := &corev1.ObjectReference{
+		Name:       rctx.Account.Name,
+		Kind:       rctx.Account.Kind,
+		UID:        rctx.Account.UID,
+		APIVersion: rctx.Account.APIVersion,
+	}
+
+	if !equality.Semantic.DeepEqual(rctx.S3Tenant.Status.S3TenantAccountRef, reference) {
+		log.V(1).Info(fmt.Sprintf("Updating S3TenantAccount reference in S3Tenant %s", rctx.S3Tenant.Name))
+		rctx.S3Tenant.Status.S3TenantAccountRef = reference
 	}
 
 	return nil
@@ -506,7 +596,7 @@ func (r *S3TenantReconciler) reconcileTenantAccountSpec(ctx context.Context, rct
 	return nil
 }
 
-func (r *S3TenantReconciler) reconcileTenantAccountStatus(ctx context.Context, rctx *tenantReconcileContext) error {
+func (r *S3TenantReconciler) reconcileTenantAccountStatus(ctx context.Context, rctx *tenantReconcileContext) {
 	log := log.FromContext(ctx)
 
 	// Always copy status from account to tenant, regardless of account phase
@@ -533,8 +623,6 @@ func (r *S3TenantReconciler) reconcileTenantAccountStatus(ctx context.Context, r
 		r.emitEvent(rctx, corev1.EventTypeWarning, EventAccountNotReady,
 			fmt.Sprintf("S3TenantAccount %s is not ready (current phase: %s)", rctx.Account.Name, rctx.Account.Status.Phase))
 	}
-
-	return nil
 }
 
 func (r *S3TenantReconciler) reconcileLinkedBuckets(ctx context.Context, rctx *tenantReconcileContext) error {

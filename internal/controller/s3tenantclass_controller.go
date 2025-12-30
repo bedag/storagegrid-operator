@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -403,6 +404,7 @@ func (r *S3TenantClassReconciler) reconcilePreferredEndpoints(ctx context.Contex
 	// Discover all endpoints from gateway certificate SANs.
 	discoveredURLs := grid.GetS3Endpoints(rctx.Gateway)
 	discoveredVIPs := grid.GetVIPs(rctx.Gateway)
+	//nolint:gocritic // ignore slice append linter for clarity.
 	allDiscovered := append(discoveredURLs, discoveredVIPs...)
 
 	var finalEndpoints []string
@@ -567,7 +569,9 @@ func (r *S3TenantClassReconciler) reconcileLinkedTenants(ctx context.Context, rc
 // SetupWithManager sets up the controller with the Manager.
 func (r *S3TenantClassReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&s3v1alpha1.S3TenantClass{}).
+		For(&s3v1alpha1.S3TenantClass{}, builder.WithPredicates(
+			PredicateWithoutStatusChange(),
+		)).
 		Watches(
 			&s3v1alpha1.S3TenantAccount{},
 			handler.EnqueueRequestsFromMapFunc(r.mapTenantToTenantClass),

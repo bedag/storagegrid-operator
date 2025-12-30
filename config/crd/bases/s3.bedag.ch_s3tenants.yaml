@@ -205,6 +205,27 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              s3TenantAccountRef:
+                description: |-
+                  S3TenantAccountRef is an optional reference to an existing S3TenantAccount to claim.
+                  When specified, the S3Tenant will claim the referenced S3TenantAccount instead of creating a new one.
+                  This field is immutable once set.
+                  Similar to PersistentVolumeClaim's volumeName, this allows claiming existing accounts.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: s3TenantAccountRef is immutable
+                  rule: self == oldSelf
               s3TenantClassName:
                 description: |-
                   define tenantclassname for s3 endpoint accessibility.
@@ -239,6 +260,8 @@ spec:
                     storageQuota: "1Gi"
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
+            required:
+            - storageQuota
             type: object
           status:
             default: {}

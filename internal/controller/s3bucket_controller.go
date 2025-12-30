@@ -614,11 +614,11 @@ func (r *S3BucketReconciler) initS3Client(ctx context.Context, rctx *bucketRecon
 
 // resolveS3Endpoint determines which S3 endpoint configuration to use for bucket operations.
 // Returns the endpoint config and the name of the tenantclass used as source.
-// Priority: StorageGrid.S3OperationsTenantClass > Bucket's tenant endpoint
+// Priority: StorageGrid.S3OperationsTenantClass > Bucket's tenant endpoint.
 func (r *S3BucketReconciler) resolveS3Endpoint(ctx context.Context, rctx *bucketReconcileContext) (*s3v1alpha1.S3EndpointConfig, string, error) {
 	log := log.FromContext(ctx).WithValues("function", "resolveS3Endpoint")
 
-	// Fetch StorageGrid to check for S3OperationsTenantClass
+	// Fetch StorageGrid to check for S3OperationsTenantClass.
 	storageGrid := &s3v1alpha1.StorageGrid{}
 	sgName := rctx.S3Tenant.Spec.StorageGridRef.Name
 	if err := r.Get(ctx, client.ObjectKey{Name: sgName}, storageGrid); err != nil {
@@ -626,7 +626,7 @@ func (r *S3BucketReconciler) resolveS3Endpoint(ctx context.Context, rctx *bucket
 		return nil, "", fmt.Errorf("failed to fetch StorageGrid: %w", err)
 	}
 
-	// Option 1: Use grid-wide S3OperationsTenantClass if configured
+	// Option 1: Use grid-wide S3OperationsTenantClass if configured.
 	if storageGrid.Spec.S3OperationsTenantClass != "" {
 		tenantClass := &s3v1alpha1.S3TenantClass{}
 		if err := r.Get(ctx, client.ObjectKey{Name: storageGrid.Spec.S3OperationsTenantClass}, tenantClass); err != nil {
@@ -644,7 +644,7 @@ func (r *S3BucketReconciler) resolveS3Endpoint(ctx context.Context, rctx *bucket
 		return tenantClass.Status.S3EndpointConfig, tenantClassName, nil
 	}
 
-	// Option 2: Use bucket's tenant-specific endpoint (default)
+	// Option 2: Use bucket's tenant-specific endpoint (default).
 	if rctx.S3Tenant.Status.S3EndpointConfig == nil {
 		return nil, "", fmt.Errorf("tenant %s has no S3EndpointConfig in status", rctx.S3Tenant.Name)
 	}
@@ -790,7 +790,7 @@ func (r *S3BucketReconciler) reconcileDrain(ctx context.Context, rctx *bucketRec
 	// Check for orphaned drain (backend draining but no StartedAt in our status)
 	if backendStatus.IsDeletingObjects &&
 		(rctx.Bucket.Status.DrainStatus == nil || rctx.Bucket.Status.DrainStatus.StartedAt == nil) {
-		return r.cancelOrphanedDrain(ctx, rctx, backendStatus)
+		return r.cancelOrphanedDrain(ctx, rctx)
 	}
 
 	// Check if user wants to drain (annotation present)
@@ -939,7 +939,7 @@ func (r *S3BucketReconciler) completeDrain(ctx context.Context, rctx *bucketReco
 // cancelDrain cancels an ongoing drain operation.
 func (r *S3BucketReconciler) cancelDrain(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "cancelDrain")
-	log.Info("Cancelling drain operation", "bucket", rctx.Bucket.Status.BucketName)
+	log.Info("Canceling drain operation", "bucket", rctx.Bucket.Status.BucketName)
 
 	if err := grid.CancelBucketDrain(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient); err != nil {
 		log.Error(err, "Failed to cancel drain on backend")
@@ -950,14 +950,14 @@ func (r *S3BucketReconciler) cancelDrain(ctx context.Context, rctx *bucketReconc
 	rctx.Bucket.Status.DrainStatus = nil
 	rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseReady
 
-	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketDrainingCancelled,
-		"Drain operation cancelled by user")
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketDrainingCanceled,
+		"Drain operation canceled by user")
 
 	return nil
 }
 
 // cancelOrphanedDrain cancels drain operations not initiated by the operator.
-func (r *S3BucketReconciler) cancelOrphanedDrain(ctx context.Context, rctx *bucketReconcileContext, backendStatus *grid.DrainStatus) error {
+func (r *S3BucketReconciler) cancelOrphanedDrain(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "detectOrphanedDrain")
 	log.Info("Detected orphaned drain operation (backend draining without operator initiation)")
 
@@ -968,7 +968,7 @@ func (r *S3BucketReconciler) cancelOrphanedDrain(ctx context.Context, rctx *buck
 	}
 
 	r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketOrphanedDrain,
-		"Detected and cancelled drain operation not initiated by operator")
+		"Detected and canceled drain operation not initiated by operator")
 
 	return nil
 }

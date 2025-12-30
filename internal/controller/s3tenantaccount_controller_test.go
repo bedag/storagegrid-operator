@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -86,6 +87,7 @@ var _ = Describe("S3TenantAccount Controller", func() {
 							StorageGridRef: corev1.LocalObjectReference{
 								Name: storageGridName,
 							},
+							StorageQuota: &[]resource.Quantity{resource.MustParse("1Gi")}[0],
 						},
 						TenantDeletionPolicy: &s3v1alpha1.TenantDeletionPolicy{
 							Policy: s3v1alpha1.TenantDeletionPolicyRetain,

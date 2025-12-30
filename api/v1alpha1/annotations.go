@@ -34,8 +34,7 @@ var (
 	AnnotationResetTenantAdminPassword = fmt.Sprintf("%s.%s/reset-admin-password", AnnotationPrefixAdmin, Domain)
 
 	// import existing s3 tenant into state.
-	// TODO: implement this.
-	AnnotationExistingTenant = fmt.Sprintf("%s.%s/existing-tenant-id", AnnotationPrefixAdmin, Domain)
+	AnnotationImportTenant = fmt.Sprintf("%s.%s/import-tenant-id", AnnotationPrefixAdmin, Domain)
 
 	// force a recreation of the tenant.
 	AnnotationRecreateTenant = fmt.Sprintf("%s.%s/recreate-tenant", AnnotationPrefixTenant, Domain)
@@ -63,12 +62,12 @@ var (
 	// buckets will be orphaned and the account is left intact.
 	AnnotationIgnoreUnmanagedBuckets = fmt.Sprintf("%s.%s/ignore-unmanaged-buckets", AnnotationPrefixTenant, Domain)
 
-	// TenantAnnotationsToKeep defines annotations that should remain on S3Tenant
+	// TenantAnnotationsToKeep defines annotations that should remain on S3Tenant.
 	// and NOT be automatically removed after propagation to S3TenantAccount.
 	// These typically serve as user-visible safety gates or status indicators.
 	// Each annotation in this list requires documented removal strategy:
-	// - Automatic: removed when resource is deleted
-	// - Explicit: controller logic removes after operation completes
+	// - Automatic: removed when resource is deleted.
+	// - Explicit: controller logic removes after operation completes.
 	TenantAnnotationsToKeep = []string{
 		AnnotationAllowTenantDeletion, // Stays until user removes or resource deleted
 	}

@@ -100,7 +100,7 @@ type S3BucketStatus struct {
 	Phase BucketPhase `json:"phase,omitempty"`
 
 	// DrainStatus tracks active drain operation progress.
-	// Only present during active drain. Cleared when drain completes or is cancelled.
+	// Only present during active drain. Cleared when drain completes or is canceled.
 	// +optional
 	DrainStatus *BucketDrainStatus `json:"drainStatus,omitempty"`
 
@@ -149,7 +149,7 @@ type BucketDrainStatus struct {
 	IsDeletingObjects bool `json:"isDeletingObjects"`
 
 	// InitialObjectCount is the number of objects when drain started.
-	InitialObjectCount int64 `json:"initialObjectCount,omitempty"`
+	InitialObjectCount int32 `json:"initialObjectCount,omitempty"`
 
 	// InitialObjectBytes is the total bytes when drain started.
 	InitialObjectBytes int64 `json:"initialObjectBytes,omitempty"`

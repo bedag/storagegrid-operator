@@ -1,5 +1,5 @@
 # Build the manager binary
-FROM golang:1.25.4-alpine AS builder
+FROM golang:1.26rc2-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git make

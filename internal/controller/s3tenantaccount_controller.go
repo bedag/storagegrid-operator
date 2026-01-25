@@ -1056,7 +1056,10 @@ func (r *S3TenantAccountReconciler) reconcileCreate(ctx context.Context, rctx *a
 	r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantCreating,
 		fmt.Sprintf("Creating tenant '%s' in StorageGrid backend", *rctx.Account.Status.DesiredTenantBackendName))
 
-	tenantID, password, err := grid.CreateTenant(ctx, *rctx.Account.Status.DesiredTenantBackendName, *rctx.Account.Spec.Description, rctx.Account.Spec.StorageQuota.Value(), rctx.GridClient)
+	// initial description will include some details about the account in case the reconcileDescription fails later.
+	initialDescription := fmt.Sprintf("Created by storagegrid-operator for S3TenantAccount %s in namespace %s at %s", rctx.Account.Name, rctx.Account.Namespace, time.Now().Format(time.RFC3339))
+
+	tenantID, password, err := grid.CreateTenant(ctx, *rctx.Account.Status.DesiredTenantBackendName, initialDescription, rctx.Account.Spec.StorageQuota.Value(), rctx.GridClient)
 	if err != nil {
 		r.emitEvent(rctx, corev1.EventTypeWarning, EventTenantCreateFailed,
 			fmt.Sprintf("Failed to create tenant: %v", err))

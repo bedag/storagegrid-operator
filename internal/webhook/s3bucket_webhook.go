@@ -75,6 +75,7 @@ func (r *S3BucketValidator) ValidateCreate(ctx context.Context, obj runtime.Obje
 
 	s3bucketlog.Info("validate create", "name", s3bucket.Name)
 
+	// check if the namespace is allowed to create buckets in the tenant.
 	s3Teant, err := r.getTenant(ctx, s3bucket)
 	if err != nil {
 		return nil, err
@@ -91,22 +92,34 @@ func (r *S3BucketValidator) ValidateCreate(ctx context.Context, obj runtime.Obje
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type.
 func (r *S3BucketValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
-	s3bucket, ok := newObj.(*s3v1alpha1.S3Bucket)
+	s3bucketNew, ok := newObj.(*s3v1alpha1.S3Bucket)
+
 	if !ok {
 		return nil, fmt.Errorf("object is not an S3Bucket")
 	}
 
-	s3bucketlog.Info("validate update", "name", s3bucket.Name)
+	s3bucketOld, ok := oldObj.(*s3v1alpha1.S3Bucket)
 
-	s3Teant, err := r.getTenant(ctx, s3bucket)
+	if !ok {
+		return nil, fmt.Errorf("object is not an S3Bucket")
+	}
+
+	s3bucketlog.Info("validate update", "name", s3bucketNew.Name)
+
+	s3Teant, err := r.getTenant(ctx, s3bucketNew)
 	if err != nil {
 		return nil, err
 	}
 
-	allowed := r.isNamespaceAllowed(s3Teant, s3bucket.Namespace)
+	allowed := r.isNamespaceAllowed(s3Teant, s3bucketNew.Namespace)
 
 	if !allowed {
-		return nil, fmt.Errorf("namespace %s is not allowed to create buckets in tenant %s", s3bucket.Namespace, s3Teant.Name)
+		return nil, fmt.Errorf("namespace %s is not allowed to create buckets in tenant %s", s3bucketNew.Namespace, s3Teant.Name)
+	}
+
+	// although the controller will just ignore updates to spec.bucketName anyway, we want to add some verbosity for the users.
+	if s3bucketOld.Spec.BucketName != nil && s3bucketNew.Spec.BucketName != nil && *s3bucketOld.Spec.BucketName != *s3bucketNew.Spec.BucketName {
+		return nil, fmt.Errorf("spec.bucketName can only be set during creation")
 	}
 
 	return nil, nil

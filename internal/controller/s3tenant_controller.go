@@ -723,7 +723,7 @@ func (r *S3TenantReconciler) reconcileTenantAnnotations(ctx context.Context, rct
 	updatedAnnotations := map[string]string{}
 	for key, value := range rctx.S3Tenant.Annotations {
 		if strings.HasPrefix(key, s3v1alpha1.AnnotationPrefixTenant) {
-			// Always copy to Account for operational use
+			// add to the list of annotations to be set on the account.
 			updatedAnnotations[key] = value
 
 			// Remove from Tenant UNLESS it's whitelisted to stay

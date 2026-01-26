@@ -31,7 +31,7 @@ var (
 	// recreate credentials.
 	AnnotationRecreateBucketKeypairs   = fmt.Sprintf("%s.%s/recreate-s3-access-keys", AnnotationPrefixBucket, Domain)
 	AnnotationRecreateTenantKeypairs   = fmt.Sprintf("%s.%s/recreate-s3-access-keys", AnnotationPrefixTenant, Domain)
-	AnnotationResetTenantAdminPassword = fmt.Sprintf("%s.%s/reset-admin-password", AnnotationPrefixAdmin, Domain)
+	AnnotationResetTenantAdminPassword = fmt.Sprintf("%s.%s/reset-admin-password", AnnotationPrefixTenant, Domain)
 
 	// import existing s3 tenant into state.
 	AnnotationImportTenant = fmt.Sprintf("%s.%s/import-tenant-id", AnnotationPrefixAdmin, Domain)

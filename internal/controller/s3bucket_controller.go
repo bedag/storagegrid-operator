@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -406,6 +407,18 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 	// Create bucket.
 	err = grid.CreateBucket(ctx, rctx.Bucket.Status.BucketName, rctx.Bucket.Spec.Region, *rctx.Bucket.Spec.RetentionInDays, rctx.TenantClient)
 	if err != nil {
+		if strings.Contains(err.Error(), "BucketAlreadyExists") {
+			r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionFalse, "BucketNameConflict", fmt.Sprintf("Bucket name %s is already taken, please choose a different name", rctx.Bucket.Status.BucketName))
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketCreateFailed,
+				fmt.Sprintf("Failed to create bucket: Bucket name %s is already taken, please either change spec.bucketName or leave it empty for an automatic generated one", rctx.Bucket.Status.BucketName))
+
+			// this will seem hacky at first but we need to nil the name in status so that it gets regenerated on next reconcile.
+			// this is because the status is immutable and once we commit this to the api server we cannot change it anymore.
+			// As this current name is taken, the user might want to just edit this current bucket to a different name and we need to allow that.
+			rctx.Bucket.Status.BucketName = ""
+			return fmt.Errorf("bucket name %s is already taken, please choose a different name", rctx.Bucket.Status.BucketName)
+		}
+
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionFalse, "BucketCreateReconcileFailed", err.Error())
 		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketCreateFailed,
 			fmt.Sprintf("Failed to create bucket: %v", err))
@@ -1074,7 +1087,14 @@ func (r *S3BucketReconciler) reconcileBucketName(ctx context.Context, s3Bucket *
 		return nil
 	}
 
-	// Generate unique bucket name: bucketname-namespace-clusterid.
+	// if user provided a unique bucket name, use it.
+	if s3Bucket.Spec.BucketName != nil {
+		s3Bucket.Status.BucketName = *s3Bucket.Spec.BucketName
+		log.V(1).Info("Using user-defined unique bucket name", "bucketName", s3Bucket.Status.BucketName)
+		return nil
+	}
+
+	// Generate unique bucket name: bucketname-namespace-clusterid as default.
 	s3Bucket.Status.BucketName = fmt.Sprintf("%s-%s", s3Bucket.Name, r.getBucketIdentifier(s3Bucket))
 	log.V(1).Info("Generated unique bucket name", "bucketName", s3Bucket.Status.BucketName)
 

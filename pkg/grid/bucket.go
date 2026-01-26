@@ -54,6 +54,13 @@ func CreateBucket(ctx context.Context, name string, region string, retentionInDa
 	_, err = tenantClient.Bucket().Create(ctx, &bucket)
 	if err != nil {
 		log.Error(err, "Failed to create bucket")
+
+		if strings.Contains(err.Error(), "409 Conflict") {
+			conflictErr := fmt.Errorf("BucketAlreadyExists: A bucket with name %s already exists on the grid, please use a different name", bucket.Name)
+			log.Error(conflictErr, "Bucket name conflict")
+			return conflictErr
+		}
+
 		return err
 	}
 

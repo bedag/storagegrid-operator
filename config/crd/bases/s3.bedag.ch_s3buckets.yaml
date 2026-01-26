@@ -70,6 +70,16 @@ spec:
           spec:
             description: S3BucketSpec defines the desired state of S3Bucket.
             properties:
+              bucketName:
+                description: |-
+                  If bucketName the operator will try to create the bucket with the name
+                  set here instead of using the default metadata.name-<resource-uid> format.
+                  Note that bucket names must be globally unique in S3, so this may lead to creation failures
+                  if the specified name is already taken.
+                  This field is only honored during creation.
+                  After successful creation, the effective name is recorded in status.bucketName
+                  and further changes to this field are ignored.
+                type: string
               bucketPolicyJson:
                 description: |-
                   specify a s3 bucketpolicy as json to apply to the bucket.

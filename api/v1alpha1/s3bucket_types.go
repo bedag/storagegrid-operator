@@ -30,6 +30,16 @@ type S3BucketSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster.
 	// Important: Run "make" to regenerate code after modifying this file.
 
+	// If bucketName the operator will try to create the bucket with the name
+	// set here instead of using the default metadata.name-<resource-uid> format.
+	// Note that bucket names must be globally unique in S3, so this may lead to creation failures
+	// if the specified name is already taken.
+	// This field is only honored during creation.
+	// After successful creation, the effective name is recorded in status.bucketName
+	// and further changes to this field are ignored.
+	// +optional
+	BucketName *string `json:"bucketName,omitempty"`
+
 	// region of the S3 Bucket.
 	// +optional
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="region is immutable"

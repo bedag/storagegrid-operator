@@ -118,8 +118,11 @@ func (r *S3BucketValidator) ValidateUpdate(ctx context.Context, oldObj, newObj r
 	}
 
 	// although the controller will just ignore updates to spec.bucketName anyway, we want to add some verbosity for the users.
-	if s3bucketOld.Spec.BucketName != nil && s3bucketNew.Spec.BucketName != nil && *s3bucketOld.Spec.BucketName != *s3bucketNew.Spec.BucketName {
-		return nil, fmt.Errorf("spec.bucketName can only be set during creation")
+	// Allowing changes only if the bucket is still in pending phase (i.e. not yet created).
+	if s3bucketOld.Status.Phase != s3v1alpha1.BucketPhasePending {
+		if s3bucketOld.Spec.BucketName != nil && s3bucketNew.Spec.BucketName != nil && *s3bucketOld.Spec.BucketName != *s3bucketNew.Spec.BucketName {
+			return nil, fmt.Errorf("spec.bucketName can only be set during creation")
+		}
 	}
 
 	return nil, nil

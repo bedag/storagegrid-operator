@@ -450,9 +450,6 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 
 	log.V(1).Info("Bucket created successfully", "bucketName", rctx.Bucket.Status.BucketName)
 
-	// Set phase to Ready after successful creation
-	rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseReady
-
 	log.V(1).Info("Bucket creation completed successfully")
 	rctx.DoRequeue = true // Requeue for further processing
 	return nil

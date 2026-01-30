@@ -36,6 +36,12 @@ var (
 	// import existing s3 tenant into state.
 	AnnotationImportTenant = fmt.Sprintf("%s.%s/import-tenant-id", AnnotationPrefixAdmin, Domain)
 
+	// import existing s3 bucket into state.
+	AnnotationImportBucket = fmt.Sprintf("%s.%s/import-bucket-name", AnnotationPrefixBucket, Domain)
+
+	// force ownership even if ownership tags do not match.
+	AnnotationForceBucketOwnership = fmt.Sprintf("%s.%s/force-bucket-ownership", AnnotationPrefixBucket, Domain)
+
 	// force a recreation of the tenant.
 	AnnotationRecreateTenant = fmt.Sprintf("%s.%s/recreate-tenant", AnnotationPrefixTenant, Domain)
 

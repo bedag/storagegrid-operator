@@ -155,6 +155,15 @@ const (
 	EventBucketRegionValidationFailed = "RegionValidationFailed"
 	EventBucketRegionSet              = "RegionSet"
 
+	// Bucket Import Events.
+	EventBucketImported     = "BucketImported"
+	EventBucketImportFailed = "BucketImportFailed"
+
+	// Bucket Ownership Events.
+	EventBucketOwnershipCheckFailed   = "BucketOwnershipCheckFailed"
+	EventBucketOwnershipTaggingFailed = "BucketOwnershipTaggingFailed"
+	EventBucketNotOwnedByOperator     = "BucketNotOwnedByOperator"
+
 	// Bucket Drain Events.
 	EventBucketDrainingStarted  = "BucketDrainingStarted"
 	EventBucketDrainingProgress = "BucketDrainingProgress"

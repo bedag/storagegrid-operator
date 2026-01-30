@@ -48,7 +48,12 @@ type S3BucketReconciler struct {
 }
 
 const (
-	s3BucketFinalizer = "bucket.s3.bedag.ch/finalizer"
+	s3BucketFinalizer     string = "bucket.s3.bedag.ch/finalizer"
+	managedByTagKey       string = "s3.bedag.ch/managed-by"
+	managedByTagValue     string = "storagegrid-operator"
+	bucketNamespaceTagKey string = "s3.bedag.ch/bucket-namespace"
+	bucketNameTagKey      string = "s3.bedag.ch/bucket-name"
+	bucketUIDTagKey       string = "s3.bedag.ch/bucket-uid"
 )
 
 // bucketReconcileContext holds all the context needed for bucket reconciliation.
@@ -158,7 +163,9 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 		return err
 	}
 
+	// basic reconciliations
 	r.reconcileSecretRefs(ctx, rctx)
+	r.reconcileS3EndpointConfig(ctx, rctx)
 
 	// Validate tenant readiness.
 	if err := r.reconcileTenantReadiness(ctx, rctx); err != nil {
@@ -169,8 +176,6 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 			fmt.Sprintf("Waiting for S3Tenant %s to become ready (current phase: %s)", rctx.S3Tenant.Name, rctx.S3Tenant.Status.Phase))
 		return err
 	}
-	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketTenantReady,
-		fmt.Sprintf("S3Tenant %s is ready for bucket operations", rctx.S3Tenant.Name))
 
 	// Initialize tenant client.
 	if err := r.reconcileTenantClient(ctx, rctx); err != nil {
@@ -190,13 +195,34 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 		return nil
 	}
 
-	// Reconcile bucket creation.
-	if err := r.reconcileBucketCreation(ctx, rctx); err != nil {
-		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketCreationFailed", err.Error())
-		return err
-	}
-	if rctx.DoRequeue {
-		// Bucket was just created or updated, requeue for further processing.
+	// Check if tenant has been created or imported
+	createdCondition := meta.FindStatusCondition(rctx.Bucket.Status.Conditions, s3v1alpha1.ConditionTypeCreated)
+
+	if createdCondition == nil {
+		// make sure proper region is set before trying to create or import the bucket.
+		if err := r.reconcileRegion(ctx, rctx); err != nil {
+			return err
+		}
+
+		if rctx.Bucket.Annotations != nil {
+			if bucketToImport := rctx.Bucket.Annotations[s3v1alpha1.AnnotationImportBucket]; bucketToImport != "" {
+				// Reconcile import
+				if err := r.reconcileImport(ctx, rctx, bucketToImport); err != nil {
+					r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketImportFailed", err.Error())
+					return err
+				}
+
+				// Import handles its own status updates, conditions, and requeue
+				return nil
+			}
+		}
+
+		// Reconcile bucket creation.
+		if err := r.reconcileBucketCreation(ctx, rctx); err != nil {
+			r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketCreationFailed", err.Error())
+			return err
+		}
+
 		return nil
 	}
 
@@ -226,8 +252,14 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 		return err
 	}
 
-	if err := r.initS3Client(ctx, rctx); err != nil {
+	if err := r.initS3ClientAsBucketAdmin(ctx, rctx); err != nil {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "S3ClientInitFailed", err.Error())
+		return err
+	}
+
+	// make sure ownership tags are present.
+	if err := r.reconcileOwnershipTags(ctx, rctx); err != nil {
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketOwnershipTaggingFailed", err.Error())
 		return err
 	}
 
@@ -256,9 +288,9 @@ func (r *S3BucketReconciler) reconcileSecretRefs(ctx context.Context, rctx *buck
 		return
 	}
 
-	// secret name is generated as <S3 Tenant>-<Bucket>-s3-admin-keypair.
+	// secret name is generated as -<Bucket>-s3-admin-keypair.
 	rctx.Bucket.Status.S3AdminKeysSecretRef = &corev1.LocalObjectReference{
-		Name: fmt.Sprintf("s3bucket-%s-%s-s3-admin-keypair", rctx.S3Tenant.Name, rctx.Bucket.Name),
+		Name: fmt.Sprintf("s3bucket-%s-s3-admin-keypair", rctx.Bucket.Name),
 	}
 
 	log.V(1).Info("Secret references reconciliation completed")
@@ -297,6 +329,15 @@ func (r *S3BucketReconciler) reconcileFinalizerAndDelete(ctx context.Context, rc
 	}
 
 	return nil
+}
+
+func (r *S3BucketReconciler) reconcileS3EndpointConfig(ctx context.Context, rctx *bucketReconcileContext) {
+	log := log.FromContext(ctx).WithValues("function", "reconcileS3EndpointConfig")
+
+	if rctx.Bucket.Status.S3EndpointConfig != rctx.S3Tenant.Status.S3EndpointConfig {
+		log.V(1).Info("Updating S3 endpoint config from tenant")
+		rctx.Bucket.Status.S3EndpointConfig = rctx.S3Tenant.Status.S3EndpointConfig
+	}
 }
 
 func (r *S3BucketReconciler) reconcileS3TenantReference(ctx context.Context, rctx *bucketReconcileContext) error {
@@ -374,28 +415,6 @@ func (r *S3BucketReconciler) reconcileTenantClient(ctx context.Context, rctx *bu
 func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileBucketCreation")
 
-	// Check if bucket already exists.
-	exists, err := grid.BucketExists(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient)
-	if err != nil {
-		return fmt.Errorf("failed to check bucket existence: %w", err)
-	}
-
-	if exists {
-		log.V(1).Info("Bucket already exists", "bucketName", rctx.Bucket.Status.BucketName)
-
-		// Update S3 endpoint config from tenant.
-		rctx.Bucket.Status.S3EndpointConfig = rctx.S3Tenant.Status.S3EndpointConfig
-
-		return nil
-	}
-
-	log.V(1).Info("Bucket does not exist, creating it")
-
-	// Validate and set region.
-	if err := r.reconcileRegion(ctx, rctx); err != nil {
-		return err
-	}
-
 	// Generate unique bucket name if not set.
 	if err := r.reconcileBucketName(ctx, rctx.Bucket); err != nil {
 		return err
@@ -404,8 +423,8 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketCreating,
 		fmt.Sprintf("Creating bucket %s in region %s", rctx.Bucket.Status.BucketName, rctx.Bucket.Status.Region))
 
-	// Create bucket.
-	err = grid.CreateBucket(ctx, rctx.Bucket.Status.BucketName, rctx.Bucket.Spec.Region, *rctx.Bucket.Spec.RetentionInDays, rctx.TenantClient)
+	// Try to create bucket.
+	err := grid.CreateBucket(ctx, rctx.Bucket.Status.BucketName, rctx.Bucket.Spec.Region, *rctx.Bucket.Spec.RetentionInDays, rctx.TenantClient)
 	if err != nil {
 		if strings.Contains(err.Error(), "BucketAlreadyExists") {
 			r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionFalse, "BucketNameConflict", fmt.Sprintf("Bucket name %s is already taken, please choose a different name", rctx.Bucket.Status.BucketName))
@@ -424,6 +443,7 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 			fmt.Sprintf("Failed to create bucket: %v", err))
 		return fmt.Errorf("failed to create bucket: %w", err)
 	}
+
 	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionTrue, "BucketCreated", "Bucket created successfully")
 	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketCreated,
 		fmt.Sprintf("Successfully created bucket %s", rctx.Bucket.Status.BucketName))
@@ -438,34 +458,275 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 	return nil
 }
 
+func (r *S3BucketReconciler) reconcileImport(ctx context.Context, rctx *bucketReconcileContext, bucketToImport string) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileImport")
+
+	log.V(1).Info("Starting import of bucket", "bucketToImport", bucketToImport)
+
+	// Check if bucket already exists.
+	exists, err := grid.BucketExists(ctx, bucketToImport, rctx.TenantClient)
+	if err != nil {
+		return fmt.Errorf("failed to check bucket existence: %w", err)
+	}
+	if !exists {
+		log.V(1).Info("Bucket does not exist, skipping import", "bucketName", bucketToImport)
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketImportFailed,
+			fmt.Sprintf("Bucket %s does not exist in tenant %s, or is not available with given credentials, import aborted", rctx.Bucket.Status.BucketName, rctx.S3Tenant.Name))
+		return nil
+	}
+
+	_, forceOwnership := rctx.Bucket.Annotations[s3v1alpha1.AnnotationForceBucketOwnership]
+	if forceOwnership {
+		log.V(1).Info("Force import ownership annotation found, ignoring current ownership tags during import")
+	} else {
+		// if ownership is to be checked, we need to use the tenant s3 client to check the tags.
+		err := r.initS3ClientAsTenantAdmin(ctx, rctx)
+		if err != nil {
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketImportFailed,
+				"Failed to initialize S3 client for tenant admin during import of bucket")
+			return fmt.Errorf("failed to initialize S3 client for tenant admin during import of bucket %s: %w", bucketToImport, err)
+		}
+
+		// as reconcileOwnershipTags uses the name in status, we need to set it temporarily.
+		rctx.Bucket.Status.BucketName = bucketToImport
+		err = r.reconcileOwnershipTags(ctx, rctx)
+		rctx.Bucket.Status.BucketName = "" // reset it back after the check.
+		if err != nil {
+
+			if strings.Contains(err.Error(), "Bucket is managed by another entity") {
+				r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketImportFailed,
+					fmt.Sprintf("Cannot import bucket %s as it is managed by another entity", bucketToImport))
+
+				return fmt.Errorf("cannot import bucket %s as it is managed by another entity: %w", bucketToImport, err)
+			}
+			if strings.Contains(err.Error(), "NoSuchBucket") {
+				r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketImportFailed,
+					fmt.Sprintf("Cannot import bucket %s as it does not exist in tenant %s", bucketToImport, rctx.S3Tenant.Name))
+				return fmt.Errorf("cannot import bucket %s as it does not exist: %w", bucketToImport, err)
+			}
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketImportFailed,
+				fmt.Sprintf("Failed to import bucket %s: %v", bucketToImport, err))
+			return fmt.Errorf("failed to reconcile ownership tags during import of bucket %s: %w", bucketToImport, err)
+		}
+
+		// set s3client back to nil to ensure it's reinitialized as bucket admin later.
+		rctx.S3Client = nil
+	}
+
+	// if we reach here, the bucket is not managed, we can proceed with the import.
+	log.V(1).Info("Importing bucket", "bucketToImport", bucketToImport)
+
+	// The import is as easy as setting the bucket name in status.
+	// this will be used in the bucket creation reconciliation to check for existence.
+	// Seems weird to do it here again after reconcileOwnership, but it keeps the logic clean.
+	rctx.Bucket.Status.BucketName = bucketToImport
+
+	// remove the annotations as it's no longer needed.
+	delete(rctx.Bucket.Annotations, s3v1alpha1.AnnotationImportBucket)
+	rctx.ObjectUpdated = true
+
+	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionTrue, "BucketImported", fmt.Sprintf("Imported Bucket with name %s into state", bucketToImport))
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketImported,
+		fmt.Sprintf("Successfully imported bucket %s", rctx.Bucket.Status.BucketName))
+
+	// we need to requeue to proceed with the bucket creation reconciliation.
+	rctx.DoRequeue = true
+	return nil
+}
+
+// reoncileOwnershipTags checks if the bucket is already managed by another entity.
+// If it is managed by another entity, it returns an error.
+// If it is not managed, it applies the ownership tags to the bucket.
+func (r *S3BucketReconciler) reconcileOwnershipTags(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileOwnershipTags")
+
+	if forceOwnership := rctx.Bucket.Annotations[s3v1alpha1.AnnotationForceBucketOwnership]; forceOwnership == "true" {
+		log.V(1).Info("Force ownership annotation found, overriding existing ownership tags if present")
+	} else {
+		// check if bucket is not managed already.
+		isManaged, err := r.isBucketManaged(ctx, rctx)
+		if err != nil {
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketOwnershipCheckFailed,
+				"Failed to check bucket ownership")
+			return fmt.Errorf("failed to check if bucket is managed: %w", err)
+		}
+
+		// if the bucket is managed, we check if it's managed by us.
+		if isManaged {
+			isOwned, err := r.isBucketOwnedByOperator(ctx, rctx)
+			if err != nil {
+				r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketOwnershipCheckFailed,
+					"Failed to check bucket ownership")
+				return fmt.Errorf("failed to check if bucket is owned by operator: %w", err)
+			}
+
+			// if the bucket is owned by us, we return nil.
+			if isOwned {
+				log.V(1).Info("Bucket is already managed and owned by operator, skipping further checks")
+				return nil
+
+			} else {
+				log.V(1).Info("Bucket is managed by another entity, cannot import")
+
+				// get current owner for proper error and event message.
+				currentOwner, err := r.getCurrentBucketOwnershipTags(ctx, rctx)
+				if err != nil {
+					r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketImportFailed,
+						"Failed to check bucket ownership")
+					return fmt.Errorf("failed to get current bucket ownership tags: %w", err)
+				}
+
+				// convert to readable owner string.
+				currentOwnerString := []string{}
+				for key, value := range currentOwner {
+					currentOwnerString = append(currentOwnerString, fmt.Sprintf("%s=%s", key, value))
+				}
+
+				r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketImportFailed,
+					fmt.Sprintf("Bucket is managed by another entity (%s), cannot be owned", (strings.Join(currentOwnerString, ", "))))
+				return fmt.Errorf("Bucket is managed by another entity (%s), cannot be owned", (strings.Join(currentOwnerString, ", ")))
+			}
+		}
+	}
+
+	// apply ownership tags to bucket.
+	if err := r.applyBucketOwnershipTags(ctx, rctx); err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketOwnershipTaggingFailed,
+			fmt.Sprintf("Failed to apply ownership tags to bucket %s", rctx.Bucket.Status.BucketName))
+		return fmt.Errorf("failed to apply ownership tags to bucket %s: %w", rctx.Bucket.Status.BucketName, err)
+	}
+
+	delete(rctx.Bucket.Annotations, s3v1alpha1.AnnotationForceBucketOwnership)
+	rctx.ObjectUpdated = true
+
+	log.V(1).Info("Successfully applied ownership tags to bucket", "bucketName", rctx.Bucket.Status.BucketName)
+	return nil
+}
+
+func (r *S3BucketReconciler) generateOwnershipTags(bucket *s3v1alpha1.S3Bucket) map[string]string {
+	return map[string]string{
+		managedByTagKey:       managedByTagValue,
+		bucketNamespaceTagKey: bucket.Namespace,
+		bucketNameTagKey:      bucket.Name,
+		bucketUIDTagKey:       string(bucket.UID),
+	}
+}
+
+func (r *S3BucketReconciler) applyBucketOwnershipTags(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "generateBucketOwnershipTags")
+
+	// apply tags to bucket.
+	if err := s3.AppendTagMap(ctx, rctx.Bucket.Status.BucketName, r.generateOwnershipTags(rctx.Bucket), rctx.S3Client); err != nil {
+		log.Error(err, "Failed to apply ownership tags to bucket")
+		return fmt.Errorf("failed to apply ownership tags to bucket: %w", err)
+	}
+
+	log.V(1).Info("Successfully applied ownership tags to bucket")
+	return nil
+}
+
+func (r *S3BucketReconciler) getCurrentBucketOwnershipTags(ctx context.Context, rctx *bucketReconcileContext) (map[string]string, error) {
+	log := log.FromContext(ctx).WithValues("function", "getCurrentBucketOwnershipTags")
+
+	// fetch tags from bucket.
+	tags, err := s3.GetBucketTagMap(ctx, rctx.Bucket.Status.BucketName, rctx.S3Client)
+	if err != nil {
+		log.Error(err, "Failed to fetch bucket tags")
+		return nil, fmt.Errorf("failed to fetch bucket tags: %w", err)
+	}
+
+	log.V(1).Info("Successfully fetched bucket tags")
+	return tags, nil
+}
+
+// Returns true if this bucket is owned by the operator, false otherwise.
+// Only returns true if all ownership tags are present and correct.
+func (r *S3BucketReconciler) isBucketOwnedByOperator(ctx context.Context, rctx *bucketReconcileContext) (bool, error) {
+	log := log.FromContext(ctx).WithValues("function", "isBucketOwnedByOperator")
+
+	// fetch tags from bucket.
+	tags, err := r.getCurrentBucketOwnershipTags(ctx, rctx)
+	if err != nil {
+		log.Error(err, "Failed to fetch bucket tags")
+		return false, fmt.Errorf("failed to fetch bucket tags: %w", err)
+	}
+
+	// check for ownership tags.
+	ownershipTags := r.generateOwnershipTags(rctx.Bucket)
+	for key, value := range ownershipTags {
+		if tagValue, exists := tags[key]; !exists || tagValue != value {
+			log.V(1).Info("Bucket is not owned by operator", "missingOrIncorrectTag", key)
+			return false, nil
+		}
+	}
+
+	log.V(1).Info("Bucket is owned by operator")
+	return true, nil
+}
+
+// Returns true if this bucket has the managed-by tag set to storagegrid-operator.
+// Returns false if the tag is missing
+// Returns false with error if the tag is present but has an unexpected value.
+func (r *S3BucketReconciler) isBucketManaged(ctx context.Context, rctx *bucketReconcileContext) (bool, error) {
+	log := log.FromContext(ctx).WithValues("function", "isBucketManaged")
+
+	// fetch tags from bucket.
+	tags, err := s3.GetBucketTagMap(ctx, rctx.Bucket.Status.BucketName, rctx.S3Client)
+	if err != nil {
+		log.Error(err, "Failed to fetch bucket tags")
+		return false, fmt.Errorf("failed to fetch bucket tags: %w", err)
+	}
+
+	// check for managed-by tag.
+	if tagValue, exists := tags[managedByTagKey]; !exists {
+		log.V(1).Info("Bucket is not managed by operator, managed-by tag missing")
+		return false, nil
+	} else if tagValue != managedByTagValue {
+		log.V(1).Info("Bucket is not managed by operator, managed-by tag has an unexpected value", "tagValue", tagValue)
+		return false, fmt.Errorf("bucket is not managed by operator, managed-by tag has an unexpected value: %s", tagValue)
+	}
+
+	log.V(1).Info("Bucket is managed by operator")
+	return true, nil
+}
+
 func (r *S3BucketReconciler) reconcileRegion(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileRegion")
 
-	if rctx.Bucket.Spec.Region == "" {
-		if rctx.S3Tenant.Status.DefaultBucketRegion == "" {
-			return fmt.Errorf("no region specified and no default region set in tenant")
-		}
-
-		log.V(1).Info("Setting default region from tenant",
-			"defaultBucketRegion", rctx.S3Tenant.Status.DefaultBucketRegion)
-		rctx.Bucket.Status.Region = rctx.S3Tenant.Status.DefaultBucketRegion
-		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketRegionSet,
-			fmt.Sprintf("Using default region %s from tenant", rctx.S3Tenant.Status.DefaultBucketRegion))
-	} else {
-		rctx.Bucket.Status.Region = rctx.Bucket.Spec.Region
-
-		// Validate specified region exists in tenant.
-		if !slices.Contains(rctx.S3Tenant.Status.Regions, rctx.Bucket.Status.Region) {
-			r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketRegionValidationFailed,
-				fmt.Sprintf("Specified region %s does not exist in tenant (available: %v)", rctx.Bucket.Spec.Region, rctx.S3Tenant.Status.Regions))
-			return fmt.Errorf("specified region %s does not exist in tenant", rctx.Bucket.Spec.Region)
-		}
-		r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketRegionSet,
-			fmt.Sprintf("Using specified region %s", rctx.Bucket.Spec.Region))
+	region, err := r.getDesiredReqgion(ctx, rctx)
+	if err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketRegionValidationFailed,
+			err.Error())
+		return err
 	}
 
-	log.V(1).Info("Region validation successful", "region", rctx.Bucket.Status.Region)
+	// Validate specified region exists in tenant.
+	if !slices.Contains(rctx.S3Tenant.Status.Regions, region) {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketRegionValidationFailed,
+			fmt.Sprintf("Specified region %s does not exist in tenant (available: %v)", rctx.Bucket.Spec.Region, rctx.S3Tenant.Status.Regions))
+		return fmt.Errorf("specified region %s does not exist in tenant", rctx.Bucket.Spec.Region)
+	}
+
+	log.V(1).Info("Using desired region", "region", region)
+	rctx.Bucket.Status.Region = region
+
 	return nil
+}
+
+func (r *S3BucketReconciler) getDesiredReqgion(ctx context.Context, rctx *bucketReconcileContext) (string, error) {
+	log := log.FromContext(ctx).WithValues("function", "getDesiredRegion")
+
+	if rctx.Bucket.Spec.Region != "" {
+		log.V(1).Info("Using specified region from spec", "region", rctx.Bucket.Spec.Region)
+		return rctx.Bucket.Spec.Region, nil
+	}
+
+	if rctx.S3Tenant.Status.DefaultBucketRegion != "" {
+		log.V(1).Info("Using default region from tenant", "region", rctx.S3Tenant.Status.DefaultBucketRegion)
+		return rctx.S3Tenant.Status.DefaultBucketRegion, nil
+	}
+
+	return "", fmt.Errorf("no region specified in spec and no default region set in tenant")
 }
 
 func (r *S3BucketReconciler) reconcileBucketAdmin(ctx context.Context, rctx *bucketReconcileContext) error {
@@ -479,9 +740,7 @@ func (r *S3BucketReconciler) reconcileBucketAdmin(ctx context.Context, rctx *buc
 		return fmt.Errorf("failed to create admin user: %w", err)
 	}
 
-	log.V(1).Info("Admin user created successfully")
-	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketAdminUserCreated,
-		fmt.Sprintf("Created admin user and group for bucket %s", rctx.Bucket.Status.BucketName))
+	log.V(1).Info("Admin user and group reconciled successfully")
 	return nil
 }
 
@@ -582,9 +841,6 @@ func (r *S3BucketReconciler) reconcileBucketUsage(ctx context.Context, rctx *buc
 	rctx.Bucket.Status.BucketUsage.ObjectCount = grid.GetBucketObjectCount(rctx.BucketUsage)
 	rctx.Bucket.Status.BucketUsage.Bytes = kube.ParseBytes(grid.GetBucketUsedBytes(rctx.BucketUsage))
 
-	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketUsageUpdated,
-		fmt.Sprintf("Updated usage: %d objects, %s", rctx.Bucket.Status.BucketUsage.ObjectCount, rctx.Bucket.Status.BucketUsage.Bytes))
-
 	log.V(1).Info("Bucket usage updated",
 		"objectCount", rctx.Bucket.Status.BucketUsage.ObjectCount,
 		"bytes", rctx.Bucket.Status.BucketUsage.Bytes)
@@ -592,15 +848,8 @@ func (r *S3BucketReconciler) reconcileBucketUsage(ctx context.Context, rctx *buc
 	return nil
 }
 
-func (r *S3BucketReconciler) initS3Client(ctx context.Context, rctx *bucketReconcileContext) error {
+func (r *S3BucketReconciler) initS3Client(ctx context.Context, rctx *bucketReconcileContext, accessKey string, secretKey string) error {
 	log := log.FromContext(ctx).WithValues("function", "initS3Client")
-
-	// Get S3 credentials for client initialization.
-	accessKey, secretKey, err := kube.FetchCredentialsFromSecret(ctx, r.Client, rctx.Bucket.Namespace, rctx.Bucket.Status.S3AdminKeysSecretRef.Name)
-	if err != nil {
-		log.Error(err, "Failed to fetch S3 credentials")
-		return fmt.Errorf("failed to fetch S3 credentials: %w", err)
-	}
 
 	// Resolve which S3 endpoint to use
 	endpointConfig, tenantClassName, err := r.resolveS3Endpoint(ctx, rctx)
@@ -618,11 +867,39 @@ func (r *S3BucketReconciler) initS3Client(ctx context.Context, rctx *bucketRecon
 	}
 
 	rctx.S3Client = s3client
-	r.emitEvent(rctx, corev1.EventTypeNormal, EventS3EndpointConnectionEstablished,
-		fmt.Sprintf("Successfully connected to S3 endpoint %s (%s)", endpointURL, tenantClassName))
 
 	log.V(1).Info("S3 client initialized successfully", "endpoint", endpointURL, "source", tenantClassName)
 	return nil
+}
+
+func (r *S3BucketReconciler) initS3ClientAsBucketAdmin(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "initS3ClientAsBucketAdmin")
+
+	log.V(1).Info("Fetching S3 credentials for bucket admin")
+
+	// Get S3 credentials for client initialization.
+	accessKey, secretKey, err := kube.FetchKeyPairFromSecret(ctx, r.Client, rctx.Bucket.Namespace, rctx.Bucket.Status.S3AdminKeysSecretRef.Name)
+	if err != nil {
+		log.Error(err, "Failed to fetch S3 credentials")
+		return fmt.Errorf("failed to fetch S3 credentials: %w", err)
+	}
+
+	return r.initS3Client(ctx, rctx, accessKey, secretKey)
+}
+
+func (r *S3BucketReconciler) initS3ClientAsTenantAdmin(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "initS3ClientAsTenantAdmin")
+
+	log.V(1).Info("Fetching S3 credentials for tenant admin")
+
+	// Get S3 credentials for client initialization.
+	accessKey, secretKey, err := kube.FetchKeyPairFromSecret(ctx, r.Client, rctx.S3Tenant.Status.S3AdminKeysSecretRef.Namespace, rctx.S3Tenant.Status.S3AdminKeysSecretRef.Name)
+	if err != nil {
+		log.Error(err, "Failed to fetch S3 credentials")
+		return fmt.Errorf("failed to fetch S3 credentials: %w", err)
+	}
+
+	return r.initS3Client(ctx, rctx, accessKey, secretKey)
 }
 
 // resolveS3Endpoint determines which S3 endpoint configuration to use for bucket operations.
@@ -1102,6 +1379,9 @@ func (r *S3BucketReconciler) reconcileBucketName(ctx context.Context, s3Bucket *
 }
 
 func (r *S3BucketReconciler) getBucketIdentifier(s3Bucket *s3v1alpha1.S3Bucket) string {
+	if s3Bucket.Spec.BucketName != nil {
+		return *s3Bucket.Spec.BucketName
+	}
 	return string(s3Bucket.UID)[0:8]
 }
 

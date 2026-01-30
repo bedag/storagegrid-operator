@@ -136,11 +136,7 @@ func createGroup(ctx context.Context, groupName string, policies *models.TenantG
 	log := log.FromContext(ctx).WithValues("func", "CreateBucketAdminGroup")
 	log.V(1).Info(fmt.Sprintf("Creating group %s", groupName))
 
-	// groupname can't be longer than 32 characters.
-	if len(groupName) > 32 {
-		log.V(1).Info(fmt.Sprintf("Group name %s is longer than 32 characters, truncating", groupName))
-		groupName = groupName[:32]
-	}
+	groupName = getSupportedGroupName(groupName)
 
 	group := models.TenantGroup{
 		UniqueName:  groupName,
@@ -162,6 +158,8 @@ func groupExists(ctx context.Context, groupName string, tenantClient *TenantClie
 	log := log.FromContext(ctx).WithValues("func", "groupExists")
 	log.V(1).Info(fmt.Sprintf("Checking if group %s exists", groupName))
 
+	groupName = getSupportedGroupName(groupName)
+
 	group, err := tenantClient.Groups().GetByName(ctx, groupName)
 	if err == nil {
 		log.V(1).Info(fmt.Sprintf("Group %s exists", groupName))
@@ -170,6 +168,14 @@ func groupExists(ctx context.Context, groupName string, tenantClient *TenantClie
 
 	log.V(1).Info(fmt.Sprintf("Group %s does not exist", groupName))
 	return false, ""
+}
+
+func getSupportedGroupName(groupName string) string {
+	// groupname can't be longer than 32 characters.
+	if len(groupName) > 32 {
+		groupName = groupName[:32]
+	}
+	return groupName
 }
 
 // createGroupIfNotExists checks if a group with the given name exists, and creates it if it does not.

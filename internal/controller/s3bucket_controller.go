@@ -103,6 +103,9 @@ func (r *S3BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// Perform the main reconciliation.
 	err := r.doReconcile(ctx, rctx)
 
+	// Use conditions to derive the readiness state.
+	r.deriveReadiness(ctx, rctx)
+
 	// update the annotations if they were updated.
 	// needs to be done before the status is updated because we lose the annotations otherwise.
 	if rctx.ObjectUpdated {
@@ -270,11 +273,8 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 		// Don't return error, continue with other reconciliation.
 	}
 
-	// Set final ready condition and phase (unless draining).
-	if rctx.Bucket.Status.Phase != s3v1alpha1.BucketPhaseDraining {
-		rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseReady
-	}
-	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReady, metav1.ConditionTrue, "BucketReady", "Bucket is created and ready to use")
+	// Reconciliation completed successfully.
+	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "ReconcileSucceeded", "Reconciliation completed successfully")
 
 	return nil
 }
@@ -1349,6 +1349,112 @@ func (r *S3BucketReconciler) setCondition(bucket *s3v1alpha1.S3Bucket, condType 
 	}
 
 	meta.SetStatusCondition(&bucket.Status.Conditions, condition)
+}
+
+// deriveReadiness uses conditions to derive the overall readiness state and phase of the bucket.
+// This method should be called after doReconcile to properly set the Ready condition and phase.
+func (r *S3BucketReconciler) deriveReadiness(ctx context.Context, rctx *bucketReconcileContext) {
+	log := log.FromContext(ctx).WithValues("function", "deriveReadiness")
+
+	// Track condition states for readiness derivation.
+	reconciliation := false
+	backendReady := false
+	created := false
+
+	// Message that will show on the ready condition.
+	message := ""
+
+	// Check reconciliation condition.
+	reconcileCondition := meta.FindStatusCondition(rctx.Bucket.Status.Conditions, s3v1alpha1.ConditionTypeReconcileSucceeded)
+	if reconcileCondition != nil {
+		if reconcileCondition.ObservedGeneration == rctx.Bucket.GetGeneration() {
+			if reconcileCondition.Status == metav1.ConditionTrue {
+				log.V(1).Info("Reconciliation succeeded")
+				message += "Reconciliation succeeded"
+				reconciliation = true
+			} else {
+				log.V(1).Info("Reconciliation failed", "reason", reconcileCondition.Reason)
+				message += fmt.Sprintf("Reconciliation failed: %s", reconcileCondition.Reason)
+			}
+		} else {
+			log.V(1).Info("Reconciliation condition is not from the current generation")
+			message += "Reconciliation condition is not from the current generation"
+		}
+	} else {
+		log.V(1).Info("Reconciliation condition not found")
+		message += "Reconciliation condition not found"
+	}
+
+	// Check backing resource (tenant) ready condition.
+	backendCondition := meta.FindStatusCondition(rctx.Bucket.Status.Conditions, s3v1alpha1.ContitionTypeBackingResourceReady)
+	if backendCondition != nil {
+		if backendCondition.ObservedGeneration == rctx.Bucket.GetGeneration() {
+			if backendCondition.Status == metav1.ConditionTrue {
+				log.V(1).Info("Backing resource (tenant) is ready")
+				message += ", Tenant is ready"
+				backendReady = true
+			} else {
+				log.V(1).Info("Backing resource (tenant) is not ready")
+				message += ", Tenant is not ready"
+			}
+		} else {
+			log.V(1).Info("Backing resource condition is not from the current generation")
+			message += ", Tenant condition is not from the current generation"
+		}
+	} else {
+		log.V(1).Info("Backing resource condition not found")
+		message += ", Tenant condition not found"
+	}
+
+	// Check created condition.
+	createdCondition := meta.FindStatusCondition(rctx.Bucket.Status.Conditions, s3v1alpha1.ConditionTypeCreated)
+	if createdCondition != nil {
+		if createdCondition.Status == metav1.ConditionTrue {
+			log.V(1).Info("Bucket has been created")
+			message += ", Bucket created"
+			created = true
+		} else {
+			log.V(1).Info("Bucket has not been created yet")
+			message += ", Bucket not yet created"
+		}
+	} else {
+		log.V(1).Info("Created condition not found")
+		message += ", Bucket creation pending"
+	}
+
+	// Determine phase and ready condition based on condition states.
+	// Special case: Draining and Deleting phases take precedence.
+	if rctx.Bucket.Status.Phase == s3v1alpha1.BucketPhaseDraining {
+		log.V(1).Info("Bucket is draining, maintaining Draining phase")
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReady, metav1.ConditionFalse, "BucketDraining", message+", Bucket is draining")
+		return
+	}
+
+	if !rctx.Bucket.DeletionTimestamp.IsZero() {
+		log.V(1).Info("Bucket is being deleted")
+		rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseDeleting
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReady, metav1.ConditionFalse, "BucketDeleting", message+", Bucket is being deleted")
+		return
+	}
+
+	// Derive readiness based on conditions.
+	if reconciliation && backendReady && created {
+		log.V(1).Info("Bucket is ready")
+		rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseReady
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReady, metav1.ConditionTrue, "BucketReady", message)
+	} else if !reconciliation {
+		log.V(1).Info("Bucket reconciliation failed")
+		rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseFailed
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReady, metav1.ConditionFalse, "BucketReconcileFailed", message)
+	} else if !backendReady {
+		log.V(1).Info("Bucket tenant not ready, bucket is pending")
+		rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhasePending
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReady, metav1.ConditionFalse, "TenantNotReady", message)
+	} else if !created {
+		log.V(1).Info("Bucket not yet created, bucket is pending")
+		rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhasePending
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReady, metav1.ConditionFalse, "BucketNotCreated", message)
+	}
 }
 
 // bucket name needs to be unique across the entire storagegrid.

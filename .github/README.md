@@ -700,6 +700,143 @@ This user will have full access to the bucket and may be used instead of the adm
 > [!NOTE]  
 > Same as with the `S3Tenant`, you can customize the name of this secret through the `spec.s3AdminKeysSecretRef` field on the `S3Bucket`.
 
+### 4.1 Importing Existing Buckets
+
+If you have existing S3 buckets in a StorageGrid tenant that were created outside of the operator, you can import them to bring them under Kubernetes management.
+
+#### Prerequisites for Bucket Import
+
+1. **Bucket Name**: The exact name of the existing bucket in StorageGrid
+2. **S3Tenant**: An S3Tenant resource that references the tenant containing the bucket
+3. **S3 Access**: The operator must have S3 API access to the bucket (via tenant admin credentials)
+
+#### How Bucket Import Works
+
+Unlike tenant imports which use description metadata, bucket imports use **S3 bucket tags** for ownership tracking. This provides a standards-based, non-invasive mechanism that doesn't affect bucket data.
+
+The operator applies four ownership tags to imported buckets:
+
+| Tag Key | Purpose |
+|---------|---------|
+| `s3.bedag.ch/managed-by` | Indicates the bucket is operator-managed |
+| `s3.bedag.ch/bucket-namespace` | Kubernetes namespace of the S3Bucket CR |
+| `s3.bedag.ch/bucket-name` | Name of the S3Bucket CR |
+| `s3.bedag.ch/bucket-uid` | UID of the S3Bucket CR |
+
+These tags enable:
+- Detection of managed vs unmanaged buckets
+- Prevention of accidental double-management
+- Cross-cluster conflict detection
+
+#### Import Process
+
+**Step 1: Ensure the S3Tenant exists and is ready**
+
+```bash
+kubectl get s3tenant my-tenant -o jsonpath='{.status.phase}'
+# Should output: Bound
+```
+
+**Step 2: Create an S3Bucket with the import annotation**
+
+```yaml
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3Bucket
+metadata:
+  name: imported-bucket
+  namespace: default
+  annotations:
+    bucket.s3.bedag.ch/import-bucket-name: "existing-bucket-name"  # Exact bucket name in StorageGrid
+spec:
+  s3TenantRef:
+    name: my-tenant
+  region: "us-east-1"  # Must match the bucket's actual region
+```
+
+**Step 3: Verify the import**
+
+```bash
+# Check bucket status
+kubectl get s3bucket imported-bucket -o yaml
+
+# Look for the Created condition
+kubectl get s3bucket imported-bucket -o jsonpath='{.status.conditions[?(@.type=="Created")].message}'
+# Should output: Imported Bucket with name existing-bucket-name into state
+```
+
+#### Import Validation
+
+Before taking ownership, the operator checks if the bucket is already managed:
+
+1. **Unmanaged Bucket** (no `s3.bedag.ch/managed-by` tag): Import succeeds
+2. **Managed by This CR** (all 4 tags match): Idempotent, no changes needed
+3. **Managed by Another CR** (different tag values): Import fails with conflict error
+
+#### Resolving Import Conflicts
+
+If a bucket is already managed by another S3Bucket CR, you'll see an error like:
+
+```
+Bucket is managed by another entity (
+  s3.bedag.ch/managed-by=storagegrid-operator,
+  s3.bedag.ch/bucket-namespace=other-namespace,
+  s3.bedag.ch/bucket-name=other-bucket,
+  s3.bedag.ch/bucket-uid=abc-123
+), cannot be owned
+```
+
+**Resolution Options:**
+
+**Option 1 - Delete the conflicting S3Bucket CR:**
+```bash
+# If the other CR is stale or from a deleted namespace
+kubectl delete s3bucket other-bucket -n other-namespace
+# Wait for cleanup, then retry import
+```
+
+**Option 2 - Use Force Ownership (dangerous):**
+```yaml
+metadata:
+  annotations:
+    bucket.s3.bedag.ch/import-bucket-name: "existing-bucket-name"
+    bucket.s3.bedag.ch/force-bucket-ownership: "true"  # Override existing tags
+```
+
+> [!WARNING]
+> Force ownership skips all safety checks and overwrites existing ownership tags. Only use when you are certain the bucket should be reassigned to this CR (e.g., disaster recovery, orphaned resources).
+
+**Option 3 - Manually Remove Tags:**
+
+1. Log into StorageGrid or use AWS CLI with tenant credentials
+2. Remove the ownership tags from the bucket:
+   ```bash
+   aws s3api delete-bucket-tagging --bucket existing-bucket-name \
+     --endpoint-url https://s3.example.com
+   ```
+3. Retry the import
+
+#### Important Notes
+
+> [!NOTE]
+> **Import Annotation is Create-Only**: The `bucket.s3.bedag.ch/import-bucket-name` annotation is only processed during initial bucket reconciliation. Once the bucket is imported (ConditionTypeCreated = True), the annotation is automatically removed.
+
+> [!NOTE]
+> **Region Must Match**: The `spec.region` field must match the bucket's actual region in StorageGrid. If not specified, it will be auto-detected from the tenant's default region.
+
+> [!TIP]
+> **Tag Preservation**: The operator only adds its ownership tags; existing user-defined tags on the bucket are preserved.
+
+#### Post-Import Operations
+
+After successful import:
+- The operator creates admin credentials and S3 access keys (stored in Secrets)
+- All normal reconciliation operations work as expected
+- Bucket policies can be applied via `spec.bucketPolicyJson`
+- The bucket can be drained and deleted like any operator-created bucket
+- Ownership tags are maintained and re-applied if externally modified
+
+For detailed architecture information on bucket import and the S3 tagging implementation, see [Bucket Import Architecture](../docs/architecture/bucket-import.md).
+
 ## Configuration
 
 ### Endpoint Filtering
@@ -859,6 +996,7 @@ For issues and questions:
 - [x] Add Events
 - [x] Implement bucket drain annotation for automatic object deletion
 - [x] Allow the import of existing grid accounts as S3TenantAccount resources
+- [x] Allow the import of existing S3 buckets with S3 tagging-based ownership protection
 - [ ] Implement labels for all resources for easier filtering
 - [ ] Integrate proper e2e tests - currently unable to test against a real StorageGrid instance due to lack of grid docker license. 
 - [ ] Write proper metrics of CRs created and backend calls

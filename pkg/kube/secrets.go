@@ -51,8 +51,8 @@ func FetchKeyPairFromSecret(ctx context.Context, k8sClient client.Client, namesp
 		return "", "", err
 	}
 
-	accessKeyId = string(secret.Data["accessKeyId"])
-	secretAccessKey = string(secret.Data["secretAccessKey"])
+	accessKeyId = string(secret.Data["accessKey"])
+	secretAccessKey = string(secret.Data["secretKey"])
 	return accessKeyId, secretAccessKey, nil
 }
 
@@ -69,8 +69,8 @@ func CreateCredentialSecret(ctx context.Context, k8sClient client.Client, namesp
 // creates a secret with keys "accessKeyId" and "secretAccessKey" in the specified namespace.
 func CreateKeyPairSecret(ctx context.Context, k8sClient client.Client, namespace string, secretName string, accessKeyId string, secretAccessKey string, owner metav1.Object) error {
 	data := map[string][]byte{
-		"accessKeyId":     []byte(accessKeyId),
-		"secretAccessKey": []byte(secretAccessKey),
+		"accessKey": []byte(accessKeyId),
+		"secretKey": []byte(secretAccessKey),
 	}
 
 	return createSecret(ctx, k8sClient, secretName, namespace, data, owner)

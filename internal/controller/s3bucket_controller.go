@@ -489,7 +489,6 @@ func (r *S3BucketReconciler) reconcileImport(ctx context.Context, rctx *bucketRe
 		err = r.reconcileOwnershipTags(ctx, rctx)
 		rctx.Bucket.Status.BucketName = "" // reset it back after the check.
 		if err != nil {
-
 			if strings.Contains(err.Error(), "Bucket is managed by another entity") {
 				r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketImportFailed,
 					fmt.Sprintf("Cannot import bucket %s as it is managed by another entity", bucketToImport))
@@ -561,7 +560,6 @@ func (r *S3BucketReconciler) reconcileOwnershipTags(ctx context.Context, rctx *b
 			if isOwned {
 				log.V(1).Info("Bucket is already managed and owned by operator, skipping further checks")
 				return nil
-
 			} else {
 				log.V(1).Info("Bucket is managed by another entity, cannot import")
 

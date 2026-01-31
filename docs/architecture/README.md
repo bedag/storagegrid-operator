@@ -58,6 +58,18 @@ Explains the bucket drain functionality and why tenant-level drain was not imple
 
 *Essential for understanding bucket deletion workflows and lifecycle management.*
 
+#### [Bucket Import](./bucket-import.md)
+Documents how existing S3 buckets can be imported into Kubernetes management:
+
+- **S3 Tagging Approach**: Why we use S3 bucket tags for ownership tracking
+- **Ownership Tags**: The four tags used to track bucket ownership
+- **Import Flow**: Step-by-step import process with validation
+- **Conflict Resolution**: Handling buckets managed by other CRs
+- **Force Ownership**: Disaster recovery override mechanism
+- **Security Considerations**: Tag tampering and cross-cluster scenarios
+
+*Essential for brownfield deployments and migrating existing buckets.*
+
 ## 🏗️ Architectural Principles
 
 The StorageGrid Operator is built on several key architectural principles:

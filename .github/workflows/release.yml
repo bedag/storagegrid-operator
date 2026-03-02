@@ -111,7 +111,7 @@ jobs:
         make build-installer
 
     - name: Upload installer artifact
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: installer-yaml
         path: dist/install.yaml

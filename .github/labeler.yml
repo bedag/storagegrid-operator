@@ -1,0 +1,64 @@
+# This configuration automatically labels pull requests based on file paths.
+# Learn more: https://github.com/actions/labeler
+
+# Documentation changes
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**/*"
+          - "*.md"
+          - "README*"
+
+# API / CRD type changes
+api:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "api/**/*"
+
+# Controller / webhook source code changes
+source:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "internal/**/*"
+          - "pkg/**/*"
+          - "cmd/**/*"
+
+# Test changes
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "test/**/*"
+          - "**/*_test.go"
+
+# CI/CD changes
+ci-cd:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**/*"
+          - ".github/actions/**/*"
+          - "Dockerfile*"
+          - "Makefile"
+
+# Infrastructure / Kubernetes manifests
+infrastructure:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "config/**/*"
+
+# Dependencies
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "go.mod"
+          - "go.sum"
+
+# Configuration changes
+config:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "PROJECT"
+          - "*.yaml"
+          - "*.yml"
+          - "*.toml"
+          - ".github/*.yml"
+          - ".github/*.yaml"

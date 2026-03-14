@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 GitHub Discussions
+    url: https://github.com/bedag/storagegrid-operator/discussions
+    about: Ask questions, share ideas, and discuss with the community
+  - name: 📚 Documentation
+    url: https://github.com/bedag/storagegrid-operator#readme
+    about: Read the documentation before reporting issues
+  - name: Security Vulnerabilities
+    url: https://github.com/bedag/storagegrid-operator/blob/main/SECURITY.md
+    about: Report security vulnerabilities privately to soc@bedag.ch — see our security policy for details

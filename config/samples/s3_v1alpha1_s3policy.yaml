@@ -1,0 +1,16 @@
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3Policy
+metadata:
+  labels:
+    app.kubernetes.io/name: storagegrid-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: specific-s3-policy
+spec:
+  description: Sample S3Policy with specific bucket access
+  version: "2026-03-28"
+  rules:
+    - effect: Allow
+      actions:
+        - s3:GetObject
+        - s3:PutObject
+      scope: Objects

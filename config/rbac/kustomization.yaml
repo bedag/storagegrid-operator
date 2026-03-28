@@ -33,3 +33,17 @@ resources:
 - s3tenant_editor_role.yaml
 - s3tenant_viewer_role.yaml
 - operator_admin_role.yaml
+# For each CRD, "Admin", "Editor" and "Viewer" roles are scaffolded by
+# default, aiding admins in cluster management. Those roles are
+# not used by the storagegrid-operator itself. You can comment the following lines
+# if you do not want those helpers be installed with your Project.
+- globals3policy_admin_role.yaml
+- globals3policy_editor_role.yaml
+- globals3policy_viewer_role.yaml
+- s3access_admin_role.yaml
+- s3access_editor_role.yaml
+- s3access_viewer_role.yaml
+- s3policy_admin_role.yaml
+- s3policy_editor_role.yaml
+- s3policy_viewer_role.yaml
+

@@ -24,11 +24,13 @@ const (
 	AnnotationPrefixTenant = "tenant" // will be forwarded from the s3tenant to the account
 	AnnotationPrefixAdmin  = "admin"  // will not be passed through from tenant to the account
 	AnnotationPrefixBucket = "bucket"
+	AnnotationPrefixAccess = "access"
 	AnnotationPrefixGrid   = "grid"
 )
 
 var (
 	// recreate credentials.
+	AnnotationRecreateAccessKeypairs   = fmt.Sprintf("%s.%s/recreate-s3-access-keys", AnnotationPrefixAccess, Domain)
 	AnnotationRecreateBucketKeypairs   = fmt.Sprintf("%s.%s/recreate-s3-access-keys", AnnotationPrefixBucket, Domain)
 	AnnotationRecreateTenantKeypairs   = fmt.Sprintf("%s.%s/recreate-s3-access-keys", AnnotationPrefixTenant, Domain)
 	AnnotationResetTenantAdminPassword = fmt.Sprintf("%s.%s/reset-admin-password", AnnotationPrefixTenant, Domain)

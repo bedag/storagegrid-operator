@@ -42,6 +42,8 @@ import (
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
 	"github.com/bedag/storagegrid-operator/internal/controller"
+	s3accessctrl "github.com/bedag/storagegrid-operator/internal/controller/s3access"
+	s3polctrl "github.com/bedag/storagegrid-operator/internal/controller/s3policies"
 	s3webhook "github.com/bedag/storagegrid-operator/internal/webhook"
 	// +kubebuilder:scaffold:imports
 )
@@ -218,6 +220,38 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &s3v1alpha1.S3Access{}, ".spec.policyRefs", func(obj client.Object) []string {
+		access := obj.(*s3v1alpha1.S3Access)
+		var keys []string
+
+		for _, ref := range access.Spec.PolicyRefs {
+			kind := ref.Kind
+			if kind == "" {
+				kind = "GlobalS3Policy"
+			}
+
+			switch kind {
+			case "S3Policy":
+				keys = append(keys, s3polctrl.BuildPolicyKey(
+					"S3Policy",
+					access.Namespace,
+					ref.Name,
+				))
+			case "GlobalS3Policy":
+				keys = append(keys, s3polctrl.BuildPolicyKey(
+					"GlobalS3Policy",
+					"",
+					ref.Name,
+				))
+			}
+		}
+
+		return keys
+	}); err != nil {
+		setupLog.Error(err, "unable to create field index for S3Access policyRefs")
+		os.Exit(1)
+	}
+
 	if err = (&controller.S3TenantReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
@@ -286,6 +320,30 @@ func main() {
 			setupLog.Error(err, "unable to create webhook", "webhook", "S3Tenant")
 			os.Exit(1)
 		}
+	}
+	if err := (&s3polctrl.S3PolicyReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("s3policy-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "S3Policy")
+		os.Exit(1)
+	}
+	if err := (&s3polctrl.GlobalS3PolicyReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("globals3policy-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "GlobalS3Policy")
+		os.Exit(1)
+	}
+	if err := (&s3accessctrl.S3AccessReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("s3access-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "S3Access")
+		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
 	if os.Getenv("ENABLE_WEBHOOKS") != "false" {

@@ -7,6 +7,9 @@ resources:
 - bases/s3.bedag.ch_s3buckets.yaml
 - bases/s3.bedag.ch_s3tenantclasses.yaml
 - bases/s3.bedag.ch_s3tenantaccounts.yaml
+- bases/s3.bedag.ch_s3policies.yaml
+- bases/s3.bedag.ch_s3accesses.yaml
+- bases/s3.bedag.ch_globals3policies.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

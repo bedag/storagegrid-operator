@@ -1,0 +1,208 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: globals3policies.s3.bedag.ch
+spec:
+  group: s3.bedag.ch
+  names:
+    kind: GlobalS3Policy
+    listKind: GlobalS3PolicyList
+    plural: globals3policies
+    shortNames:
+    - s3gpols
+    - s3gpol
+    singular: globals3policy
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .metadata.creationTimestamp
+      name: AGE
+      type: date
+    - description: Whether the policy has been successfully rendered
+      jsonPath: .status.ready
+      name: Ready
+      type: boolean
+    - description: Policy version
+      jsonPath: .spec.version
+      name: Version
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: GlobalS3Policy is the Schema for the globals3policies API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: GlobalS3PolicySpec defines the desired state of GlobalS3Policy.
+            properties:
+              description:
+                description: Add a description to help others understand the purpose
+                  of this policy.
+                type: string
+              rules:
+                description: |-
+                  List of rules that should be applied to the s3access.
+                  This is a simplified version of the actual S3 policy statement from AWS
+                  See https://docs.aws.amazon.com/AmazonS3/latest/userguide/example-bucket-policies.html for more details and some examples.
+                  You cannot set the resource, as we are automatically scoping the policy to the bucket referenced in the s3access.
+                items:
+                  properties:
+                    actions:
+                      description: |-
+                        List of actions that are allowed or denied by this rule.
+                        These should be in the format of "s3:Action", e.g. "s3:GetObject" or "s3:ListBucket".
+                      items:
+                        type: string
+                      minItems: 1
+                      type: array
+                    condition:
+                      description: |-
+                        Optional condition for the rule, e.g. only allow access if the request is coming from a specific IP range.
+                        This is a simplified version of the actual S3 policy condition spec from AWS.
+                        See https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_condition.html for more details and some examples.
+                      properties:
+                        key:
+                          description: Key is the key of the condition, e.g. "aws:SourceIp"
+                            for an IpAddress condition.
+                          type: string
+                        type:
+                          description: |-
+                            Type of the condition, e.g. "IpAddress", "StringLike" or "StringEquals".
+                            see https://docs.aws.amazon.com/AmazonS3/latest/userguide/example-bucket-policies.html#example-bucket-policies-global-condition-keys for some examples of conditions in S3 policies.
+                          type: string
+                        values:
+                          description: Values is the list of values for the condition,
+                            e.g. ["10.0.0.1"] for an IpAddress condition with key
+                            "aws:SourceIp".
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - key
+                      - type
+                      - values
+                      type: object
+                    effect:
+                      description: Effect of the rule, either "Allow" or "Deny".
+                      enum:
+                      - Allow
+                      - Deny
+                      type: string
+                    scope:
+                      description: |-
+                        Scope of the rule, either "Bucket" or "Objects".
+                        This is used to determine whether the rule applies to bucket-level actions (e.g. ListBucket) or object-level actions (e.g. GetObject).
+                      enum:
+                      - Bucket
+                      - Objects
+                      type: string
+                  required:
+                  - actions
+                  - effect
+                  - scope
+                  type: object
+                type: array
+              version:
+                description: |-
+                  Specify the version of the policy as a string, e.g. "2024-01-01".
+                  This can be used for tracking changes to the policy over time.
+                pattern: ^\d{4}-\d{2}-\d{2}$
+                type: string
+            type: object
+          status:
+            description: GlobalS3PolicyStatus defines the observed state of GlobalS3Policy.
+            properties:
+              conditions:
+                description: Conditions is an array of conditions.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              ready:
+                description: Ready indicates whether the policy has been successfully
+                  rendered.
+                type: boolean
+              renderedPolicy:
+                description: |-
+                  Rendered policy json document that is applied to the s3access.
+                  Resource is ommited as this is automatically set to the bucket referenced in the s3access.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

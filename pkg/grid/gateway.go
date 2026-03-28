@@ -156,7 +156,7 @@ func DropUntrustedNetworks(gw *Gateway) bool {
 func GetS3Endpoints(gw *Gateway) []string {
 	// endpoints are the subject alt name from the cert.
 	// they are always formatted as DNS: <endpoint>.
-	endpoints := []string{}
+	endpoints := make([]string, 0, len(*gw.ServerConfig.PlaintextCertData.Metadata.ServerCertificateDetails.SubjectAltNames))
 	for _, endpoint := range *gw.ServerConfig.PlaintextCertData.Metadata.ServerCertificateDetails.SubjectAltNames {
 		endpoints = append(endpoints, strings.ReplaceAll(endpoint, "DNS:", ""))
 	}

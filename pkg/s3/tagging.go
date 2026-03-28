@@ -133,7 +133,7 @@ func GetBucketTagMap(ctx context.Context, bucket string, s3Client *S3Client) (ma
 }
 
 func mapToS3Tags(tagMap map[string]string) []s3types.Tag {
-	tags := []s3types.Tag{}
+	tags := make([]s3types.Tag, 0, len(tagMap))
 	for k, v := range tagMap {
 		tags = append(tags, s3types.Tag{
 			Key:   aws.String(k),

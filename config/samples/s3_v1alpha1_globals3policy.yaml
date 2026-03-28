@@ -1,0 +1,19 @@
+apiVersion: s3.bedag.ch/v1alpha1
+kind: GlobalS3Policy
+metadata:
+  labels:
+    app.kubernetes.io/name: storagegrid-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: admin
+spec:
+  description: Full privileges for the bucket referenced
+  version: "2026-03-28"
+  rules:
+    - effect: Allow
+      actions:
+        - s3:*
+      scope: Bucket
+    - effect: Allow
+      actions:
+        - s3:*
+      scope: Objects

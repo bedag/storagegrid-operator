@@ -75,4 +75,31 @@ resources:
   kind: S3TenantAccount
   path: github.com/bedag/storagegrid-operator/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: bedag.ch
+  group: s3
+  kind: S3Policy
+  path: github.com/bedag/storagegrid-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: bedag.ch
+  group: s3
+  kind: S3Access
+  path: github.com/bedag/storagegrid-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: bedag.ch
+  group: s3
+  kind: GlobalS3Policy
+  path: github.com/bedag/storagegrid-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"

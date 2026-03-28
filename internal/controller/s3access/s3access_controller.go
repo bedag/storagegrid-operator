@@ -355,8 +355,8 @@ func (r *S3AccessReconciler) renderPolicyDocument(ctx context.Context, rctx *s3A
 		return fmt.Errorf("bucket %s has no BucketName in status", rctx.S3Bucket.Name)
 	}
 
-	var allStatements []grid.PolicyStatement
-	var appliedRefs []s3v1alpha1.AppliedPolicyRef
+	allStatements := []grid.PolicyStatement{}
+	appliedRefs := []s3v1alpha1.AppliedPolicyRef{}
 
 	// Collect statements from namespaced policies.
 	for _, policy := range rctx.Policies {

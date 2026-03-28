@@ -17,22 +17,31 @@ graph TB
     STA[S3TenantAccount]
     ST[S3Tenant]
     SB[S3Bucket]
+    SA[S3Access]
+    GP[GlobalS3Policy]
+    SP[S3Policy]
     
     SG -->|owns| STC
     SG -->|owns| STA
     STA -->|uses| STC
     STA -->|owns| ST
     ST -->|has| SB
+    SB -->|has| SA
+    SA -->|references| GP
+    SA -->|references| SP
     
     subgraph "Cluster Scoped"
         SG
         STC
         STA
+        GP
     end
     
     subgraph "Namespace Scoped"
         ST
         SB
+        SA
+        SP
     end
     
     subgraph "Relationships"
@@ -40,6 +49,7 @@ graph TB
         STC -.->|refers to loadbalancer endpoint| Backend
         STA -.->|manages tenant account| Backend
         SB -.->|manages bucket| Backend
+        SA -.->|manages access user| Backend
     end
 ```
 
@@ -53,6 +63,9 @@ This operator revolves around the following Custom Resource Definitions (CRDs):
 * `S3TenantAccount`
 * `S3Tenant`
 * `S3Bucket`
+* `S3Access`
+* `GlobalS3Policy`
+* `S3Policy`
 
 ### StorageGrid
 Cluster-scoped resource representing a StorageGrid installation. Manages connection credentials and global configuration.
@@ -150,7 +163,7 @@ This operator is currently only provided as source. You can deploy it by cloning
 
 ```bash
 # Clone the repository
-git clone https://git.mgmtbi.ch/cloud/storagegrid-operator.git
+git clone https://github.com/bedag/storagegrid-operator.git
 cd storagegrid-operator
 
 # Deploy the operator
@@ -695,10 +708,11 @@ To delete a tenant that has buckets:
 
 When the `S3Bucket` is created, the operator will create a corresponding `Secret` in the same namespace containing the S3 access credentials for the bucket. The secret will be named `s3-bucket-<bucket-name>-credentials`.
 
-This user will have full access to the bucket and may be used instead of the admin credentials of the `S3Tenant` to ensure proper least-privilege access.
+> [!IMPORTANT]
+> This secret contains **internal operator credentials** used by the controller to manage bucket operations (ownership tags, bucket policies, drain). It is not intended for application use. To grant applications access to a bucket, create an [S3Access](#6-create-s3-access) resource instead.
 
 > [!NOTE]  
-> Same as with the `S3Tenant`, you can customize the name of this secret through the `spec.s3AdminKeysSecretRef` field on the `S3Bucket`.
+> Same as with the `S3Tenant`, you can customize the name of this secret through the `spec.s3AdminKeysSecretRef` field on the `S3Bucket`. This is primarily useful for migration scenarios.
 
 ### 4.1 Importing Existing Buckets
 
@@ -716,12 +730,12 @@ Unlike tenant imports which use description metadata, bucket imports use **S3 bu
 
 The operator applies four ownership tags to imported buckets:
 
-| Tag Key | Purpose |
-|---------|---------|
-| `s3.bedag.ch/managed-by` | Indicates the bucket is operator-managed |
-| `s3.bedag.ch/bucket-namespace` | Kubernetes namespace of the S3Bucket CR |
-| `s3.bedag.ch/bucket-name` | Name of the S3Bucket CR |
-| `s3.bedag.ch/bucket-uid` | UID of the S3Bucket CR |
+| Tag Key                        | Purpose                                  |
+| ------------------------------ | ---------------------------------------- |
+| `s3.bedag.ch/managed-by`       | Indicates the bucket is operator-managed |
+| `s3.bedag.ch/bucket-namespace` | Kubernetes namespace of the S3Bucket CR  |
+| `s3.bedag.ch/bucket-name`      | Name of the S3Bucket CR                  |
+| `s3.bedag.ch/bucket-uid`       | UID of the S3Bucket CR                   |
 
 These tags enable:
 - Detection of managed vs unmanaged buckets
@@ -836,6 +850,235 @@ After successful import:
 - Ownership tags are maintained and re-applied if externally modified
 
 For detailed architecture information on bucket import and the S3 tagging implementation, see [Bucket Import Architecture](../docs/architecture/bucket-import.md).
+
+### 5. Define S3 Policies
+
+The operator provides two policy resources for managing S3 access permissions:
+
+- **`GlobalS3Policy`** (cluster-scoped): Policies available to all namespaces
+- **`S3Policy`** (namespace-scoped): Policies scoped to a specific namespace
+
+Policies define S3 permission rules using a simplified IAM-style syntax. The actual bucket ARN is injected automatically when the policy is applied to an S3Access — you only define the actions and scope.
+
+#### GlobalS3Policy
+
+Use `GlobalS3Policy` for common permission sets shared across teams:
+
+```yaml
+apiVersion: s3.bedag.ch/v1alpha1
+kind: GlobalS3Policy
+metadata:
+  name: admin
+spec:
+  description: "Full privileges for the bucket referenced"
+  version: "2024-01-01"
+  rules:
+    - effect: Allow
+      actions:
+        - s3:*
+      scope: Bucket
+    - effect: Allow
+      actions:
+        - s3:*
+      scope: Objects
+```
+
+#### S3Policy
+
+Use `S3Policy` for namespace-specific permission sets:
+
+```yaml
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3Policy
+metadata:
+  name: readonly
+  namespace: default
+spec:
+  description: "Read-only access to bucket and objects"
+  version: "2024-01-01"
+  rules:
+    - effect: Allow
+      actions:
+        - s3:ListBucket
+        - s3:GetBucketLocation
+      scope: Bucket
+    - effect: Allow
+      actions:
+        - s3:GetObject
+      scope: Objects
+```
+
+#### Policy Fields
+
+| Field                    | Description                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `spec.description`       | Optional human-readable description                                                                          |
+| `spec.version`           | Optional version string (format: `YYYY-MM-DD`) for tracking policy changes                                   |
+| `spec.rules[].effect`    | `Allow` or `Deny`                                                                                            |
+| `spec.rules[].actions`   | List of S3 actions, e.g. `s3:GetObject`, `s3:PutObject`, `s3:*`                                              |
+| `spec.rules[].scope`     | `Bucket` (bucket-level actions like `s3:ListBucket`) or `Objects` (object-level actions like `s3:GetObject`) |
+| `spec.rules[].condition` | Optional IAM-style condition (type, key, values)                                                             |
+
+#### Policy Status
+
+Policies show their readiness and version in `kubectl get`:
+
+```bash
+kubectl get globals3policies
+# NAME    AGE   READY   VERSION
+# admin   5m    true    2024-01-01
+
+kubectl get s3policies
+# NAME       AGE   READY   VERSION
+# readonly   5m    true    2024-01-01
+```
+
+A policy is `Ready` once it has been successfully rendered into an S3 policy document. If rendering fails, an event is emitted and the `Ready` condition is set to `False`.
+
+> [!NOTE]
+> Policies cannot be deleted while they are referenced by an S3Access resource. The operator blocks deletion via a finalizer to prevent accidental policy removal.
+
+### 6. Create S3 Access
+
+`S3Access` creates a dedicated S3 user with credentials scoped to a specific bucket, applying the permissions defined by referenced policies.
+
+```yaml
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3Access
+metadata:
+  name: my-app-access
+  namespace: default
+spec:
+  s3BucketRef:
+    name: my-bucket
+  policyRefs:
+    - name: admin
+      kind: GlobalS3Policy
+    - name: readonly
+      kind: S3Policy
+```
+
+#### PolicyRef Kind Validation
+
+The `kind` field in `policyRefs` is validated via OpenAPI schema and only accepts:
+- `GlobalS3Policy` — references a cluster-scoped policy
+- `S3Policy` — references a namespace-scoped policy (same namespace as the S3Access)
+- Empty string — defaults to `GlobalS3Policy`
+
+Invalid values (e.g., `kind: Foo`) are rejected at admission time.
+
+#### Subpath Restrictions
+
+You can restrict access to specific paths within a bucket:
+
+```yaml
+spec:
+  s3BucketRef:
+    name: my-bucket
+  policyRefs:
+    - name: admin
+  subPaths:
+    - "uploads/*"
+    - "public/*"
+```
+
+When `subPaths` is set, object-scoped policy statements are expanded per subpath instead of granting access to the entire bucket. Bucket-level actions (e.g., `s3:ListBucket`) are not affected by subpath restrictions.
+
+#### Custom Secret Name
+
+By default, the operator creates a credentials secret named `s3access-<name>-keypair`. You can override this:
+
+```yaml
+spec:
+  secretRef:
+    name: my-custom-secret-name
+```
+
+> [!WARNING]
+> Changing `spec.secretRef` after the secret has been created will **rename** the secret: the credential data is moved to the new secret and the old one is deleted. Workloads referencing the old secret name must be updated.
+
+#### S3Access Status
+
+Monitor your S3Access resources:
+
+```bash
+kubectl get s3accesses
+# NAME            BUCKET      SECRET                          STATUS   AGE
+# my-app-access   my-bucket   s3access-my-app-access-keypair  Ready    5m
+```
+
+Lifecycle phases:
+- **Pending**: Initial setup or policy update in progress
+- **Ready**: Fully reconciled with the most recent policy applied
+- **Failed**: Reconciliation error, check conditions for details
+
+The status also tracks which policies are currently applied:
+
+```yaml
+status:
+  appliedPolicyRefs:
+    - kind: GlobalS3Policy
+      name: admin
+      version: "2024-01-01"
+    - kind: S3Policy
+      name: readonly
+      namespace: default
+      version: "2024-01-01"
+```
+
+#### Credential Rotation
+
+To rotate S3 access credentials, annotate the S3Access resource:
+
+```bash
+kubectl annotate s3access my-app-access access.s3.bedag.ch/recreate-s3-access-keys=true
+```
+
+This will:
+1. Delete the existing S3 access key from the StorageGrid backend
+2. Create a new access key
+3. Update the Kubernetes secret with the new credentials
+4. Remove the annotation after successful rotation
+
+Events are emitted for rotation start, success, and failure.
+
+> [!WARNING]
+> Credential rotation is a destructive operation. The old access key is immediately invalidated. Make sure your applications can handle credential changes (e.g., by restarting pods that mount the secret).
+
+#### Secrets Created
+
+The operator creates a `Secret` in the same namespace as the S3Access containing:
+
+```yaml
+data:
+  accessKey: <base64-encoded-access-key>
+  secretKey: <base64-encoded-secret-key>
+```
+
+The secret is owned by the S3Access resource and will be automatically deleted when the S3Access is deleted.
+
+#### Available Annotations
+
+```yaml
+metadata:
+  annotations:
+    # Force recreation of S3 access keys on next reconciliation
+    access.s3.bedag.ch/recreate-s3-access-keys: "true"
+```
+
+#### How S3Access Works
+
+When you create an S3Access:
+1. The operator resolves the referenced S3Bucket and its tenant
+2. A dedicated user and group are created on the StorageGrid backend
+3. All referenced policies are fetched and their rendered statements are combined into a single policy document
+4. The `BUCKET_NAME` placeholder in policy statements is replaced with the actual bucket name
+5. Subpath restrictions are applied if configured
+6. The combined policy is attached to the user's group
+7. S3 credentials are created and stored in a Kubernetes secret
+8. On subsequent reconciliations, the policy is only re-applied if it changed
+
+Policy changes (editing a GlobalS3Policy or S3Policy) automatically trigger reconciliation of all S3Accesses that reference the changed policy.
 
 ## Configuration
 

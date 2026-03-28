@@ -34,7 +34,10 @@ rules:
 - apiGroups:
   - s3.bedag.ch
   resources:
+  - globals3policies
+  - s3accesses
   - s3buckets
+  - s3policies
   - s3tenantaccounts
   - s3tenantclasses
   - s3tenants
@@ -50,7 +53,10 @@ rules:
 - apiGroups:
   - s3.bedag.ch
   resources:
+  - globals3policies/finalizers
+  - s3accesses/finalizers
   - s3buckets/finalizers
+  - s3policies/finalizers
   - s3tenantaccounts/finalizers
   - s3tenantclasses/finalizers
   - s3tenants/finalizers
@@ -60,7 +66,10 @@ rules:
 - apiGroups:
   - s3.bedag.ch
   resources:
+  - globals3policies/status
+  - s3accesses/status
   - s3buckets/status
+  - s3policies/status
   - s3tenantaccounts/status
   - s3tenantclasses/status
   - s3tenants/status

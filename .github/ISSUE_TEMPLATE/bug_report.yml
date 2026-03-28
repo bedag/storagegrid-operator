@@ -28,8 +28,8 @@ body:
       label: Steps to Reproduce
       description: Detailed steps to reproduce the behavior
       placeholder: |
-        1. Go to '...'
-        2. Run command '...'
+        1. apply this manifest...
+        2. check status, describe what you see...
         3. See error
     validations:
       required: true
@@ -66,15 +66,6 @@ body:
       required: true
 
   - type: input
-    id: os
-    attributes:
-      label: Operating System
-      description: "What OS are you using?"
-      placeholder: "e.g., Ubuntu 22.04, macOS 13.5, Windows 11"
-    validations:
-      required: true
-
-  - type: input
     id: go-version
     attributes:
       label: Go Version
@@ -96,13 +87,6 @@ body:
       placeholder: "e.g., v1.27.3"
     validations:
       required: true
-
-  - type: input
-    id: cloud-provider
-    attributes:
-      label: Cloud Provider / Platform
-      description: "Where is Kubernetes running?"
-      placeholder: "e.g., AWS EKS, Google GKE, Azure AKS, self-hosted, minikube, kind"
 
   - type: textarea
     id: logs

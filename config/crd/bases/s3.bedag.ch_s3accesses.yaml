@@ -1,0 +1,249 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: s3accesses.s3.bedag.ch
+spec:
+  group: s3.bedag.ch
+  names:
+    kind: S3Access
+    listKind: S3AccessList
+    plural: s3accesses
+    singular: s3access
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: The bucket this access belongs to
+      jsonPath: .spec.s3BucketRef.name
+      name: Bucket
+      type: string
+    - description: Name of the credentials secret
+      jsonPath: .status.secretRef.name
+      name: Secret
+      type: string
+    - description: Current lifecycle phase
+      jsonPath: .status.phase
+      name: Status
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: AGE
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: S3Access is the Schema for the s3accesses API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: S3AccessSpec defines the desired state of S3Access.
+            properties:
+              policyRefs:
+                description: |-
+                  List of GlobalS3Policies and namespaced S3Policies to apply to the access.
+                  if kind is not specified, it will be assumed to be a GlobalS3Policy.
+                items:
+                  description: PolicyRef references an S3Policy or GlobalS3Policy
+                    by name and kind.
+                  properties:
+                    kind:
+                      description: |-
+                        Kind of the policy. Must be "S3Policy" or "GlobalS3Policy".
+                        Defaults to "GlobalS3Policy" if not specified.
+                      enum:
+                      - S3Policy
+                      - GlobalS3Policy
+                      - ""
+                      type: string
+                    name:
+                      description: Name of the policy resource.
+                      type: string
+                  required:
+                  - name
+                  type: object
+                minItems: 1
+                type: array
+              s3BucketRef:
+                description: |-
+                  Reference to the S3Bucket this access belongs to.
+                  This is immutable after creation, recreate the access if you want to change the bucket.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+                x-kubernetes-validations:
+                - message: s3TenantRef is immutable
+                  rule: self == oldSelf
+              secretRef:
+                description: |-
+                  Optionally specify the secret for the access and secret key
+                  if not specified, a secret will be automatically generated and managed by the operator.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+              subPaths:
+                description: |-
+                  Optional list of subpaths to restrict access to, e.g. ["folder1/*", "folder2/subfolder/*"].
+                  if empty, access will be granted to the whole bucket.
+                items:
+                  type: string
+                type: array
+            required:
+            - policyRefs
+            - s3BucketRef
+            type: object
+          status:
+            description: S3AccessStatus defines the observed state of S3Access.
+            properties:
+              accessKeyId:
+                description: S3 Access Key ID for the access.
+                type: string
+              appliedPolicyRefs:
+                description: Applied policies for this access.
+                items:
+                  description: AppliedPolicyRef describes a policy that has been applied
+                    to this S3Access.
+                  properties:
+                    kind:
+                      description: Kind of the policy, e.g. "S3Policy" or "GlobalS3Policy".
+                      type: string
+                    name:
+                      description: Name of the policy.
+                      type: string
+                    namespace:
+                      description: Namespace of the policy. Empty for cluster-scoped
+                        policies.
+                      type: string
+                    version:
+                      description: Version of the policy at the time it was applied.
+                        Empty if the policy has no version.
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  type: object
+                type: array
+              conditions:
+                description: |-
+                  Track s3Access conditions.
+                  Conditions is an array of conditions.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              phase:
+                default: Pending
+                description: Phase represents the current lifecycle phase of the S3Access.
+                type: string
+              policyDocument:
+                description: Rendered policy document for this access, after applying
+                  the referenced policies and subpath restrictions.
+                type: string
+              secretRef:
+                description: Reference to the secret containing the access credentials.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

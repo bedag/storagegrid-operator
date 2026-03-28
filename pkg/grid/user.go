@@ -103,7 +103,7 @@ func ensureGroupMembership(ctx context.Context, username string, groupID string,
 	// check if the user is already a member of the group.
 	for _, gid := range user.MemberOf {
 		if gid == *group.Id {
-			log.V(1).Info(fmt.Sprintf("User %s is already member of group %s", username, group.DisplayName))
+			log.V(1).Info(fmt.Sprintf("User %s is already member of group %s", username, group.UniqueName))
 			return nil
 		}
 	}
@@ -115,7 +115,7 @@ func ensureGroupMembership(ctx context.Context, username string, groupID string,
 		log.Error(err, "Failed to update user")
 	}
 
-	log.V(1).Info(fmt.Sprintf("User %s added to group %s", username, group.DisplayName))
+	log.V(1).Info(fmt.Sprintf("User %s added to group %s", username, group.UniqueName))
 	return nil
 }
 
@@ -136,11 +136,12 @@ func createGroup(ctx context.Context, groupName string, policies *models.TenantG
 	log := log.FromContext(ctx).WithValues("func", "CreateBucketAdminGroup")
 	log.V(1).Info(fmt.Sprintf("Creating group %s", groupName))
 
-	groupName = getSupportedGroupName(groupName)
+	// displaname cannot exceed 32 characters, so we use a truncated group name for display purposes if necessary.
+	displayName := getSupportedGroupName(groupName)
 
 	group := models.TenantGroup{
 		UniqueName:  groupName,
-		DisplayName: groupName,
+		DisplayName: displayName,
 		Policies:    policies,
 	}
 
@@ -157,8 +158,6 @@ func createGroup(ctx context.Context, groupName string, policies *models.TenantG
 func groupExists(ctx context.Context, groupName string, tenantClient *TenantClient) (bool, string) {
 	log := log.FromContext(ctx).WithValues("func", "groupExists")
 	log.V(1).Info(fmt.Sprintf("Checking if group %s exists", groupName))
-
-	groupName = getSupportedGroupName(groupName)
 
 	group, err := tenantClient.Groups().GetByName(ctx, groupName)
 	if err == nil {

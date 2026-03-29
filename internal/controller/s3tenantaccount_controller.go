@@ -1071,9 +1071,15 @@ func (r *S3TenantAccountReconciler) reconcileCreate(ctx context.Context, rctx *a
 		fmt.Sprintf("Successfully created tenant with ID %s", tenantID))
 
 	// store credentials in a secret.
-	err = kube.CreateCredentialSecret(ctx, r.Client, rctx.Account.Status.RootSecretRef.Namespace, rctx.Account.Status.RootSecretRef.Name, "root", password, rctx.Account)
+	err = kube.CreateCredentialSecret(ctx, r.Client, rctx.Account.Status.RootSecretRef.Namespace, rctx.Account.Status.RootSecretRef.Name, "root", password, rctx.Account, rctx.Account.Kind)
 	if err != nil {
 		log.Error(err, "Failed to create secret")
+		return err
+	}
+
+	// Add protective finalizer to root secret to prevent premature deletion during namespace teardown.
+	if err := kube.AddSecretFinalizer(ctx, r.Client, rctx.Account.Status.RootSecretRef.Namespace, rctx.Account.Status.RootSecretRef.Name); err != nil {
+		log.Error(err, "Failed to add finalizer to root secret")
 		return err
 	}
 
@@ -1492,13 +1498,15 @@ func (r *S3TenantAccountReconciler) createTenantAdminCredentials(ctx context.Con
 	// Always use S3Tenant as owner if it exists (user-facing secret).
 	// Otherwise fall back to Account (platform-managed scenario).
 	var owner metav1.Object
+	ownerKind := "S3TenantAccount"
 	if rctx.Account.Status.S3TenantRef != nil {
 		owner = rctx.S3Tenant
+		ownerKind = "S3Tenant"
 	} else {
 		owner = rctx.Account
 	}
 
-	err = kube.CreateCredentialSecret(ctx, r.Client, rctx.Account.Status.AdminSecretRef.Namespace, rctx.Account.Status.AdminSecretRef.Name, username, password, owner)
+	err = kube.CreateCredentialSecret(ctx, r.Client, rctx.Account.Status.AdminSecretRef.Namespace, rctx.Account.Status.AdminSecretRef.Name, username, password, owner, ownerKind)
 	if err != nil {
 		log.Error(err, "Failed to create secret")
 		return err
@@ -1575,15 +1583,23 @@ func (r *S3TenantAccountReconciler) createS3AdminKeypair(ctx context.Context, rc
 
 	// if tenantref is set use this as owner instead.
 	var owner metav1.Object
+	ownerKind := rctx.Account.Kind
 	if rctx.Account.Status.S3TenantRef != nil {
 		owner = rctx.S3Tenant
+		ownerKind = rctx.S3Tenant.Kind
 	} else {
 		owner = rctx.Account
 	}
 	// store s3 keys in a secret.
-	err = kube.CreateKeyPairSecret(ctx, r.Client, rctx.Account.Status.S3AdminKeysSecretRef.Namespace, rctx.Account.Status.S3AdminKeysSecretRef.Name, accessKey, secretKey, owner)
+	err = kube.CreateKeyPairSecret(ctx, r.Client, rctx.Account.Status.S3AdminKeysSecretRef.Namespace, rctx.Account.Status.S3AdminKeysSecretRef.Name, accessKey, secretKey, owner, ownerKind)
 	if err != nil {
 		log.Error(err, "Failed to create secret")
+		return err
+	}
+
+	// Add protective finalizer to S3 admin keys secret to prevent premature deletion during namespace teardown.
+	if err := kube.AddSecretFinalizer(ctx, r.Client, rctx.Account.Status.S3AdminKeysSecretRef.Namespace, rctx.Account.Status.S3AdminKeysSecretRef.Name); err != nil {
+		log.Error(err, "Failed to add finalizer to S3 admin keys secret")
 		return err
 	}
 
@@ -1724,8 +1740,12 @@ func (r *S3TenantAccountReconciler) mapTenantClassToAccounts(ctx context.Context
 func (r *S3TenantAccountReconciler) deleteOperatorSecrets(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// Delete root secret if present
+	// Delete root secret if present (remove protective finalizer first)
 	if rctx.Account.Status.RootSecretRef != nil && rctx.Account.Status.RootSecretRef.Name != "" {
+		if err := kube.RemoveSecretFinalizer(ctx, r.Client, rctx.Account.Status.RootSecretRef.Namespace, rctx.Account.Status.RootSecretRef.Name); err != nil {
+			log.Error(err, "Failed to remove finalizer from root secret")
+			return err
+		}
 		if err := kube.DeleteSecret(ctx, r.Client, rctx.Account.Status.RootSecretRef.Namespace, rctx.Account.Status.RootSecretRef.Name); err != nil {
 			log.Error(err, "Failed to delete root secret")
 			return err
@@ -1740,8 +1760,12 @@ func (r *S3TenantAccountReconciler) deleteOperatorSecrets(ctx context.Context, r
 		}
 	}
 
-	// Delete S3 admin keys secret if present
+	// Delete S3 admin keys secret if present (remove protective finalizer first)
 	if rctx.Account.Status.S3AdminKeysSecretRef != nil && rctx.Account.Status.S3AdminKeysSecretRef.Name != "" {
+		if err := kube.RemoveSecretFinalizer(ctx, r.Client, rctx.Account.Status.S3AdminKeysSecretRef.Namespace, rctx.Account.Status.S3AdminKeysSecretRef.Name); err != nil {
+			log.Error(err, "Failed to remove finalizer from S3 admin keys secret")
+			return err
+		}
 		if err := kube.DeleteSecret(ctx, r.Client, rctx.Account.Status.S3AdminKeysSecretRef.Namespace, rctx.Account.Status.S3AdminKeysSecretRef.Name); err != nil {
 			log.Error(err, "Failed to delete S3 admin keys secret")
 			return err

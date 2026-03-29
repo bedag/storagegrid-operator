@@ -101,8 +101,9 @@ spec:
                   rule: self == oldSelf
               secretRef:
                 description: |-
-                  Optionally specify the secret for the access and secret key
-                  if not specified, a secret will be automatically generated and managed by the operator.
+                  Optionally specify the secret name for the access credentials.
+                  If not specified, a secret will be automatically generated and managed by the operator.
+                  Changing this after creation will rename the secret (data is moved, old secret is deleted).
                 properties:
                   name:
                     default: ""

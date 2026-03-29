@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -28,6 +29,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+)
+
+const (
+	// SecretFinalizer is added to critical secrets to prevent premature deletion during namespace teardown.
+	SecretFinalizer = "secret.s3.bedag.ch/finalizer"
 )
 
 // FetchCredentialsFromSecret fetches a Secret and returns the credentials as strings.
@@ -57,33 +63,36 @@ func FetchKeyPairFromSecret(ctx context.Context, k8sClient client.Client, namesp
 }
 
 // creates a secret with keys "username" and "password" in the specified namespace.
-func CreateCredentialSecret(ctx context.Context, k8sClient client.Client, namespace string, secretName string, username string, password string, owner metav1.Object) error {
+func CreateCredentialSecret(ctx context.Context, k8sClient client.Client, namespace string, secretName string, username string, password string, owner metav1.Object, ownerKind string) error {
 	data := map[string][]byte{
 		"username": []byte(username),
 		"password": []byte(password),
 	}
 
-	return createSecret(ctx, k8sClient, secretName, namespace, data, owner)
+	return createSecret(ctx, k8sClient, secretName, namespace, data, owner, ownerKind)
 }
 
 // creates a secret with keys "accessKeyId" and "secretAccessKey" in the specified namespace.
-func CreateKeyPairSecret(ctx context.Context, k8sClient client.Client, namespace string, secretName string, accessKeyId string, secretAccessKey string, owner metav1.Object) error {
+func CreateKeyPairSecret(ctx context.Context, k8sClient client.Client, namespace string, secretName string, accessKeyId string, secretAccessKey string, owner metav1.Object, ownerKind string) error {
 	data := map[string][]byte{
 		"accessKey": []byte(accessKeyId),
 		"secretKey": []byte(secretAccessKey),
 	}
 
-	return createSecret(ctx, k8sClient, secretName, namespace, data, owner)
+	return createSecret(ctx, k8sClient, secretName, namespace, data, owner, ownerKind)
 }
 
-func createSecret(ctx context.Context, k8sClient client.Client, secretName string, secretNamespace string, data map[string][]byte, owner metav1.Object) error {
+func createSecret(ctx context.Context, k8sClient client.Client, secretName string, secretNamespace string, data map[string][]byte, owner metav1.Object, ownerKind string) error {
 	log := log.FromContext(ctx).WithValues("func", "createSecret")
 	log.V(1).Info("Creating or updating secret", "name", secretName, "namespace", secretNamespace)
+
+	labels := secretLabels(ownerKind, owner.GetName())
 
 	desired := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      secretName,
 			Namespace: secretNamespace,
+			Labels:    labels,
 		},
 		Data: data,
 	}
@@ -116,9 +125,15 @@ func createSecret(ctx context.Context, k8sClient client.Client, secretName strin
 		)
 	}
 
-	// Update existing if necessary.
-	if !reflect.DeepEqual(existing.Data, desired.Data) {
+	// Reconcile labels and data on existing secret.
+	labelsChanged := mergeLabels(existing, labels)
+	dataChanged := !reflect.DeepEqual(existing.Data, desired.Data)
+
+	if dataChanged {
 		existing.Data = desired.Data
+	}
+
+	if labelsChanged || dataChanged {
 		if err := k8sClient.Update(ctx, existing); err != nil {
 			return err
 		}
@@ -127,6 +142,32 @@ func createSecret(ctx context.Context, k8sClient client.Client, secretName strin
 	log.V(1).Info("Secret created or updated successfully", "name", secretName, "namespace", secretNamespace)
 
 	return nil
+}
+
+// secretLabels returns the standard labels for operator-managed secrets.
+func secretLabels(ownerKind string, ownerName string) map[string]string {
+	return map[string]string{
+		"app.kubernetes.io/managed-by": "storagegrid-operator",
+		"app.kubernetes.io/part-of":    strings.ToLower(ownerKind),
+		"app.kubernetes.io/instance":   ownerName,
+	}
+}
+
+// mergeLabels adds missing labels to the existing object. Returns true if any labels were added or changed.
+func mergeLabels(obj metav1.Object, desired map[string]string) bool {
+	existing := obj.GetLabels()
+	if existing == nil {
+		obj.SetLabels(desired)
+		return true
+	}
+	changed := false
+	for k, v := range desired {
+		if existing[k] != v {
+			existing[k] = v
+			changed = true
+		}
+	}
+	return changed
 }
 
 // DeleteSecret deletes a secret from the specified namespace.
@@ -151,5 +192,53 @@ func DeleteSecret(ctx context.Context, k8sClient client.Client, namespace string
 	}
 
 	log.V(1).Info("Secret deleted successfully", "name", secretName, "namespace", namespace)
+	return nil
+}
+
+// AddSecretFinalizer adds the protective finalizer to a secret to prevent premature deletion during namespace teardown.
+func AddSecretFinalizer(ctx context.Context, k8sClient client.Client, namespace string, secretName string) error {
+	log := log.FromContext(ctx).WithValues("func", "AddSecretFinalizer")
+
+	secret := &corev1.Secret{}
+	if err := k8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: secretName}, secret); err != nil {
+		return fmt.Errorf("failed to get secret %s/%s for adding finalizer: %w", namespace, secretName, err)
+	}
+
+	if controllerutil.ContainsFinalizer(secret, SecretFinalizer) {
+		return nil
+	}
+
+	controllerutil.AddFinalizer(secret, SecretFinalizer)
+	if err := k8sClient.Update(ctx, secret); err != nil {
+		return fmt.Errorf("failed to add finalizer to secret %s/%s: %w", namespace, secretName, err)
+	}
+
+	log.V(1).Info("Added finalizer to secret", "name", secretName, "namespace", namespace)
+	return nil
+}
+
+// RemoveSecretFinalizer removes the protective finalizer from a secret to allow deletion.
+func RemoveSecretFinalizer(ctx context.Context, k8sClient client.Client, namespace string, secretName string) error {
+	log := log.FromContext(ctx).WithValues("func", "RemoveSecretFinalizer")
+
+	secret := &corev1.Secret{}
+	if err := k8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: secretName}, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.V(1).Info("Secret already deleted, no finalizer to remove", "name", secretName, "namespace", namespace)
+			return nil
+		}
+		return fmt.Errorf("failed to get secret %s/%s for removing finalizer: %w", namespace, secretName, err)
+	}
+
+	if !controllerutil.ContainsFinalizer(secret, SecretFinalizer) {
+		return nil
+	}
+
+	controllerutil.RemoveFinalizer(secret, SecretFinalizer)
+	if err := k8sClient.Update(ctx, secret); err != nil {
+		return fmt.Errorf("failed to remove finalizer from secret %s/%s: %w", namespace, secretName, err)
+	}
+
+	log.V(1).Info("Removed finalizer from secret", "name", secretName, "namespace", namespace)
 	return nil
 }

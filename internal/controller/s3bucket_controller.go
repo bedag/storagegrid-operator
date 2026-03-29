@@ -808,7 +808,7 @@ func (r *S3BucketReconciler) createS3AdminKeypair(ctx context.Context, rctx *buc
 
 	// store s3 keys in a secret.
 	// Update secret with new credentials.
-	err = kube.CreateKeyPairSecret(ctx, r.Client, rctx.Bucket.Namespace, rctx.Bucket.Status.S3AdminKeysSecretRef.Name, accessKey, secretKey, rctx.Bucket)
+	err = kube.CreateKeyPairSecret(ctx, r.Client, rctx.Bucket.Namespace, rctx.Bucket.Status.S3AdminKeysSecretRef.Name, accessKey, secretKey, rctx.Bucket, rctx.Bucket.Kind)
 	if err != nil {
 		return fmt.Errorf("failed to update credential secret: %w", err)
 	}

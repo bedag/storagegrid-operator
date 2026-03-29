@@ -200,7 +200,7 @@ spec:
               renderedPolicy:
                 description: |-
                   Rendered policy json document that is applied to the s3access.
-                  Resource is ommited as this is automatically set to the bucket referenced in the s3access.
+                  Resource is omitted as this is automatically set to the bucket referenced in the s3access.
                 type: string
             type: object
         type: object

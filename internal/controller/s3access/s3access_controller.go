@@ -606,7 +606,7 @@ func (r *S3AccessReconciler) createAccessKeypair(ctx context.Context, rctx *s3Ac
 		}
 	}
 
-	if err := kube.CreateKeyPairSecret(ctx, r.Client, rctx.S3Access.Namespace, secretName, accessKey, secretKey, rctx.S3Access); err != nil {
+	if err := kube.CreateKeyPairSecret(ctx, r.Client, rctx.S3Access.Namespace, secretName, accessKey, secretKey, rctx.S3Access, rctx.S3Access.Kind); err != nil {
 		return fmt.Errorf("failed to create credentials secret: %w", err)
 	}
 
@@ -662,7 +662,7 @@ func (r *S3AccessReconciler) moveSecret(ctx context.Context, rctx *s3AccessRecon
 	}
 
 	// Create the new secret with the same data.
-	if err := kube.CreateKeyPairSecret(ctx, r.Client, rctx.S3Access.Namespace, newName, accessKey, secretKey, rctx.S3Access); err != nil {
+	if err := kube.CreateKeyPairSecret(ctx, r.Client, rctx.S3Access.Namespace, newName, accessKey, secretKey, rctx.S3Access, rctx.S3Access.Kind); err != nil {
 		return fmt.Errorf("failed to create new secret %s: %w", newName, err)
 	}
 	log.V(1).Info("New secret created", "secretName", newName)

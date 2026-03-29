@@ -1255,11 +1255,17 @@ func (r *S3TenantAccountReconciler) updateSecretRef(
 
 	if (*statusRef).Name != newRef.Name || (*statusRef).Namespace != newRef.Namespace {
 		// Delete old secret before updating reference.
+		// Remove protective finalizer first to allow deletion during namespace teardown.
 		log.Info("Secret reference changed, deleting old secret",
 			"oldName", (*statusRef).Name,
 			"oldNamespace", (*statusRef).Namespace,
 			"newName", newRef.Name,
 			"newNamespace", newRef.Namespace)
+		if err := kube.RemoveSecretFinalizer(ctx, r.Client, (*statusRef).Namespace, (*statusRef).Name); err != nil {
+			log.Error(err, "Failed to remove finalizer from old secret",
+				"name", (*statusRef).Name,
+				"namespace", (*statusRef).Namespace)
+		}
 		if err := kube.DeleteSecret(ctx, r.Client, (*statusRef).Namespace, (*statusRef).Name); err != nil {
 			log.Error(err, "Failed to delete old secret",
 				"name", (*statusRef).Name,
@@ -1613,10 +1619,10 @@ func (r *S3TenantAccountReconciler) finalize(ctx context.Context, rctx *accountR
 	log := log.FromContext(ctx)
 	log.Info(fmt.Sprintf("Finalizing S3TenantAccount %s", rctx.Account.Name))
 
-	// Delete all operator-managed secrets regardless of policy
-	if err := r.deleteOperatorSecrets(ctx, rctx); err != nil {
-		log.Error(err, "Failed to delete operator-managed secrets")
-		// Continue with finalization even if secret deletion fails
+	// Remove protective finalizers from secrets to allow Kubernetes GC via OwnerReferences.
+	if err := r.removeSecretFinalizers(ctx, rctx); err != nil {
+		log.Error(err, "Failed to remove secret finalizers")
+		// Continue with finalization even if finalizer removal fails
 	}
 
 	// Check if tenant still exists on the backend
@@ -1736,43 +1742,28 @@ func (r *S3TenantAccountReconciler) mapTenantClassToAccounts(ctx context.Context
 	return requests
 }
 
-// deleteOperatorSecrets removes all operator-managed secrets for the tenant.
-func (r *S3TenantAccountReconciler) deleteOperatorSecrets(ctx context.Context, rctx *accountReconcileContext) error {
+// removeSecretFinalizers removes protective finalizers from operator-managed secrets,
+// allowing Kubernetes garbage collection to delete them via OwnerReferences.
+func (r *S3TenantAccountReconciler) removeSecretFinalizers(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
-	// Delete root secret if present (remove protective finalizer first)
+	// Remove finalizer from root secret if present.
 	if rctx.Account.Status.RootSecretRef != nil && rctx.Account.Status.RootSecretRef.Name != "" {
 		if err := kube.RemoveSecretFinalizer(ctx, r.Client, rctx.Account.Status.RootSecretRef.Namespace, rctx.Account.Status.RootSecretRef.Name); err != nil {
 			log.Error(err, "Failed to remove finalizer from root secret")
 			return err
 		}
-		if err := kube.DeleteSecret(ctx, r.Client, rctx.Account.Status.RootSecretRef.Namespace, rctx.Account.Status.RootSecretRef.Name); err != nil {
-			log.Error(err, "Failed to delete root secret")
-			return err
-		}
 	}
 
-	// Delete admin secret if present
-	if rctx.Account.Status.AdminSecretRef != nil && rctx.Account.Status.AdminSecretRef.Name != "" {
-		if err := kube.DeleteSecret(ctx, r.Client, rctx.Account.Status.AdminSecretRef.Namespace, rctx.Account.Status.AdminSecretRef.Name); err != nil {
-			log.Error(err, "Failed to delete admin secret")
-			return err
-		}
-	}
-
-	// Delete S3 admin keys secret if present (remove protective finalizer first)
+	// Remove finalizer from S3 admin keys secret if present.
 	if rctx.Account.Status.S3AdminKeysSecretRef != nil && rctx.Account.Status.S3AdminKeysSecretRef.Name != "" {
 		if err := kube.RemoveSecretFinalizer(ctx, r.Client, rctx.Account.Status.S3AdminKeysSecretRef.Namespace, rctx.Account.Status.S3AdminKeysSecretRef.Name); err != nil {
 			log.Error(err, "Failed to remove finalizer from S3 admin keys secret")
 			return err
 		}
-		if err := kube.DeleteSecret(ctx, r.Client, rctx.Account.Status.S3AdminKeysSecretRef.Namespace, rctx.Account.Status.S3AdminKeysSecretRef.Name); err != nil {
-			log.Error(err, "Failed to delete S3 admin keys secret")
-			return err
-		}
 	}
 
-	log.V(1).Info("Successfully deleted all operator-managed secrets")
+	log.V(1).Info("Successfully removed finalizers from operator-managed secrets")
 	return nil
 }
 

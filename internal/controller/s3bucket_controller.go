@@ -195,13 +195,16 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 		return err
 	}
 	if rctx.DoRequeue {
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "ReconcileSucceeded", "Finalizer reconciled, requeuing")
 		return nil
 	}
 
-	// Check if tenant has been created or imported
+	// Check if bucket has been created or imported.
+	// Gate on ConditionTrue (not just existence) so that a failed creation attempt (ConditionFalse)
+	// re-enters the creation path and allows the user to fix spec.bucketName.
 	createdCondition := meta.FindStatusCondition(rctx.Bucket.Status.Conditions, s3v1alpha1.ConditionTypeCreated)
 
-	if createdCondition == nil {
+	if createdCondition == nil || createdCondition.Status != metav1.ConditionTrue {
 		// make sure proper region is set before trying to create or import the bucket.
 		if err := r.reconcileRegion(ctx, rctx); err != nil {
 			return err
@@ -431,11 +434,14 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 			r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketCreateFailed,
 				fmt.Sprintf("Failed to create bucket: Bucket name %s is already taken, please either change spec.bucketName or leave it empty for an automatic generated one", rctx.Bucket.Status.BucketName))
 
-			// this will seem hacky at first but we need to nil the name in status so that it gets regenerated on next reconcile.
-			// this is because the status is immutable and once we commit this to the api server we cannot change it anymore.
-			// As this current name is taken, the user might want to just edit this current bucket to a different name and we need to allow that.
+			// Clear the attempted name so reconcileBucketName re-evaluates from spec on next reconcile.
+			// This allows the user to update spec.bucketName and retry.
 			rctx.Bucket.Status.BucketName = ""
-			return fmt.Errorf("bucket name %s is already taken, please choose a different name", rctx.Bucket.Status.BucketName)
+
+			// Mark reconciliation as succeeded so deriveReadiness keeps phase as Pending (not Failed).
+			// The ConditionTypeCreated=False with reason BucketNameConflict provides the actionable info.
+			r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "ReconcileSucceeded", "Bucket name conflict, waiting for user action")
+			return nil
 		}
 
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionFalse, "BucketCreateReconcileFailed", err.Error())

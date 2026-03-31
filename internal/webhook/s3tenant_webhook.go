@@ -141,12 +141,13 @@ func (r *S3TenantValidator) ValidateDelete(ctx context.Context, obj runtime.Obje
 
 	s3tenantlog.Info("validate delete", "name", s3tenant.Name)
 
-	// deletion is blocked until the allow-delete annotation is added.
-	if _, ok := s3tenant.Annotations[s3v1alpha1.AnnotationAllowTenantDeletion]; ok {
-		return nil, nil
+	// Opt-in deletion protection: block deletion only if the protection annotation is explicitly set.
+	if val, ok := s3tenant.Annotations[s3v1alpha1.AnnotationDeletionProtection]; ok && val == "true" {
+		return nil, fmt.Errorf("deletion of S3Tenant %s is protected by annotation %s=true. To remove protection run: kubectl annotate s3tenant %s %s- -n %s",
+			s3tenant.Name, s3v1alpha1.AnnotationDeletionProtection, s3tenant.Name, s3v1alpha1.AnnotationDeletionProtection, s3tenant.Namespace)
 	}
 
-	return nil, fmt.Errorf("deletion of s3tenant %s is blocked until annotation %s is set, please add this first", s3tenant.Name, s3v1alpha1.AnnotationAllowTenantDeletion)
+	return nil, nil
 }
 
 func (r *S3TenantValidator) tenantClassExists(ctx context.Context, tenantClassName string) (bool, error) {

@@ -142,21 +142,22 @@ func (r *S3TenantAccountValidator) ValidateDelete(ctx context.Context, obj runti
 
 	s3tenantAccountlog.Info("validate delete", "name", s3tenantAccount.Name)
 
-	// Block import annotation on delete
+	// Opt-in deletion protection: block deletion only if the protection annotation is explicitly set.
+	if val, ok := s3tenantAccount.Annotations[s3v1alpha1.AnnotationDeletionProtection]; ok && val == "true" {
+		return nil, fmt.Errorf("deletion of S3TenantAccount %s is protected by annotation %s=true. To remove protection run: kubectl annotate s3tenantaccount %s %s-",
+			s3tenantAccount.Name, s3v1alpha1.AnnotationDeletionProtection, s3tenantAccount.Name, s3v1alpha1.AnnotationDeletionProtection)
+	}
+
+	// Block deletion while import is in progress.
 	if s3tenantAccount.Annotations != nil {
 		if _, hasImport := s3tenantAccount.Annotations[s3v1alpha1.AnnotationImportTenant]; hasImport {
 			return nil, fmt.Errorf("cannot delete S3TenantAccount with import annotation '%s'. Remove the annotation first", s3v1alpha1.AnnotationImportTenant)
 		}
 	}
 
-	// deletion is blocked until the allow-delete annotation is added.
-	if _, ok := s3tenantAccount.Annotations[s3v1alpha1.AnnotationAllowTenantDeletion]; !ok {
-		return nil, fmt.Errorf("deletion of s3tenant %s is blocked until annotation %s is set, please add this first", s3tenantAccount.Name, s3v1alpha1.AnnotationAllowTenantDeletion)
-	}
-
-	// make sure no tenant is still bound to this account.
+	// Block deletion while a tenant is still bound to this account.
 	if s3tenantAccount.Status.S3TenantRef != nil {
-		return nil, fmt.Errorf("deletion of s3tenantaccount %s is blocked until all tenants are unbound, please remove the reference to tenant %s/%s first", s3tenantAccount.Name, s3tenantAccount.Status.S3TenantRef.Namespace, s3tenantAccount.Status.S3TenantRef.Name)
+		return nil, fmt.Errorf("deletion of S3TenantAccount %s is blocked until all tenants are unbound, please remove the reference to tenant %s/%s first", s3tenantAccount.Name, s3tenantAccount.Status.S3TenantRef.Namespace, s3tenantAccount.Status.S3TenantRef.Name)
 	}
 
 	return nil, nil

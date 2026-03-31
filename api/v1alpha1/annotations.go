@@ -54,12 +54,9 @@ var (
 	// TODO: implement this.
 	AnnotationAllowTenantQuotaShrinking = fmt.Sprintf("%s.%s/allow-tenant-quota-shrink", AnnotationPrefixTenant, Domain)
 
-	// allow force deletion of the tenant.
-	// TODO: implement this.
-	AnnotationForceDeleteTenant = fmt.Sprintf("%s.%s/force-tenant-delete", AnnotationPrefixTenant, Domain)
-
-	// allow the deletion of the account.
-	AnnotationAllowTenantDeletion = fmt.Sprintf("%s.%s/allow-tenant-deletion", AnnotationPrefixTenant, Domain)
+	// Opt-in deletion protection. When set to "true" on any operator-managed resource,
+	// the validating webhook will block deletion until the annotation is removed.
+	AnnotationDeletionProtection = fmt.Sprintf("%s/deletion-protection", Domain)
 
 	// Annotation to drain a bucket, deleting all objects stored in it before deleting the bucket itself.
 	AnnotationDrainBucket = fmt.Sprintf("%s.%s/force-drain-bucket", AnnotationPrefixBucket, Domain)
@@ -70,13 +67,7 @@ var (
 	// buckets will be orphaned and the account is left intact.
 	AnnotationIgnoreUnmanagedBuckets = fmt.Sprintf("%s.%s/ignore-unmanaged-buckets", AnnotationPrefixTenant, Domain)
 
-	// TenantAnnotationsToKeep defines annotations that should remain on S3Tenant.
+	// TenantAnnotationsToKeep defines annotations that should remain on S3Tenant
 	// and NOT be automatically removed after propagation to S3TenantAccount.
-	// These typically serve as user-visible safety gates or status indicators.
-	// Each annotation in this list requires documented removal strategy:
-	// - Automatic: removed when resource is deleted.
-	// - Explicit: controller logic removes after operation completes.
-	TenantAnnotationsToKeep = []string{
-		AnnotationAllowTenantDeletion, // Stays until user removes or resource deleted
-	}
+	TenantAnnotationsToKeep = []string{}
 )

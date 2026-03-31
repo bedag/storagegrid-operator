@@ -83,7 +83,7 @@ type S3BucketStatus struct {
 	Region string `json:"region,omitempty"`
 
 	// The bucketname is generated automatically to prevent duplication.
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="bucketName is immutable"
+	// Managed by the controller — set only after successful backend creation.
 	BucketName string `json:"bucketName,omitempty"`
 
 	// BucketUsage is the total uf bytes and objects in this bucket.

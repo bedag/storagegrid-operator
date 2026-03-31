@@ -503,7 +503,8 @@ func (r *S3TenantAccountReconciler) reconcileDeletedTenant(ctx context.Context, 
 		// Clear bound condition since tenant is being unbound
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeBound, metav1.ConditionFalse, "S3TenantNotBound", "S3Tenant was deleted, account is now unbound")
 		rctx.Account.Status.S3TenantRef = nil
-		rctx.Account.Spec.S3TenantRef = nil // also set the spec to nil to avoid confusion
+		rctx.Account.Spec.S3TenantRef = nil    // also set the spec to nil to avoid confusion
+		rctx.S3Tenant = &s3v1alpha1.S3Tenant{} // clear in-memory tenant so reconcileSecretRefs resolves the correct namespace
 		rctx.ObjectUpdated = true
 	case s3v1alpha1.TenantDeletionPolicyRetainThenDelete:
 		// retain then delete policy is set, we need to set the S3TenantRef to nil and delete the account.
@@ -513,7 +514,8 @@ func (r *S3TenantAccountReconciler) reconcileDeletedTenant(ctx context.Context, 
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeBound, metav1.ConditionFalse, "S3TenantNotBound", "S3Tenant was deleted, account is now unbound")
 		rctx.Account.Status.S3TenantRef = nil
 		retentionDuration := rctx.Account.Status.TenantDeletionPolicy.RetentionDuration
-		rctx.Account.Spec.S3TenantRef = nil // also set the spec to nil to avoid confusion
+		rctx.Account.Spec.S3TenantRef = nil    // also set the spec to nil to avoid confusion
+		rctx.S3Tenant = &s3v1alpha1.S3Tenant{} // clear in-memory tenant so reconcileSecretRefs resolves the correct namespace
 		rctx.ObjectUpdated = true
 
 		// calculate the deletion timestamp based on the retention duration.

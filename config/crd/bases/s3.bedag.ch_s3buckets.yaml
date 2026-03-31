@@ -162,12 +162,10 @@ spec:
                 description: S3 Access Key ID for the bucket admin.
                 type: string
               bucketName:
-                description: The bucketname is generated automatically to prevent
-                  duplication.
+                description: |-
+                  The bucketname is generated automatically to prevent duplication.
+                  Managed by the controller — set only after successful backend creation.
                 type: string
-                x-kubernetes-validations:
-                - message: bucketName is immutable
-                  rule: self == oldSelf
               bucketUsage:
                 description: BucketUsage is the total uf bytes and objects in this
                   bucket.

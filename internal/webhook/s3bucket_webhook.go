@@ -22,6 +22,8 @@ import (
 	"strings"
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -117,11 +119,13 @@ func (r *S3BucketValidator) ValidateUpdate(ctx context.Context, oldObj, newObj r
 		return nil, fmt.Errorf("namespace %s is not allowed to create buckets in tenant %s", s3bucketNew.Namespace, s3Teant.Name)
 	}
 
-	// although the controller will just ignore updates to spec.bucketName anyway, we want to add some verbosity for the users.
-	// Allowing changes only if the bucket is still in pending phase (i.e. not yet created).
-	if s3bucketOld.Status.Phase != s3v1alpha1.BucketPhasePending {
+	// spec.bucketName is immutable once the bucket has been successfully created on the backend.
+	// Gate on ConditionTypeCreated=True rather than phase, so the user can still fix the name
+	// when creation failed (e.g. BucketNameConflict) while phase is Pending.
+	createdCondition := meta.FindStatusCondition(s3bucketOld.Status.Conditions, s3v1alpha1.ConditionTypeCreated)
+	if createdCondition != nil && createdCondition.Status == metav1.ConditionTrue {
 		if s3bucketNew.Spec.BucketName != nil && *s3bucketNew.Spec.BucketName != s3bucketOld.Status.BucketName {
-			return nil, fmt.Errorf("spec.bucketName can only be set during creation")
+			return nil, fmt.Errorf("spec.bucketName cannot be changed after the bucket has been created")
 		}
 	}
 

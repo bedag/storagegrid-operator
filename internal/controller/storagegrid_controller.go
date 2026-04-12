@@ -89,6 +89,7 @@ func (r *StorageGridReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		ObjectUpdated: false,
 	}
 
+	statusBase := sg.DeepCopy()
 	err := r.doReconcile(ctx, rctx)
 
 	// use conditions to derive the readiness state.
@@ -116,7 +117,7 @@ func (r *StorageGridReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Due to condition tracking status always needs to be updated.
-	if updateErr := r.Status().Update(ctx, rctx.SG); updateErr != nil {
+	if updateErr := r.Status().Patch(ctx, rctx.SG, client.MergeFrom(statusBase)); updateErr != nil {
 		log.Error(updateErr, "Failed to update status, requeuing")
 		if err == nil {
 			// no error occurred during reconciliation, but status update failed.
@@ -256,12 +257,26 @@ func (r *StorageGridReconciler) deriveReadiness(ctx context.Context, sg *s3v1alp
 }
 
 func (r *StorageGridReconciler) finalize(ctx context.Context, sg *s3v1alpha1.StorageGrid) error {
-	// Add your finalization logic here.
-	// For example, you might want to delete external resources associated with the StorageGrid.
 	log := log.FromContext(ctx)
 	log.Info("Finalizing storageGrid", "name", sg.Name)
 
-	// currently no finalization logic is needed, but we keep this for future use.
+	// Block finalization while S3TenantAccounts still reference this StorageGrid
+	accountList := &s3v1alpha1.S3TenantAccountList{}
+	if err := r.List(ctx, accountList); err != nil {
+		return fmt.Errorf("failed to list S3TenantAccounts: %w", err)
+	}
+
+	var boundAccounts []string
+	for _, account := range accountList.Items {
+		if account.Spec.StorageGridRef.Name == sg.Name {
+			boundAccounts = append(boundAccounts, account.Name)
+		}
+	}
+
+	if len(boundAccounts) > 0 {
+		return fmt.Errorf("cannot finalize StorageGrid %s: %d S3TenantAccount(s) still reference it: %v",
+			sg.Name, len(boundAccounts), boundAccounts)
+	}
 
 	return nil
 }

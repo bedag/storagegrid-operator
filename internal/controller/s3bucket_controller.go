@@ -101,6 +101,7 @@ func (r *S3BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	log.V(1).Info("Successfully retrieved S3Bucket", "name", rctx.Bucket.Name)
 
 	// Perform the main reconciliation.
+	statusBase := rctx.Bucket.DeepCopy()
 	err := r.doReconcile(ctx, rctx)
 
 	// Use conditions to derive the readiness state.
@@ -128,7 +129,7 @@ func (r *S3BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// update the status of the account if it was updated during reconciliation.
-	if updateErr := r.Status().Update(ctx, rctx.Bucket); updateErr != nil {
+	if updateErr := r.Status().Patch(ctx, rctx.Bucket, client.MergeFrom(statusBase)); updateErr != nil {
 		log.Error(updateErr, "Failed to update status, requeuing")
 		if err == nil {
 			// no error occurred during reconciliation, but status update failed.

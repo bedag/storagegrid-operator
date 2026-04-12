@@ -1,0 +1,31 @@
+# S3Tenant invalid class: webhook rejects creation with non-existent TenantClass
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3tenant-invalid-class
+spec:
+  steps:
+    - name: create-with-bad-class
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: invalid-class-test
+              spec:
+                s3TenantClassName: does-not-exist
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+            expect:
+              - check:
+                  ($error != null): true
+    - name: assert-not-created
+      try:
+        - error:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: invalid-class-test

@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/configuration-chainsaw-v1alpha2.json
+apiVersion: chainsaw.kyverno.io/v1alpha2
+kind: Configuration
+metadata:
+  name: existing
+spec:
+  timeouts:
+    apply: 30s
+    assert: 2m
+    delete: 2m
+    cleanup: 5m
+  namespace:
+    template:
+      metadata:
+        name: (join('-', [$values.namespacePrefix, $namespace]))
+  discovery:
+    fullName: true
+  execution:
+    failFast: true

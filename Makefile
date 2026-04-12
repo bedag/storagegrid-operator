@@ -104,6 +104,48 @@ test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expect
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
 	@$(KIND) delete cluster --name $(KIND_CLUSTER)
 
+CHAINSAW_VALUES ?= test/e2e/chainsaw/values.yaml
+CHAINSAW_VALUES_EXISTING ?= test/e2e/chainsaw/values-existing.yaml
+CHAINSAW_CONFIG ?= test/e2e/chainsaw/.chainsaw.yaml
+CHAINSAW_CONFIG_EXISTING ?= test/e2e/chainsaw/.chainsaw-existing.yaml
+CHAINSAW_ARGS ?=
+
+.PHONY: setup-git-filters
+setup-git-filters: ## Configure git clean/smudge filters for chainsaw values sanitization.
+	@git config filter.chainsaw-values.clean hack/sanitize-chainsaw-values.sh
+	@git config filter.chainsaw-values.smudge cat
+	@echo "Git filter 'chainsaw-values' configured. Staged values files will be sanitized automatically."
+
+# check-chainsaw-values checks a values file for REPLACE_ME placeholders and
+# launches the interactive setup script if any are found.
+# Usage: $(call check-chainsaw-values,<values-file>)
+define check-chainsaw-values
+@if command -v yq &>/dev/null && yq eval '.. | select(. == "REPLACE_ME") | path | join(".")' $(1) 2>/dev/null | grep -q .; then \
+	echo "Values file $(1) contains REPLACE_ME placeholders."; \
+	hack/setup-chainsaw-values.sh $(1); \
+fi
+endef
+
+.PHONY: test-chainsaw
+test-chainsaw: chainsaw ## Run Chainsaw e2e tests with fresh infrastructure.
+	$(call check-chainsaw-values,$(CHAINSAW_VALUES))
+	$(CHAINSAW) test test/e2e/chainsaw/ --config $(CHAINSAW_CONFIG) --values $(CHAINSAW_VALUES) $(CHAINSAW_ARGS)
+
+.PHONY: test-chainsaw-existing
+test-chainsaw-existing: chainsaw ## Run Chainsaw e2e tests against pre-existing StorageGrid.
+	$(call check-chainsaw-values,$(CHAINSAW_VALUES_EXISTING))
+	$(CHAINSAW) test test/e2e/chainsaw/ --config $(CHAINSAW_CONFIG_EXISTING) --values $(CHAINSAW_VALUES_EXISTING) $(CHAINSAW_ARGS)
+
+.PHONY: e2e-s3tnt
+e2e-s3tnt: chainsaw ## Run S3Tenant e2e tests.
+	$(call check-chainsaw-values,$(CHAINSAW_VALUES))
+	$(CHAINSAW) test test/e2e/chainsaw/s3tenant/ --config $(CHAINSAW_CONFIG) --values $(CHAINSAW_VALUES) $(CHAINSAW_ARGS)
+
+.PHONY: e2e-s3tnt-existing
+e2e-s3tnt-existing: chainsaw ## Run S3Tenant e2e tests against pre-existing StorageGrid.
+	$(call check-chainsaw-values,$(CHAINSAW_VALUES_EXISTING))
+	$(CHAINSAW) test test/e2e/chainsaw/s3tenant/ --config $(CHAINSAW_CONFIG_EXISTING) --values $(CHAINSAW_VALUES_EXISTING) $(CHAINSAW_ARGS)
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	$(GOLANGCI_LINT) run
@@ -211,6 +253,7 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+CHAINSAW ?= $(LOCALBIN)/chainsaw
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.7.1
@@ -220,6 +263,7 @@ ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
 GOLANGCI_LINT_VERSION ?= v2.11.3
+CHAINSAW_VERSION ?= v0.2.14
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -248,6 +292,19 @@ $(ENVTEST): $(LOCALBIN)
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+
+.PHONY: chainsaw
+chainsaw: $(CHAINSAW) ## Download chainsaw locally if necessary.
+$(CHAINSAW): $(LOCALBIN)
+	@[ -f "$(CHAINSAW)-$(CHAINSAW_VERSION)" ] || { \
+	set -e; \
+	OS=$$(uname -s | tr '[:upper:]' '[:lower:]') ;\
+	ARCH=$$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/') ;\
+	echo "Downloading chainsaw $(CHAINSAW_VERSION) for $${OS}/$${ARCH}" ;\
+	curl -fsSL "https://github.com/kyverno/chainsaw/releases/download/$(CHAINSAW_VERSION)/chainsaw_$${OS}_$${ARCH}.tar.gz" | tar xz -C $(LOCALBIN) chainsaw ;\
+	mv $(LOCALBIN)/chainsaw $(CHAINSAW)-$(CHAINSAW_VERSION) ;\
+	}
+	@ln -sf $(CHAINSAW)-$(CHAINSAW_VERSION) $(CHAINSAW)
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary

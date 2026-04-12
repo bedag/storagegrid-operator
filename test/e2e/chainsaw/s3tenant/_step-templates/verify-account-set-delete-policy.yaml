@@ -1,0 +1,49 @@
+# StepTemplate: Verify the auto-created S3TenantAccount is Bound+Ready
+# and set its tenantDeletionPolicy to Delete for test cleanup.
+#
+# Bindings:
+#   tenantName (required) - Name of the S3Tenant to look up (inherited from test bindings)
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: StepTemplate
+metadata:
+  name: verify-account-set-delete-policy
+spec:
+  try:
+    - assert:
+        resource:
+          apiVersion: s3.bedag.ch/v1alpha1
+          kind: S3Tenant
+          metadata:
+            name: ($tenantName)
+          status:
+            s3TenantAccountRef:
+              (name != ''): true
+    - script:
+        env:
+          - name: TENANT_NAME
+            value: ($tenantName)
+        content: |
+          kubectl get s3tenant "$TENANT_NAME" -n $NAMESPACE -o jsonpath='{.status.s3TenantAccountRef.name}'
+        outputs:
+          - name: accountName
+            value: ($stdout)
+    - assert:
+        timeout: 2m
+        resource:
+          apiVersion: s3.bedag.ch/v1alpha1
+          kind: S3TenantAccount
+          metadata:
+            name: ($accountName)
+          status:
+            phase: Bound
+            (conditions[?type == 'Ready']):
+              - status: "True"
+    - patch:
+        resource:
+          apiVersion: s3.bedag.ch/v1alpha1
+          kind: S3TenantAccount
+          metadata:
+            name: ($accountName)
+          spec:
+            tenantDeletionPolicy:
+              policy: Delete

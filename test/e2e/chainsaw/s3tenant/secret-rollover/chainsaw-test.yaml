@@ -1,0 +1,171 @@
+# S3Tenant secret rollover: annotations trigger credential rotation
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3tenant-secret-rollover
+spec:
+  bindings:
+    - name: tenantName
+      value: rollover-test
+  steps:
+    # ── Step 1: Create tenant and wait for Bound ────────────────────────
+    - name: create
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 2: Verify account and set deletion policy ──────────────────
+    - name: verify-account
+      use:
+        template: ../_step-templates/verify-account-set-delete-policy.yaml
+
+    # ── Step 3: Capture initial secrets ──────────────────────────────────
+    - name: capture-secrets
+      try:
+        - script:
+            timeout: 30s
+            env:
+              - name: TENANT_NAME
+                value: ($tenantName)
+            content: |
+              kubectl get secret $TENANT_NAME-admin-credentials -n $NAMESPACE -o jsonpath='{.data.password}'
+            outputs:
+              - name: originalPassword
+                value: ($stdout)
+        - script:
+            timeout: 30s
+            env:
+              - name: TENANT_NAME
+                value: ($tenantName)
+            content: |
+              kubectl get secret $TENANT_NAME-s3-admin-keypair -n $NAMESPACE -o jsonpath='{.data.accessKey}'
+            outputs:
+              - name: originalAccessKey
+                value: ($stdout)
+        - script:
+            timeout: 30s
+            env:
+              - name: TENANT_NAME
+                value: ($tenantName)
+            content: |
+              kubectl get secret $TENANT_NAME-s3-admin-keypair -n $NAMESPACE -o jsonpath='{.data.secretKey}'
+            outputs:
+              - name: originalSecretKey
+                value: ($stdout)
+
+    # ── Step 3: Trigger admin password reset ────────────────────────────
+    - name: reset-admin-password
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+                annotations:
+                  tenant.s3.bedag.ch/reset-admin-password: "true"
+        # Assert annotation was consumed by the controller.
+        - error:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+                annotations:
+                  tenant.s3.bedag.ch/reset-admin-password: "true"
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+        # Verify the password changed.
+        - script:
+            timeout: 30s
+            env:
+              - name: TENANT_NAME
+                value: ($tenantName)
+            content: |
+              NEW_PASSWORD=$(kubectl get secret $TENANT_NAME-admin-credentials -n $NAMESPACE -o jsonpath='{.data.password}')
+              if [ "$NEW_PASSWORD" = "$originalPassword" ]; then
+                echo "FAIL: password did not change"
+                exit 1
+              fi
+              echo "Password rotated successfully"
+
+    # ── Step 4: Trigger S3 keypair rotation ─────────────────────────────
+    - name: recreate-s3-keys
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+                annotations:
+                  tenant.s3.bedag.ch/recreate-s3-access-keys: "true"
+        # Assert annotation was consumed by the controller.
+        - error:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+                annotations:
+                  tenant.s3.bedag.ch/recreate-s3-access-keys: "true"
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+        # Verify both keys changed.
+        - script:
+            timeout: 30s
+            env:
+              - name: TENANT_NAME
+                value: ($tenantName)
+            content: |
+              NEW_AK=$(kubectl get secret $TENANT_NAME-s3-admin-keypair -n $NAMESPACE -o jsonpath='{.data.accessKey}')
+              NEW_SK=$(kubectl get secret $TENANT_NAME-s3-admin-keypair -n $NAMESPACE -o jsonpath='{.data.secretKey}')
+              if [ "$NEW_AK" = "$originalAccessKey" ]; then
+                echo "FAIL: accessKey did not change"
+                exit 1
+              fi
+              if [ "$NEW_SK" = "$originalSecretKey" ]; then
+                echo "FAIL: secretKey did not change"
+                exit 1
+              fi
+              echo "S3 keypair rotated successfully"

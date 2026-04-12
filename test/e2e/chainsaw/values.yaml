@@ -1,0 +1,16 @@
+# Values for chainsaw e2e tests.
+# These reference pre-existing cluster resources.
+# Override per-environment as needed.
+
+# When set, test namespaces are created as "<prefix>-<generated-name>".
+# Leave empty for no prefix.
+namespacePrefix: "REPLACE_ME"
+storageGrid:
+  # Name of the StorageGrid CR in the cluster.
+  name: REPLACE_ME
+tenantClass:
+  # Name of the S3TenantClass CR in the cluster.
+  name: REPLACE_ME
+# Optional: a second S3TenantClass for class-change tests.
+alternateTenantClass:
+  name: "REPLACE_ME"

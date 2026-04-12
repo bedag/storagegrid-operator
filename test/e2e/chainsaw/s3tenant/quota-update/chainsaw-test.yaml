@@ -1,0 +1,90 @@
+# S3Tenant quota update: increase and shrink storage quota
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3tenant-quota-update
+spec:
+  bindings:
+    - name: tenantName
+      value: quota-test
+  steps:
+    # ── Step 1: Create tenant ───────────────────────────────────────────
+    - name: create
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 2: Verify account and set deletion policy ──────────────────
+    - name: verify-account
+      use:
+        template: ../_step-templates/verify-account-set-delete-policy.yaml
+
+    # ── Step 3: Increase quota ──────────────────────────────────────────
+    - name: increase-quota
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                storageQuota: 50Gi
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                quota:
+                  limit: 50Gi
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 4: Shrink quota ────────────────────────────────────────────
+    - name: shrink-quota
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                storageQuota: 5Gi
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                quota:
+                  limit: 5Gi
+                (conditions[?type == 'Ready']):
+                  - status: "True"

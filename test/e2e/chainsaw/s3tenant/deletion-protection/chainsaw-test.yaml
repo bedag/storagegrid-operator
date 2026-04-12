@@ -1,0 +1,78 @@
+# S3Tenant deletion protection: annotated tenant cannot be deleted
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3tenant-deletion-protection
+spec:
+  bindings:
+    - name: tenantName
+      value: protect-test
+  steps:
+    # ── Step 1: Create tenant with deletion-protection annotation ───────
+    - name: create-protected
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+                annotations:
+                  s3.bedag.ch/deletion-protection: "true"
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 2: Verify account is ready and set deletion policy ─────────
+    - name: verify-account-and-set-deletion-policy
+      use:
+        template: ../_step-templates/verify-account-set-delete-policy.yaml
+
+    # ── Step 3: Attempt delete — should be rejected by webhook ──────────
+    - name: delete-rejected
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              name: ($tenantName)
+            expect:
+              - check:
+                  ($error != null): true
+
+    # ── Step 4: Remove annotation and delete ────────────────────────────
+    - name: remove-protection-and-delete
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+                annotations:
+                  s3.bedag.ch/deletion-protection: "false"
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              name: ($tenantName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)

@@ -93,6 +93,7 @@ func (r *S3TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		DoRequeue:     false,
 	}
 
+	statusBase := s3Tenant.DeepCopy()
 	err := r.doReconcile(ctx, rctx)
 
 	// use conditions to derive the readiness state.
@@ -120,7 +121,7 @@ func (r *S3TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Due to condition tracking status always needs to be updated.
-	if updateErr := r.Status().Update(ctx, rctx.S3Tenant); updateErr != nil {
+	if updateErr := r.Status().Patch(ctx, rctx.S3Tenant, client.MergeFrom(statusBase)); updateErr != nil {
 		log.Error(updateErr, "Failed to update status, requeuing")
 		if err == nil {
 			// no error occurred during reconciliation, but status update failed.
@@ -511,10 +512,6 @@ func (r *S3TenantReconciler) generateTenantAccount(s3Tenant *s3v1alpha1.S3Tenant
 	return &s3v1alpha1.S3TenantAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: accountName,
-			// make sure annotation is added to allow class change.
-			Annotations: map[string]string{
-				s3v1alpha1.AnnotationAllowTenantClassNameChange: "true",
-			},
 		},
 		Spec: s3v1alpha1.S3TenantAccountSpec{
 			S3TenantRef: &corev1.ObjectReference{

@@ -1,0 +1,4 @@
+# Chainsaw values files: sanitize on commit via clean filter.
+# Run `make setup-git-filters` to activate.
+test/e2e/chainsaw/values.yaml filter=chainsaw-values
+test/e2e/chainsaw/values-existing.yaml filter=chainsaw-values

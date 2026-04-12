@@ -1,0 +1,10 @@
+# Values for running tests against a pre-existing StorageGrid instance.
+# Namespaces are prefixed to satisfy cluster naming requirements.
+
+namespacePrefix: REPLACE_ME
+storageGrid:
+  name: REPLACE_ME
+tenantClass:
+  name: REPLACE_ME
+alternateTenantClass:
+  name: "REPLACE_ME"

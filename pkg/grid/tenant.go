@@ -73,6 +73,10 @@ func CreateTenant(ctx context.Context, name string, description string, quota in
 		return "", "", err
 	}
 
+	if createdTenant.Id == "" {
+		return "", "", fmt.Errorf("backend returned empty tenant ID after creation")
+	}
+
 	log.V(1).Info(fmt.Sprintf("Tenant created: id=%s", createdTenant.Id))
 	return createdTenant.Id, pw, nil
 }

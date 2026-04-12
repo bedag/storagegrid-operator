@@ -95,6 +95,7 @@ func (r *S3TenantClassReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		ObjectUpdated: false,
 	}
 
+	statusBase := tenantClass.DeepCopy()
 	err = r.doReconcile(ctx, rctx)
 
 	// use conditions to derive the readiness state.
@@ -121,7 +122,7 @@ func (r *S3TenantClassReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		tenantClass.Status = statusCopy.Status // restore the status from the copy
 	}
 
-	if updateErr := r.Status().Update(ctx, rctx.S3TenantClass); updateErr != nil {
+	if updateErr := r.Status().Patch(ctx, rctx.S3TenantClass, client.MergeFrom(statusBase)); updateErr != nil {
 		log.Error(updateErr, "Failed to update status, requeuing")
 		if err == nil {
 			// no error occurred during reconciliation, but status update failed.

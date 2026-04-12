@@ -49,7 +49,7 @@ func (r *StorageGridValidator) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 // NOTE: The 'path' attribute must follow a specific pattern and should not be modified directly here.
 // Modifying the path for an invalid path can cause API server errors; failing to locate the webhook.
-// +kubebuilder:webhook:path=/validate-s3-bedag-ch-v1alpha1-storagegrid,mutating=false,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=storagegrids,verbs=create;update,versions=v1alpha1,name=vstoragegrid.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-s3-bedag-ch-v1alpha1-storagegrid,mutating=false,failurePolicy=fail,sideEffects=None,groups=s3.bedag.ch,resources=storagegrids,verbs=create;update;delete,versions=v1alpha1,name=vstoragegrid.kb.io,admissionReviewVersions=v1
 
 var _ webhook.CustomValidator = &StorageGridValidator{}
 
@@ -91,7 +91,7 @@ func (r *StorageGridValidator) ValidateUpdate(ctx context.Context, oldObj, newOb
 	return nil, nil
 }
 
-// ValidateDelete implements webhook.Validator so a webhook will be registered for the type.
+// ValidateDelete blocks deletion while S3TenantAccounts still reference this StorageGrid.
 func (r *StorageGridValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	storagegrid, ok := obj.(*s3v1alpha1.StorageGrid)
 	if !ok {
@@ -99,6 +99,25 @@ func (r *StorageGridValidator) ValidateDelete(ctx context.Context, obj runtime.O
 	}
 
 	storagegridlog.Info("validate delete", "name", storagegrid.Name)
+
+	// List all S3TenantAccounts that reference this StorageGrid
+	accountList := &s3v1alpha1.S3TenantAccountList{}
+	if err := r.k8sClient.List(ctx, accountList); err != nil {
+		storagegridlog.Error(err, "failed to list S3TenantAccounts")
+		return nil, fmt.Errorf("failed to list S3TenantAccounts: %w", err)
+	}
+
+	var boundAccounts []string
+	for _, account := range accountList.Items {
+		if account.Spec.StorageGridRef.Name == storagegrid.Name {
+			boundAccounts = append(boundAccounts, account.Name)
+		}
+	}
+
+	if len(boundAccounts) > 0 {
+		return nil, fmt.Errorf("deletion of StorageGrid %s is blocked: %d S3TenantAccount(s) still reference it: %v",
+			storagegrid.Name, len(boundAccounts), boundAccounts)
+	}
 
 	return nil, nil
 }

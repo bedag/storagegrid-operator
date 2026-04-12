@@ -97,6 +97,10 @@ type S3TenantAccountStatus struct {
 	// +optional
 	S3TenantRef *corev1.ObjectReference `json:"s3TenantRef,omitempty"`
 
+	// BoundTenant is the namespace/name of the S3Tenant bound to this account (display field).
+	// +optional
+	BoundTenant string `json:"boundTenant,omitempty"`
+
 	// ObservedTenantBackendName is the actual name in the backend.
 	// +optional
 	// +kubebuilder:default=""
@@ -145,7 +149,7 @@ type S3TenantAccountStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="S3Tenant",type="string",JSONPath=".spec.s3TenantRef.name",description="The s3 Tenant this account is bound to"
+// +kubebuilder:printcolumn:name="S3Tenant",type="string",JSONPath=".status.boundTenant",description="The s3 Tenant this account is bound to"
 // +kubebuilder:printcolumn:name="TenantBackendName",type="string",JSONPath=".status.observedTenantBackendName",description="The name of the tenant in the backend"
 // +kubebuilder:printcolumn:name="StorageGrid",type="string",JSONPath=".spec.storageGridRef.name",description="The StorageGrid this tenant account belongs to"
 // +kubebuilder:printcolumn:name="Capacity",type="string",JSONPath=".status.quota.limit",description="Configured capacity of the tenant"

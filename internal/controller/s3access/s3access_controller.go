@@ -95,6 +95,7 @@ func (r *S3AccessReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	log.V(1).Info("Successfully fetched S3Access", "name", rctx.S3Access.Name)
 
+	statusBase := rctx.S3Access.DeepCopy()
 	err := r.doReconcile(ctx, rctx)
 
 	// use conditions to derive the readiness state.
@@ -122,7 +123,7 @@ func (r *S3AccessReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// update the status of the s3access if it was updated during reconciliation.
-	if updateErr := r.Status().Update(ctx, rctx.S3Access); updateErr != nil {
+	if updateErr := r.Status().Patch(ctx, rctx.S3Access, client.MergeFrom(statusBase)); updateErr != nil {
 		log.Error(updateErr, "Failed to update status, requeuing")
 		if err == nil {
 			// no error occurred during reconciliation, but status update failed.

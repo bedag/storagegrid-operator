@@ -1,0 +1,123 @@
+# S3Tenant class change: rejected without annotation, allowed with annotation
+#
+# Requires $values.alternateTenantClass.name to be set to a valid second S3TenantClass.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3tenant-class-change
+spec:
+  bindings:
+    - name: tenantName
+      value: class-change-test
+  steps:
+    # ── Step 1: Create tenant ───────────────────────────────────────────
+    - name: create
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 2: Verify account and set deletion policy ──────────────────
+    - name: verify-account
+      use:
+        template: ../_step-templates/verify-account-set-delete-policy.yaml
+
+    # ── Step 3: Change class without annotation — should stay on old class
+    - name: change-class-without-annotation
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.alternateTenantClass.name)
+        # The account controller rejects the change — S3Tenant reflects this via AccountReady going False.
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                (conditions[?type == 'AccountReady']):
+                  - status: "False"
+
+    # ── Step 4: Revert class and re-verify Ready ────────────────────────
+    - name: revert-class
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 5: Change class with annotation — should succeed ───────────
+    - name: change-class-with-annotation
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+                annotations:
+                  tenant.s3.bedag.ch/allow-tenant-class-name-change: "true"
+              spec:
+                s3TenantClassName: ($values.alternateTenantClass.name)
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+        # Annotation should be consumed after successful change.
+        - error:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+                annotations:
+                  tenant.s3.bedag.ch/allow-tenant-class-name-change: "true"

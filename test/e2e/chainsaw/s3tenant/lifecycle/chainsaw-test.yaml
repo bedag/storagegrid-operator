@@ -1,0 +1,125 @@
+# S3Tenant full lifecycle: create → bound → update → delete
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3tenant-lifecycle
+spec:
+  bindings:
+    - name: tenantName
+      value: lifecycle-test
+  steps:
+    # ── Step 1: Create tenant and wait for Bound ────────────────────────
+    - name: create
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+                defaultBucketRegion: us-east-1
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 2: Verify S3TenantAccount was auto-created and is ready ────
+    - name: verify-account
+      use:
+        template: ../_step-templates/verify-account-set-delete-policy.yaml
+
+    # ── Step 3: Verify admin credential secrets were created ────────────
+    - name: verify-secrets
+      try:
+        - script:
+            timeout: 30s
+            env:
+              - name: TENANT_NAME
+                value: ($tenantName)
+            content: |
+              kubectl get secret $TENANT_NAME-admin-credentials -n $NAMESPACE -o jsonpath='{.data}' | grep -q username
+              kubectl get secret $TENANT_NAME-admin-credentials -n $NAMESPACE -o jsonpath='{.data}' | grep -q password
+            check:
+              ($error == null): true
+        - script:
+            timeout: 30s
+            env:
+              - name: TENANT_NAME
+                value: ($tenantName)
+            content: |
+              kubectl get secret $TENANT_NAME-s3-admin-keypair -n $NAMESPACE -o jsonpath='{.data}' | grep -q accessKey
+              kubectl get secret $TENANT_NAME-s3-admin-keypair -n $NAMESPACE -o jsonpath='{.data}' | grep -q secretKey
+            check:
+              ($error == null): true
+
+    # ── Step 4: Update quota and description ────────────────────────────
+    - name: update
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                storageQuota: 20Gi
+                description: updated-description
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                quota:
+                  limit: 20Gi
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 5: Delete and confirm cleanup ──────────────────────────────
+    - name: delete
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              name: ($tenantName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+
+    # ── Step 6: Verify secrets are cleaned up ───────────────────────────
+    - name: verify-secrets-deleted
+      try:
+        - error:
+            timeout: 1m
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: (join('-', [$tenantName, 'admin-credentials']))
+        - error:
+            timeout: 1m
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: (join('-', [$tenantName, 's3-admin-keypair']))

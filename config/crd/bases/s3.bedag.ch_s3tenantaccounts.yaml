@@ -19,7 +19,7 @@ spec:
   versions:
   - additionalPrinterColumns:
     - description: The s3 Tenant this account is bound to
-      jsonPath: .spec.s3TenantRef.name
+      jsonPath: .status.boundTenant
       name: S3Tenant
       type: string
     - description: The name of the tenant in the backend
@@ -452,6 +452,10 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              boundTenant:
+                description: BoundTenant is the namespace/name of the S3Tenant bound
+                  to this account (display field).
+                type: string
               conditions:
                 description: |-
                   Track s3Tenant conditions.

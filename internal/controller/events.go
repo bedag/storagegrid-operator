@@ -133,7 +133,6 @@ const (
 	EventBucketCredentialsRotated         = "CredentialsRotated"
 	EventBucketCredentialsRotationFailed  = "CredentialsRotationFailed"
 	EventBucketCredentialsSecretMissing   = "CredentialsSecretMissing"
-	EventBucketCredentialsSecretMismatch  = "CredentialsSecretMismatch"
 
 	// Bucket Policy Events.
 	EventBucketPolicyApplied      = "PolicyApplied"

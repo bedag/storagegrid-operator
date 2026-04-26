@@ -769,24 +769,13 @@ func (r *S3BucketReconciler) reconcileBucketS3Credentials(ctx context.Context, r
 		return r.createS3AdminKeypair(ctx, rctx, false)
 	}
 
-	// Validate the secret matches Status.AccessKeyId. If the secret is
-	// missing or contains a different access key, recover by recreating
+	// If the secret is missing for an existing bucket, recover by recreating
 	// credentials on the grid and rewriting the secret.
-	secretAccessKeyId, _, err := kube.FetchKeyPairFromSecret(ctx, r.Client, rctx.Bucket.Namespace, rctx.Bucket.Status.S3AdminKeysSecretRef.Name)
-	if err != nil {
+	if _, _, err := kube.FetchKeyPairFromSecret(ctx, r.Client, rctx.Bucket.Namespace, rctx.Bucket.Status.S3AdminKeysSecretRef.Name); err != nil {
 		log.Info("S3 credentials secret missing for existing bucket, recreating",
 			"secret", rctx.Bucket.Status.S3AdminKeysSecretRef.Name, "error", err.Error())
 		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketCredentialsSecretMissing,
 			fmt.Sprintf("Secret %s missing for bucket %s, recreating credentials",
-				rctx.Bucket.Status.S3AdminKeysSecretRef.Name, rctx.Bucket.Status.BucketName))
-		return r.createS3AdminKeypair(ctx, rctx, true)
-	}
-
-	if secretAccessKeyId != rctx.Bucket.Status.AccessKeyId {
-		log.Info("S3 credentials secret accessKey does not match status.accessKeyId, secret is stale, recreating",
-			"secret", rctx.Bucket.Status.S3AdminKeysSecretRef.Name)
-		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketCredentialsSecretMismatch,
-			fmt.Sprintf("Secret %s contains stale credentials (accessKeyId mismatch with status.accessKeyId for bucket %s). Recreating to restore consistency.",
 				rctx.Bucket.Status.S3AdminKeysSecretRef.Name, rctx.Bucket.Status.BucketName))
 		return r.createS3AdminKeypair(ctx, rctx, true)
 	}

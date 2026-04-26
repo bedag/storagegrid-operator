@@ -749,32 +749,43 @@ func (r *S3BucketReconciler) reconcileBucketAdmin(ctx context.Context, rctx *buc
 func (r *S3BucketReconciler) reconcileBucketS3Credentials(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileBucketS3Credentials")
 
-	_, _, err := kube.FetchKeyPairFromSecret(ctx, r.Client, rctx.Bucket.Namespace, rctx.Bucket.Status.S3AdminKeysSecretRef.Name)
-	if err != nil {
-		log.Error(err, "Failed to fetch s3 keypair from secret, creating new s3 admin keypair")
-		err := r.createS3AdminKeypair(ctx, rctx, false)
-		if err != nil {
-			log.Error(err, "Failed to create S3 admin keypair")
-			return err
+	// Annotation-driven recreation takes priority over all other paths.
+	if rctx.Bucket.Annotations != nil && rctx.Bucket.Annotations[s3v1alpha1.AnnotationRecreateBucketKeypairs] == "true" {
+		if err := r.createS3AdminKeypair(ctx, rctx, true); err != nil {
+			return fmt.Errorf("failed to recreate S3 admin keypair: %w", err)
 		}
-
+		delete(rctx.Bucket.Annotations, s3v1alpha1.AnnotationRecreateBucketKeypairs)
+		rctx.ObjectUpdated = true
 		return nil
 	}
 
-	// Check if credential recreation annotation is present.
-	// check if annotations exist and exit if unset.
-	if rctx.Bucket.Annotations != nil {
-		// if annotation is not set to "true", we start recreation.
-		if rctx.Bucket.Annotations[s3v1alpha1.AnnotationRecreateBucketKeypairs] == "true" {
-			err := r.createS3AdminKeypair(ctx, rctx, true)
-			if err != nil {
-				return fmt.Errorf("failed to recreate S3 admin keypair: %w", err)
-			}
-			// Remove annotation.
-			delete(rctx.Bucket.Annotations, s3v1alpha1.AnnotationRecreateBucketKeypairs)
-			rctx.ObjectUpdated = true
-			return nil
-		}
+	// Fresh bucket (no AccessKeyId tracked in status): always create a new
+	// keypair and overwrite whatever secret may exist.
+	if rctx.Bucket.Status.AccessKeyId == "" {
+		log.V(1).Info("Fresh bucket, creating S3 admin keypair (overwrites any stale secret pending GC)")
+		return r.createS3AdminKeypair(ctx, rctx, false)
+	}
+
+	// Validate the secret matches Status.AccessKeyId. If the secret is
+	// missing or contains a different access key, recover by recreating
+	// credentials on the grid and rewriting the secret.
+	secretAccessKeyId, _, err := kube.FetchKeyPairFromSecret(ctx, r.Client, rctx.Bucket.Namespace, rctx.Bucket.Status.S3AdminKeysSecretRef.Name)
+	if err != nil {
+		log.Info("S3 credentials secret missing for existing bucket, recreating",
+			"secret", rctx.Bucket.Status.S3AdminKeysSecretRef.Name, "error", err.Error())
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketCredentialsSecretMissing,
+			fmt.Sprintf("Secret %s missing for bucket %s, recreating credentials",
+				rctx.Bucket.Status.S3AdminKeysSecretRef.Name, rctx.Bucket.Status.BucketName))
+		return r.createS3AdminKeypair(ctx, rctx, true)
+	}
+
+	if secretAccessKeyId != rctx.Bucket.Status.AccessKeyId {
+		log.Info("S3 credentials secret accessKey does not match status.accessKeyId, secret is stale, recreating",
+			"secret", rctx.Bucket.Status.S3AdminKeysSecretRef.Name)
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketCredentialsSecretMismatch,
+			fmt.Sprintf("Secret %s contains stale credentials (accessKeyId mismatch with status.accessKeyId for bucket %s). Recreating to restore consistency.",
+				rctx.Bucket.Status.S3AdminKeysSecretRef.Name, rctx.Bucket.Status.BucketName))
+		return r.createS3AdminKeypair(ctx, rctx, true)
 	}
 
 	return nil

@@ -129,9 +129,10 @@ const (
 	EventBucketTenantReady    = "TenantReady"
 
 	// Bucket Credentials Events.
-	EventBucketCredentialsCreated        = "CredentialsCreated"
-	EventBucketCredentialsRotated        = "CredentialsRotated"
-	EventBucketCredentialsRotationFailed = "CredentialsRotationFailed"
+	EventBucketCredentialsCreated         = "CredentialsCreated"
+	EventBucketCredentialsRotated         = "CredentialsRotated"
+	EventBucketCredentialsRotationFailed  = "CredentialsRotationFailed"
+	EventBucketCredentialsSecretMissing   = "CredentialsSecretMissing"
 
 	// Bucket Policy Events.
 	EventBucketPolicyApplied      = "PolicyApplied"

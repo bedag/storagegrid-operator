@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -27,12 +28,16 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
 	"github.com/bedag/storagegrid-operator/pkg/grid"
@@ -344,24 +349,22 @@ func (r *S3BucketReconciler) reconcileS3EndpointConfig(ctx context.Context, rctx
 	}
 }
 
+// resolveBucketTenantKey returns the ObjectKey of the S3Tenant referenced by
+// a bucket. An empty Namespace in the ref means "the bucket's own namespace".
+func resolveBucketTenantKey(bucket *s3v1alpha1.S3Bucket) client.ObjectKey {
+	ns := bucket.Spec.S3TenantRef.Namespace
+	if ns == "" {
+		ns = bucket.Namespace
+	}
+	return client.ObjectKey{Name: bucket.Spec.S3TenantRef.Name, Namespace: ns}
+}
+
 func (r *S3BucketReconciler) reconcileS3TenantReference(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileS3TenantReference")
 
 	rctx.S3Tenant = &s3v1alpha1.S3Tenant{}
-
-	// Determine namespace to look up tenant.
-	tenantNamespace := rctx.Bucket.Spec.S3TenantRef.Namespace
-	if tenantNamespace == "" {
-		tenantNamespace = rctx.Bucket.Namespace
-		log.V(1).Info("Using bucket namespace for tenant lookup", "namespace", tenantNamespace)
-	} else {
-		log.V(1).Info("Using specified tenant namespace", "namespace", tenantNamespace)
-	}
-
-	tenantKey := client.ObjectKey{
-		Name:      rctx.Bucket.Spec.S3TenantRef.Name,
-		Namespace: tenantNamespace,
-	}
+	tenantKey := resolveBucketTenantKey(rctx.Bucket)
+	log.V(1).Info("Resolved tenant lookup key", "namespace", tenantKey.Namespace, "name", tenantKey.Name)
 
 	if err := r.Get(ctx, tenantKey, rctx.S3Tenant); err != nil {
 		return fmt.Errorf("failed to get S3Tenant %s: %w", tenantKey, err)
@@ -749,32 +752,32 @@ func (r *S3BucketReconciler) reconcileBucketAdmin(ctx context.Context, rctx *buc
 func (r *S3BucketReconciler) reconcileBucketS3Credentials(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileBucketS3Credentials")
 
-	_, _, err := kube.FetchKeyPairFromSecret(ctx, r.Client, rctx.Bucket.Namespace, rctx.Bucket.Status.S3AdminKeysSecretRef.Name)
-	if err != nil {
-		log.Error(err, "Failed to fetch s3 keypair from secret, creating new s3 admin keypair")
-		err := r.createS3AdminKeypair(ctx, rctx, false)
-		if err != nil {
-			log.Error(err, "Failed to create S3 admin keypair")
-			return err
+	// Annotation-driven recreation takes priority over all other paths.
+	if rctx.Bucket.Annotations != nil && rctx.Bucket.Annotations[s3v1alpha1.AnnotationRecreateBucketKeypairs] == "true" {
+		if err := r.createS3AdminKeypair(ctx, rctx, true); err != nil {
+			return fmt.Errorf("failed to recreate S3 admin keypair: %w", err)
 		}
-
+		delete(rctx.Bucket.Annotations, s3v1alpha1.AnnotationRecreateBucketKeypairs)
+		rctx.ObjectUpdated = true
 		return nil
 	}
 
-	// Check if credential recreation annotation is present.
-	// check if annotations exist and exit if unset.
-	if rctx.Bucket.Annotations != nil {
-		// if annotation is not set to "true", we start recreation.
-		if rctx.Bucket.Annotations[s3v1alpha1.AnnotationRecreateBucketKeypairs] == "true" {
-			err := r.createS3AdminKeypair(ctx, rctx, true)
-			if err != nil {
-				return fmt.Errorf("failed to recreate S3 admin keypair: %w", err)
-			}
-			// Remove annotation.
-			delete(rctx.Bucket.Annotations, s3v1alpha1.AnnotationRecreateBucketKeypairs)
-			rctx.ObjectUpdated = true
-			return nil
-		}
+	// Fresh bucket (no AccessKeyId tracked in status): always create a new
+	// keypair and overwrite whatever secret may exist.
+	if rctx.Bucket.Status.AccessKeyId == "" {
+		log.V(1).Info("Fresh bucket, creating S3 admin keypair (overwrites any stale secret pending GC)")
+		return r.createS3AdminKeypair(ctx, rctx, false)
+	}
+
+	// If the secret is missing for an existing bucket, recover by recreating
+	// credentials on the grid and rewriting the secret.
+	if _, _, err := kube.FetchKeyPairFromSecret(ctx, r.Client, rctx.Bucket.Namespace, rctx.Bucket.Status.S3AdminKeysSecretRef.Name); err != nil {
+		log.Info("S3 credentials secret missing for existing bucket, recreating",
+			"secret", rctx.Bucket.Status.S3AdminKeysSecretRef.Name, "error", err.Error())
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketCredentialsSecretMissing,
+			fmt.Sprintf("Secret %s missing for bucket %s, recreating credentials",
+				rctx.Bucket.Status.S3AdminKeysSecretRef.Name, rctx.Bucket.Status.BucketName))
+		return r.createS3AdminKeypair(ctx, rctx, true)
 	}
 
 	return nil
@@ -1507,5 +1510,70 @@ func (r *S3BucketReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			PredicateWithoutStatusChange(),
 		)).
 		Owns(&corev1.Secret{}).
+		Watches(
+			&s3v1alpha1.S3Tenant{},
+			handler.EnqueueRequestsFromMapFunc(r.mapTenantToBuckets),
+			builder.WithPredicates(r.tenantEndpointChangePredicate()),
+		).
 		Complete(r)
+}
+
+// tenantEndpointChangePredicate triggers reconciliation only when the tenant's
+// S3EndpointConfig changes (e.g. due to an S3TenantClassName change). All other
+// tenant status updates are ignored for now to avoid unnecessary bucket reconciliations.
+func (r *S3BucketReconciler) tenantEndpointChangePredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			// Buckets handle their own initial endpoint resolution.
+			return false
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldT, okOld := e.ObjectOld.(*s3v1alpha1.S3Tenant)
+			newT, okNew := e.ObjectNew.(*s3v1alpha1.S3Tenant)
+			if !okOld || !okNew {
+				return false
+			}
+			return !reflect.DeepEqual(oldT.Status.S3EndpointConfig, newT.Status.S3EndpointConfig)
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			// Bucket reconciliation handles tenant disappearance on its next loop.
+			return false
+		},
+	}
+}
+
+// mapTenantToBuckets returns reconcile requests for all S3Buckets that
+// reference the given S3Tenant. Uses the "spec.s3TenantRef.name" field index
+// (registered by S3TenantReconciler) to scope the list, then filters with the
+// shared resolveBucketTenantKey helper to honor namespace-defaulting semantics.
+func (r *S3BucketReconciler) mapTenantToBuckets(ctx context.Context, obj client.Object) []ctrl.Request {
+	log := log.FromContext(ctx)
+	tenant, ok := obj.(*s3v1alpha1.S3Tenant)
+	if !ok {
+		return nil
+	}
+
+	buckets := &s3v1alpha1.S3BucketList{}
+	if err := r.List(ctx, buckets, client.MatchingFields{"spec.s3TenantRef.name": tenant.Name}); err != nil {
+		log.Error(err, "Failed to list buckets for tenant", "tenant", tenant.Name)
+		return nil
+	}
+
+	tenantKey := client.ObjectKey{Name: tenant.Name, Namespace: tenant.Namespace}
+	requests := make([]ctrl.Request, 0, len(buckets.Items))
+	for i := range buckets.Items {
+		b := &buckets.Items[i]
+		if resolveBucketTenantKey(b) != tenantKey {
+			continue
+		}
+		requests = append(requests, ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: b.Name, Namespace: b.Namespace},
+		})
+	}
+
+	if len(requests) > 0 {
+		log.V(1).Info("Enqueueing buckets due to tenant endpoint change",
+			"tenant", tenant.Name, "namespace", tenant.Namespace, "count", len(requests))
+	}
+	return requests
 }

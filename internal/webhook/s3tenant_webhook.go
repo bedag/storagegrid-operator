@@ -117,6 +117,10 @@ func (r *S3TenantValidator) ValidateCreate(ctx context.Context, obj runtime.Obje
 		}
 	}
 
+	if err := r.validateObjectLockGridAvailability(ctx, s3tenant.Spec.StorageGridRef.Name, s3tenant.Spec.S3ObjectLock); err != nil {
+		return nil, err
+	}
+
 	return nil, nil
 }
 
@@ -127,7 +131,20 @@ func (r *S3TenantValidator) ValidateUpdate(ctx context.Context, oldObj runtime.O
 		return nil, fmt.Errorf("object is not an S3Tenant")
 	}
 
+	oldS3Tenant, ok := oldObj.(*s3v1alpha1.S3Tenant)
+	if !ok {
+		return nil, fmt.Errorf("old object is not an S3Tenant")
+	}
+
 	s3tenantlog.Info("validate update", "name", s3tenant.Name)
+
+	if err := r.validateObjectLockGridAvailability(ctx, s3tenant.Spec.StorageGridRef.Name, s3tenant.Spec.S3ObjectLock); err != nil {
+		return nil, err
+	}
+
+	if err := validateTenantObjectLockTransition(ctx, r.k8sClient, s3tenant.Name, s3tenant.Namespace, oldS3Tenant.Spec.S3ObjectLock, s3tenant.Spec.S3ObjectLock); err != nil {
+		return nil, err
+	}
 
 	return nil, nil
 }
@@ -170,4 +187,20 @@ func (r *S3TenantValidator) tenantClassExists(ctx context.Context, tenantClassNa
 
 	log.Info("TenantClass exists", "name", tenantClassName)
 	return true, nil
+}
+
+// validateObjectLockGridAvailability rejects mode=Compliance when the parent grid does not have S3 Object Lock enabled.
+// Other modes (Disabled, Governance) are unconditionally allowed at this layer; the bucket webhook re-validates per-bucket.
+func (r *S3TenantValidator) validateObjectLockGridAvailability(ctx context.Context, storageGridName string, spec *s3v1alpha1.S3ObjectLockTenantSpec) error {
+	if effectiveTenantObjectLockMode(spec) != s3v1alpha1.S3ObjectLockModeCompliance {
+		return nil
+	}
+	available, err := gridObjectLockAvailable(ctx, r.k8sClient, storageGridName)
+	if err != nil {
+		return err
+	}
+	if !available {
+		return fmt.Errorf("spec.s3ObjectLock.mode=Compliance requires StorageGrid %s to have S3 Object Lock enabled grid-wide", storageGridName)
+	}
+	return nil
 }

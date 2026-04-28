@@ -307,6 +307,13 @@ spec:
                 items:
                   type: string
                 type: array
+              s3ObjectLockAvailable:
+                default: false
+                description: |-
+                  S3ObjectLockAvailable indicates whether S3 Object Lock is enabled grid-wide.
+                  nil means the capability has not yet been probed (or last probe failed and no prior value exists).
+                  Derived from /grid/compliance-global complianceEnabled.
+                type: boolean
               usage:
                 description: Usage of the StorageGrid summarizes the usage of all
                   tenants.

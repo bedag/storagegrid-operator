@@ -270,6 +270,14 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 		return err
 	}
 
+	// Reconcile bucket object-lock drift. Sends spec verbatim; StorageGRID rejects invalid transitions.
+	if err := r.reconcileBucketObjectLock(ctx, rctx); err != nil {
+		log.Error(err, "Failed to reconcile bucket object lock")
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketObjectLockReconcileFailed", err.Error())
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeConfigurationSynced, metav1.ConditionFalse, "BucketObjectLockReconcileFailed", err.Error())
+		// Don't return error; continue with other reconciliation so policy and credentials can still progress.
+	}
+
 	// Reconcile bucket policy.
 	if err := r.reconcileBucketPolicy(ctx, rctx); err != nil {
 		log.Error(err, "Failed to reconcile bucket policy")
@@ -428,7 +436,7 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 		fmt.Sprintf("Creating bucket %s in region %s", rctx.Bucket.Status.BucketName, rctx.Bucket.Status.Region))
 
 	// Try to create bucket.
-	err := grid.CreateBucket(ctx, rctx.Bucket.Status.BucketName, rctx.Bucket.Spec.Region, *rctx.Bucket.Spec.RetentionInDays, rctx.TenantClient)
+	err := grid.CreateBucket(ctx, rctx.Bucket.Status.BucketName, rctx.Bucket.Spec.Region, rctx.Bucket.Spec.S3ObjectLock, rctx.TenantClient)
 	if err != nil {
 		if strings.Contains(err.Error(), "BucketAlreadyExists") {
 			r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionFalse, "BucketNameConflict", fmt.Sprintf("Bucket name %s is already taken, please choose a different name", rctx.Bucket.Status.BucketName))
@@ -459,6 +467,40 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 
 	log.V(1).Info("Bucket creation completed successfully")
 	rctx.DoRequeue = true // Requeue for further processing
+	return nil
+}
+
+// reconcileBucketObjectLock fetches the current object-lock configuration of the bucket and
+// issues an UpdateObjectLock when it diverges from the spec. Sends spec verbatim; the StorageGRID
+// backend rejects invalid transitions (e.g. disabling once enabled) — we surface those errors.
+// Note: StorageGRID applies retention changes to NEW objects only; an event is emitted to make
+// this explicit to operators.
+func (r *S3BucketReconciler) reconcileBucketObjectLock(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileBucketObjectLock")
+
+	current, err := grid.GetBucketObjectLock(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient)
+	if err != nil {
+		return fmt.Errorf("failed to fetch current object lock settings: %w", err)
+	}
+
+	desired := grid.DesiredBucketObjectLock(rctx.Bucket.Spec.S3ObjectLock)
+
+	if grid.ObjectLockSettingsEqual(current, desired) {
+		log.V(1).Info("Bucket object lock already in sync")
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeConfigurationSynced, metav1.ConditionTrue, "ObjectLockInSync", "Bucket S3 Object Lock configuration matches spec")
+		return nil
+	}
+
+	log.V(1).Info("Bucket object lock drift detected, updating", "bucketName", rctx.Bucket.Status.BucketName)
+
+	if err := grid.UpdateBucketObjectLock(ctx, rctx.Bucket.Status.BucketName, desired, rctx.TenantClient); err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketObjectLockUpdateFailed,
+			fmt.Sprintf("Failed to update S3 Object Lock for bucket %s: %v", rctx.Bucket.Status.BucketName, err))
+		return fmt.Errorf("failed to update bucket object lock: %w", err)
+	}
+
+	r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketObjectLockUpdated,
+		fmt.Sprintf("Updated S3 Object Lock configuration for bucket %s; the new default retention applies to NEW objects only — existing objects keep their prior retention", rctx.Bucket.Status.BucketName))
 	return nil
 }
 

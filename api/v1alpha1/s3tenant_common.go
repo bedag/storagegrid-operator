@@ -97,6 +97,30 @@ type CommonTenantSpec struct {
 	// StorageGrid reference.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="storageGridRef is immutable"
 	StorageGridRef corev1.LocalObjectReference `json:"storageGridRef,omitempty"`
+
+	// S3ObjectLock configures the maximum S3 Object Lock capabilities allowed for buckets in this tenant.
+	// Mode acts as the ceiling on bucket-level mode (Disabled < Governance < Compliance).
+	// Compliance requires the parent StorageGrid to have S3 Object Lock enabled grid-wide.
+	// +optional
+	S3ObjectLock *S3ObjectLockTenantSpec `json:"s3ObjectLock,omitempty"`
+}
+
+// S3ObjectLockTenantSpec configures the per-tenant S3 Object Lock policy.
+type S3ObjectLockTenantSpec struct {
+	// Mode is the maximum S3 Object Lock mode permitted for buckets owned by this tenant.
+	// - Disabled: buckets in this tenant may not enable object lock.
+	// - Governance: buckets may use Governance only.
+	// - Compliance: buckets may use either Governance or Compliance; sets allowComplianceMode=true on the backend tenant.
+	// +kubebuilder:default="Disabled"
+	// +optional
+	Mode S3ObjectLockMode `json:"mode,omitempty"`
+
+	// MaxRetentionInDays caps the retentionInDays a bucket in this tenant may request.
+	// Mapped to the backend tenant policy MaxRetentionDays.
+	// +kubebuilder:default=90
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxRetentionInDays int32 `json:"maxRetentionInDays,omitempty"`
 }
 
 type CommonTenantStatus struct {

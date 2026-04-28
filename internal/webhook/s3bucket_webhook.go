@@ -89,6 +89,10 @@ func (r *S3BucketValidator) ValidateCreate(ctx context.Context, obj runtime.Obje
 		return nil, fmt.Errorf("namespace %s is not allowed to create buckets in tenant %s", s3bucket.Namespace, s3Teant.Name)
 	}
 
+	if err := r.validateBucketObjectLock(ctx, s3bucket, s3Teant); err != nil {
+		return nil, err
+	}
+
 	return nil, nil
 }
 
@@ -127,6 +131,10 @@ func (r *S3BucketValidator) ValidateUpdate(ctx context.Context, oldObj, newObj r
 		if s3bucketNew.Spec.BucketName != nil && *s3bucketNew.Spec.BucketName != s3bucketOld.Status.BucketName {
 			return nil, fmt.Errorf("spec.bucketName cannot be changed after the bucket has been created")
 		}
+	}
+
+	if err := r.validateBucketObjectLock(ctx, s3bucketNew, s3Teant); err != nil {
+		return nil, err
 	}
 
 	return nil, nil
@@ -202,4 +210,44 @@ func matchesWildcard(bucketNamespace string, pattern string) bool {
 	}
 
 	return false
+}
+
+// validateBucketObjectLock enforces grid-availability, tenant-mode-ceiling and retention-cap rules
+// for S3Bucket spec.s3ObjectLock. Called from both ValidateCreate and ValidateUpdate.
+func (r *S3BucketValidator) validateBucketObjectLock(ctx context.Context, bucket *s3v1alpha1.S3Bucket, tenant *s3v1alpha1.S3Tenant) error {
+	bucketMode := effectiveBucketObjectLockMode(bucket.Spec.S3ObjectLock)
+	if bucketMode == s3v1alpha1.S3ObjectLockModeDisabled {
+		return nil
+	}
+
+	// Required: retentionInDays > 0 when mode != Disabled.
+	if bucket.Spec.S3ObjectLock == nil || bucket.Spec.S3ObjectLock.RetentionInDays <= 0 {
+		return fmt.Errorf("spec.s3ObjectLock.retentionInDays must be greater than 0 when mode is %s", bucketMode)
+	}
+
+	// Grid must support S3 Object Lock.
+	gridName := tenant.Spec.StorageGridRef.Name
+	available, err := gridObjectLockAvailable(ctx, r.k8sClient, gridName)
+	if err != nil {
+		return err
+	}
+	if !available {
+		return fmt.Errorf("StorageGrid %s does not have S3 Object Lock enabled grid-wide", gridName)
+	}
+
+	// Tenant mode acts as ceiling.
+	tenantMode := effectiveTenantObjectLockMode(tenant.Spec.S3ObjectLock)
+	if objectLockModeRank(bucketMode) > objectLockModeRank(tenantMode) {
+		return fmt.Errorf("spec.s3ObjectLock.mode=%s is not allowed: parent tenant %s/%s permits at most %s", bucketMode, tenant.Namespace, tenant.Name, tenantMode)
+	}
+
+	// Tenant maxRetentionInDays caps the bucket retention.
+	if tenant.Spec.S3ObjectLock != nil && tenant.Spec.S3ObjectLock.MaxRetentionInDays > 0 {
+		if bucket.Spec.S3ObjectLock.RetentionInDays > tenant.Spec.S3ObjectLock.MaxRetentionInDays {
+			return fmt.Errorf("spec.s3ObjectLock.retentionInDays=%d exceeds parent tenant %s/%s maxRetentionInDays=%d",
+				bucket.Spec.S3ObjectLock.RetentionInDays, tenant.Namespace, tenant.Name, tenant.Spec.S3ObjectLock.MaxRetentionInDays)
+		}
+	}
+
+	return nil
 }

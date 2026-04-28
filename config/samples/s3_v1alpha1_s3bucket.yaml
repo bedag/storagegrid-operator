@@ -10,4 +10,10 @@ spec:
     name: s3tenant-sample
     namespace: default
   region: us-east-1
-  
+  # Optional S3 Object Lock configuration. Mode defaults to Disabled.
+  # Compliance requires the parent tenant to have s3ObjectLock.mode=Compliance and the
+  # parent StorageGrid to have S3 Object Lock enabled grid-wide.
+  # Changes to retentionInDays apply to NEW objects only; existing objects keep their prior retention.
+  s3ObjectLock:
+    mode: Governance
+    retentionInDays: 30

@@ -45,10 +45,13 @@ type S3BucketSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="region is immutable"
 	Region string `json:"region,omitempty"`
 
-	// Optional retention in days for objects in the bucket, defaults to 0, meaning unlimited retention.
+	// S3ObjectLock configures S3 Object Lock for this bucket.
+	// When omitted, object lock is disabled (Mode=Disabled).
+	// Requires the parent StorageGrid to have S3 Object Lock enabled grid-wide.
+	// Compliance mode additionally requires the parent tenant's s3ObjectLock.mode to be Compliance.
+	// Note: changes to mode/retention apply to NEW objects only; existing objects keep their prior settings.
 	// +optional
-	// +kubebuilder:default=0
-	RetentionInDays *int32 `json:"retentionInDays,omitempty"`
+	S3ObjectLock *S3ObjectLockBucketSpec `json:"s3ObjectLock,omitempty"`
 
 	// tenant the bucket will be created in.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="s3TenantRef is immutable"
@@ -129,6 +132,38 @@ type BucketUsage struct {
 
 	// total resources used by the S3 Bucket.
 	Bytes *resource.Quantity `json:"bytes,omitempty"`
+}
+
+// S3ObjectLockMode represents the configured S3 Object Lock retention mode for a bucket
+// or the maximum allowed mode for a tenant.
+// +kubebuilder:validation:Enum=Disabled;Governance;Compliance
+type S3ObjectLockMode string
+
+const (
+	// S3ObjectLockModeDisabled means S3 Object Lock is not configured.
+	S3ObjectLockModeDisabled S3ObjectLockMode = "Disabled"
+	// S3ObjectLockModeGovernance allows objects to be retained but privileged users can override.
+	S3ObjectLockModeGovernance S3ObjectLockMode = "Governance"
+	// S3ObjectLockModeCompliance enforces strict retention; nobody can override or delete protected objects.
+	S3ObjectLockModeCompliance S3ObjectLockMode = "Compliance"
+)
+
+// S3ObjectLockBucketSpec configures S3 Object Lock for a bucket.
+type S3ObjectLockBucketSpec struct {
+	// Mode is the default retention mode applied to new objects.
+	// - Disabled: object lock is not enabled on the bucket.
+	// - Governance: privileged users may bypass retention.
+	// - Compliance: retention is strictly enforced; requires tenant.s3ObjectLock.mode=Compliance.
+	// +kubebuilder:default="Disabled"
+	// +optional
+	Mode S3ObjectLockMode `json:"mode,omitempty"`
+
+	// RetentionInDays is the default retention period applied to new objects when Mode is not Disabled.
+	// Must be greater than zero. Capped by the parent tenant's s3ObjectLock.maxRetentionInDays.
+	// +kubebuilder:default=90
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	RetentionInDays int32 `json:"retentionInDays,omitempty"`
 }
 
 // BucketPhase represents the lifecycle phase of an S3 bucket.

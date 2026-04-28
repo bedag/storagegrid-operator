@@ -164,6 +164,10 @@ const (
 	EventBucketOwnershipTaggingFailed = "BucketOwnershipTaggingFailed"
 	EventBucketNotOwnedByOperator     = "BucketNotOwnedByOperator"
 
+	// Bucket Object Lock Events.
+	EventBucketObjectLockUpdated      = "BucketObjectLockUpdated"
+	EventBucketObjectLockUpdateFailed = "BucketObjectLockUpdateFailed"
+
 	// Bucket Drain Events.
 	EventBucketDrainingStarted  = "BucketDrainingStarted"
 	EventBucketDrainingProgress = "BucketDrainingProgress"

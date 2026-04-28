@@ -205,6 +205,33 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-map-type: atomic
+              s3ObjectLock:
+                description: |-
+                  S3ObjectLock configures the maximum S3 Object Lock capabilities allowed for buckets in this tenant.
+                  Mode acts as the ceiling on bucket-level mode (Disabled < Governance < Compliance).
+                  Compliance requires the parent StorageGrid to have S3 Object Lock enabled grid-wide.
+                properties:
+                  maxRetentionInDays:
+                    default: 90
+                    description: |-
+                      MaxRetentionInDays caps the retentionInDays a bucket in this tenant may request.
+                      Mapped to the backend tenant policy MaxRetentionDays.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  mode:
+                    default: Disabled
+                    description: |-
+                      Mode is the maximum S3 Object Lock mode permitted for buckets owned by this tenant.
+                      - Disabled: buckets in this tenant may not enable object lock.
+                      - Governance: buckets may use Governance only.
+                      - Compliance: buckets may use either Governance or Compliance; sets allowComplianceMode=true on the backend tenant.
+                    enum:
+                    - Disabled
+                    - Governance
+                    - Compliance
+                    type: string
+                type: object
               s3TenantAccountRef:
                 description: |-
                   S3TenantAccountRef is an optional reference to an existing S3TenantAccount to claim.

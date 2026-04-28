@@ -88,6 +88,10 @@ func (r *S3TenantAccountValidator) ValidateCreate(ctx context.Context, obj runti
 		return nil, fmt.Errorf("TenantAccountClass %s does not exist", s3tenantAccount.Spec.S3TenantClassName)
 	}
 
+	if err := r.validateObjectLockGridAvailability(ctx, s3tenantAccount.Spec.StorageGridRef.Name, s3tenantAccount.Spec.S3ObjectLock); err != nil {
+		return nil, err
+	}
+
 	return nil, nil
 }
 
@@ -128,6 +132,20 @@ func (r *S3TenantAccountValidator) ValidateUpdate(ctx context.Context, oldObj ru
 	// block creation if the TenantClass does not exist.
 	if !exists {
 		return nil, fmt.Errorf("TenantClass %s does not exist", s3tenantAccount.Spec.S3TenantClassName)
+	}
+
+	if err := r.validateObjectLockGridAvailability(ctx, s3tenantAccount.Spec.StorageGridRef.Name, s3tenantAccount.Spec.S3ObjectLock); err != nil {
+		return nil, err
+	}
+
+	// On update, block tenant mode downgrade or maxRetentionInDays reduction when buckets would be left in violation.
+	// Use account.Status.S3TenantRef to find the bound tenant and list its buckets.
+	if s3tenantAccount.Status.S3TenantRef != nil {
+		boundTenantName := s3tenantAccount.Status.S3TenantRef.Name
+		boundTenantNamespace := s3tenantAccount.Status.S3TenantRef.Namespace
+		if err := validateTenantObjectLockTransition(ctx, r.k8sClient, boundTenantName, boundTenantNamespace, oldAccount.Spec.S3ObjectLock, s3tenantAccount.Spec.S3ObjectLock); err != nil {
+			return nil, err
+		}
 	}
 
 	return nil, nil
@@ -183,4 +201,19 @@ func (r *S3TenantAccountValidator) tenantClassExists(ctx context.Context, tenant
 
 	log.Info("TenantClass exists", "name", tenantClassName)
 	return true, nil
+}
+
+// validateObjectLockGridAvailability rejects mode=Compliance when the parent grid does not have S3 Object Lock enabled.
+func (r *S3TenantAccountValidator) validateObjectLockGridAvailability(ctx context.Context, storageGridName string, spec *s3v1alpha1.S3ObjectLockTenantSpec) error {
+	if effectiveTenantObjectLockMode(spec) != s3v1alpha1.S3ObjectLockModeCompliance {
+		return nil
+	}
+	available, err := gridObjectLockAvailable(ctx, r.k8sClient, storageGridName)
+	if err != nil {
+		return err
+	}
+	if !available {
+		return fmt.Errorf("spec.s3ObjectLock.mode=Compliance requires StorageGrid %s to have S3 Object Lock enabled grid-wide", storageGridName)
+	}
+	return nil
 }

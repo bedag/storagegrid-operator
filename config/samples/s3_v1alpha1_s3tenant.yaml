@@ -13,4 +13,9 @@ spec:
   storageQuota: 100Gi
   storageGridRef:
     name: storagegrid-sample
-  
+  # S3 Object Lock policy applied to all buckets owned by this tenant.
+  # mode acts as the ceiling on bucket-level mode (Disabled < Governance < Compliance).
+  # maxRetentionInDays caps the per-bucket retentionInDays.
+  s3ObjectLock:
+    mode: Governance
+    maxRetentionInDays: 90

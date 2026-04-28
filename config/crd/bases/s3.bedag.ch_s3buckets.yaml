@@ -42,6 +42,10 @@ spec:
       jsonPath: .status.bucketUsage.objectCount
       name: Objects
       type: integer
+    - description: Configured S3 Object Lock mode
+      jsonPath: .spec.s3ObjectLock.mode
+      name: ObjectLock
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: AGE
       type: date
@@ -102,12 +106,35 @@ spec:
                 x-kubernetes-validations:
                 - message: region is immutable
                   rule: self == oldSelf
-              retentionInDays:
-                default: 0
-                description: Optional retention in days for objects in the bucket,
-                  defaults to 0, meaning unlimited retention.
-                format: int32
-                type: integer
+              s3ObjectLock:
+                description: |-
+                  S3ObjectLock configures S3 Object Lock for this bucket.
+                  When omitted, object lock is disabled (Mode=Disabled).
+                  Requires the parent StorageGrid to have S3 Object Lock enabled grid-wide.
+                  Compliance mode additionally requires the parent tenant's s3ObjectLock.mode to be Compliance.
+                  Note: changes to mode/retention apply to NEW objects only; existing objects keep their prior settings.
+                properties:
+                  mode:
+                    default: Disabled
+                    description: |-
+                      Mode is the default retention mode applied to new objects.
+                      - Disabled: object lock is not enabled on the bucket.
+                      - Governance: privileged users may bypass retention.
+                      - Compliance: retention is strictly enforced; requires tenant.s3ObjectLock.mode=Compliance.
+                    enum:
+                    - Disabled
+                    - Governance
+                    - Compliance
+                    type: string
+                  retentionInDays:
+                    default: 90
+                    description: |-
+                      RetentionInDays is the default retention period applied to new objects when Mode is not Disabled.
+                      Must be greater than zero. Capped by the parent tenant's s3ObjectLock.maxRetentionInDays.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                type: object
               s3TenantRef:
                 description: tenant the bucket will be created in.
                 properties:

@@ -62,6 +62,17 @@ type S3BucketSpec struct {
 	// +optional
 	BucketPolicyJson string `json:"bucketPolicyJson,omitempty"`
 
+	// LifecycleManagement controls the operator-managed S3 bucket lifecycle configuration.
+	// Defaults to {expirationInDays: 0}, which disables lifecycle management for the bucket
+	// (any previously-applied lifecycle configuration will be removed by the operator).
+	// Setting expirationInDays > 0 instructs StorageGRID to delete current object versions
+	// after that many days from ingestion. Note: on versioned buckets, this only places a
+	// delete marker on the current version; previous versions are not removed (an event will be
+	// emitted in that case).
+	// +kubebuilder:default={expirationInDays: 0}
+	// +optional
+	LifecycleManagement *LifecycleManagementSpec `json:"lifecycleManagement,omitempty"`
+
 	// DrainPollInterval overrides the StorageGrid drain polling frequency for this bucket.
 	// When set, replaces the two-tier polling strategy with this single interval.
 	// Use for buckets needing different polling behavior (e.g., huge bucket = 4h+, urgent = 1m).
@@ -108,6 +119,10 @@ type S3BucketStatus struct {
 	// track last successfully applied policy.
 	LastAppliedPolicy string `json:"lastAppliedPolicy,omitempty"`
 
+	// LastAppliedLifecycle is a fingerprint of the lifecycle configuration last successfully applied.
+	// Used by the operator for drift detection. Empty when no lifecycle configuration is managed.
+	LastAppliedLifecycle string `json:"lastAppliedLifecycle,omitempty"`
+
 	// Phase represents the current lifecycle phase of the bucket.
 	// +kubebuilder:default="Pending"
 	Phase BucketPhase `json:"phase,omitempty"`
@@ -148,6 +163,21 @@ const (
 	S3ObjectLockModeCompliance S3ObjectLockMode = "Compliance"
 )
 
+// LifecycleManagementSpec configures the operator-managed S3 bucket lifecycle.
+// v1 supports a single rule that expires current object versions after a fixed number
+// of days from ingestion (maps to S3 Expiration.Days with no filter).
+type LifecycleManagementSpec struct {
+	// ExpirationInDays is the number of days from object ingestion after which the current
+	// version of an object is deleted by StorageGRID. Maps to the S3 lifecycle rule
+	// `Expiration.Days`.
+	// Set to 0 to explicitly disable lifecycle management for this bucket. Any previously
+	// applied lifecycle configuration will be removed by the operator.
+	// On versioned buckets, expiration only places a delete marker on the current version;
+	// noncurrent versions are NOT removed by this rule (a warning event is emitted).
+	// +kubebuilder:validation:Minimum=0
+	ExpirationInDays int32 `json:"expirationInDays"`
+}
+
 // S3ObjectLockBucketSpec configures S3 Object Lock for a bucket.
 type S3ObjectLockBucketSpec struct {
 	// Mode is the default retention mode applied to new objects.
@@ -160,7 +190,6 @@ type S3ObjectLockBucketSpec struct {
 
 	// RetentionInDays is the default retention period applied to new objects when Mode is not Disabled.
 	// Must be greater than zero. Capped by the parent tenant's s3ObjectLock.maxRetentionInDays.
-	// +kubebuilder:default=90
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	RetentionInDays int32 `json:"retentionInDays,omitempty"`

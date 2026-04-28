@@ -42,10 +42,6 @@ spec:
       jsonPath: .status.bucketUsage.objectCount
       name: Objects
       type: integer
-    - description: Configured S3 Object Lock mode
-      jsonPath: .spec.s3ObjectLock.mode
-      name: ObjectLock
-      type: string
     - jsonPath: .metadata.creationTimestamp
       name: AGE
       type: date
@@ -100,6 +96,33 @@ spec:
                   DrainStuckThreshold overrides when to consider this bucket's drain stuck.
                   Use for buckets with expected slow drain rates (e.g., 24h+ for multi-billion object bucket).
                 type: string
+              lifecycleManagement:
+                default:
+                  expirationInDays: 0
+                description: |-
+                  LifecycleManagement controls the operator-managed S3 bucket lifecycle configuration.
+                  Defaults to {expirationInDays: 0}, which disables lifecycle management for the bucket
+                  (any previously-applied lifecycle configuration will be removed by the operator).
+                  Setting expirationInDays > 0 instructs StorageGRID to delete current object versions
+                  after that many days from ingestion. Note: on versioned buckets, this only places a
+                  delete marker on the current version; previous versions are not removed (an event will be
+                  emitted in that case).
+                properties:
+                  expirationInDays:
+                    description: |-
+                      ExpirationInDays is the number of days from object ingestion after which the current
+                      version of an object is deleted by StorageGRID. Maps to the S3 lifecycle rule
+                      `Expiration.Days`.
+                      Set to 0 to explicitly disable lifecycle management for this bucket. Any previously
+                      applied lifecycle configuration will be removed by the operator.
+                      On versioned buckets, expiration only places a delete marker on the current version;
+                      noncurrent versions are NOT removed by this rule (a warning event is emitted).
+                    format: int32
+                    minimum: 0
+                    type: integer
+                required:
+                - expirationInDays
+                type: object
               region:
                 description: region of the S3 Bucket.
                 type: string
@@ -127,7 +150,6 @@ spec:
                     - Compliance
                     type: string
                   retentionInDays:
-                    default: 90
                     description: |-
                       RetentionInDays is the default retention period applied to new objects when Mode is not Disabled.
                       Must be greater than zero. Capped by the parent tenant's s3ObjectLock.maxRetentionInDays.
@@ -326,6 +348,11 @@ spec:
                 - isDeletingObjects
                 - nextPollInterval
                 type: object
+              lastAppliedLifecycle:
+                description: |-
+                  LastAppliedLifecycle is a fingerprint of the lifecycle configuration last successfully applied.
+                  Used by the operator for drift detection. Empty when no lifecycle configuration is managed.
+                type: string
               lastAppliedPolicy:
                 description: track last successfully applied policy.
                 type: string

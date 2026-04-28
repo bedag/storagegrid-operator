@@ -17,3 +17,10 @@ spec:
   s3ObjectLock:
     mode: Governance
     retentionInDays: 30
+  # Operator-managed bucket lifecycle. Setting expirationInDays > 0 instructs StorageGRID
+  # to delete objects that many days after ingestion. Set to 0 to explicitly disable
+  # lifecycle management; any previously applied configuration will be removed.
+  # Works on both unversioned and versioned buckets: noncurrent versions and
+  # stranded delete-markers are reaped automatically.
+  lifecycleManagement:
+    expirationInDays: 30

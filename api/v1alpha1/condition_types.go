@@ -33,4 +33,5 @@ const (
 	ConditionTypeConfigurationSynced      = "ConfigurationSynced"
 	ConditionTypeOwnershipConflict        = "OwnershipConflict"
 	ConditionTypeS3ObjectLockSupported    = "S3ObjectLockSupported"
+	ConditionTypeLifecycleSynced          = "LifecycleSynced"
 )

@@ -285,6 +285,14 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 		// Don't return error, continue with other reconciliation.
 	}
 
+	// Reconcile bucket lifecycle management.
+	if err := r.reconcileBucketLifecycle(ctx, rctx); err != nil {
+		log.Error(err, "Failed to reconcile bucket lifecycle")
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketLifecycleReconcileFailed", err.Error())
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeLifecycleSynced, metav1.ConditionFalse, "BucketLifecycleReconcileFailed", err.Error())
+		// Don't return error; continue so other reconcilers can still progress.
+	}
+
 	// Reconciliation completed successfully.
 	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "ReconcileSucceeded", "Reconciliation completed successfully")
 
@@ -483,7 +491,7 @@ func (r *S3BucketReconciler) reconcileBucketObjectLock(ctx context.Context, rctx
 		return fmt.Errorf("failed to fetch current object lock settings: %w", err)
 	}
 
-	desired := grid.DesiredBucketObjectLock(rctx.Bucket.Spec.S3ObjectLock)
+	desired := grid.DesiredBucketObjectLock(rctx.Bucket.Spec.S3ObjectLock, current)
 
 	if grid.ObjectLockSettingsEqual(current, desired) {
 		log.V(1).Info("Bucket object lock already in sync")
@@ -1053,6 +1061,109 @@ func (r *S3BucketReconciler) reconcileBucketPolicyRemove(ctx context.Context, rc
 	}
 
 	return nil
+}
+
+// reconcileBucketLifecycle drives the operator-managed S3 lifecycle configuration on the bucket.
+// It mirrors reconcileBucketPolicy: dispatches to apply or remove based on whether the spec
+// describes any rules, and tracks the last successfully applied configuration via a JSON
+// fingerprint stored in status.LastAppliedLifecycle for drift detection.
+func (r *S3BucketReconciler) reconcileBucketLifecycle(ctx context.Context, rctx *bucketReconcileContext) error {
+	desired := lifecycleSpecFromBucket(rctx.Bucket)
+	if desired.IsEmpty() {
+		return r.reconcileBucketLifecycleRemove(ctx, rctx)
+	}
+	return r.reconcileBucketLifecycleApply(ctx, rctx, desired)
+}
+
+func (r *S3BucketReconciler) reconcileBucketLifecycleApply(ctx context.Context, rctx *bucketReconcileContext, desired s3.LifecycleSpec) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileBucketLifecycleApply")
+
+	// Warn the user when lifecycle expiration is shorter than the bucket's configured object-lock retention.
+	// We do not block the apply: the grid will reject deletes of locked objects when the lifecycle fires.
+	r.warnLifecycleObjectLockConflict(rctx, desired)
+
+	desiredCfg := s3.BuildLifecycleConfiguration(desired)
+	desiredFingerprint := s3.LifecycleFingerprint(desiredCfg)
+
+	// Always observe the backend before acting: status.LastAppliedLifecycle is diagnostic only,
+	// it must not gate work, otherwise out-of-band drift (manual aws CLI changes, restores,
+	// other tooling) would be silently masked.
+	currentCfg, err := s3.GetLifecycle(ctx, rctx.Bucket.Status.BucketName, rctx.S3Client)
+	if err != nil {
+		return fmt.Errorf("failed to get current lifecycle configuration: %w", err)
+	}
+
+	if s3.LifecycleFingerprint(currentCfg) == desiredFingerprint {
+		log.V(1).Info("Lifecycle configuration already in sync, no changes needed")
+		rctx.Bucket.Status.LastAppliedLifecycle = desiredFingerprint
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeLifecycleSynced, metav1.ConditionTrue, "LifecycleApplied", "Bucket lifecycle configuration in sync")
+		return nil
+	}
+
+	log.V(1).Info("Applying bucket lifecycle configuration", "expirationInDays", desired.ExpirationInDays)
+	if err := s3.PutLifecycle(ctx, rctx.Bucket.Status.BucketName, desiredCfg, rctx.S3Client); err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketLifecycleApplyFailed,
+			fmt.Sprintf("Failed to apply bucket lifecycle configuration: %v", err))
+		return fmt.Errorf("failed to apply lifecycle: %w", err)
+	}
+
+	rctx.Bucket.Status.LastAppliedLifecycle = desiredFingerprint
+	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeLifecycleSynced, metav1.ConditionTrue, "LifecycleApplied", "Bucket lifecycle configuration applied successfully")
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketLifecycleApplied,
+		fmt.Sprintf("Successfully applied bucket lifecycle configuration (expirationInDays=%d)", desired.ExpirationInDays))
+	log.V(1).Info("Bucket lifecycle configuration applied successfully")
+	return nil
+}
+
+func (r *S3BucketReconciler) reconcileBucketLifecycleRemove(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileBucketLifecycleRemove")
+
+	// Fast path: if we never applied a lifecycle configuration, there's nothing to remove.
+	// This trades strict drift-correction (out-of-band rules added directly to the backend won't
+	// be reconciled away) for a cheaper steady state on buckets that don't use lifecycle at all.
+	if rctx.Bucket.Status.LastAppliedLifecycle == "" {
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeLifecycleSynced, metav1.ConditionTrue, "LifecycleDisabled", "Bucket lifecycle management disabled")
+		return nil
+	}
+
+	log.V(1).Info("Removing bucket lifecycle configuration")
+	if err := s3.DeleteLifecycle(ctx, rctx.Bucket.Status.BucketName, rctx.S3Client); err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketLifecycleRemoveFailed,
+			fmt.Sprintf("Failed to remove bucket lifecycle configuration: %v", err))
+		return fmt.Errorf("failed to delete lifecycle: %w", err)
+	}
+
+	rctx.Bucket.Status.LastAppliedLifecycle = ""
+	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeLifecycleSynced, metav1.ConditionTrue, "LifecycleDisabled", "Bucket lifecycle management disabled")
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketLifecycleRemoved,
+		"Successfully removed bucket lifecycle configuration")
+	return nil
+}
+
+// lifecycleSpecFromBucket extracts the operator-level lifecycle spec from the bucket CR.
+// Treats a nil pointer the same as an explicit {expirationInDays: 0} (disabled).
+func lifecycleSpecFromBucket(bucket *s3v1alpha1.S3Bucket) s3.LifecycleSpec {
+	if bucket.Spec.LifecycleManagement == nil {
+		return s3.LifecycleSpec{}
+	}
+	return s3.LifecycleSpec{
+		ExpirationInDays: bucket.Spec.LifecycleManagement.ExpirationInDays,
+	}
+}
+
+// warnLifecycleObjectLockConflict emits a warning event when the configured lifecycle
+// expiration is shorter than the bucket's object-lock retention. The grid will refuse to
+// delete locked objects when the lifecycle fires; we surface this so users notice early.
+func (r *S3BucketReconciler) warnLifecycleObjectLockConflict(rctx *bucketReconcileContext, desired s3.LifecycleSpec) {
+	lock := rctx.Bucket.Spec.S3ObjectLock
+	if lock == nil || lock.Mode == s3v1alpha1.S3ObjectLockModeDisabled {
+		return
+	}
+	if desired.ExpirationInDays > 0 && desired.ExpirationInDays < lock.RetentionInDays {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketLifecycleObjectLockConflict,
+			fmt.Sprintf("Lifecycle expirationInDays=%d is shorter than s3ObjectLock.retentionInDays=%d; StorageGRID will refuse to delete locked objects when the lifecycle fires",
+				desired.ExpirationInDays, lock.RetentionInDays))
+	}
 }
 
 func (r *S3BucketReconciler) finalize(ctx context.Context, rctx *bucketReconcileContext) error {

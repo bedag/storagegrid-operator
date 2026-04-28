@@ -18,7 +18,9 @@ package grid
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -413,7 +415,7 @@ func objectLockToSDK(spec *s3v1alpha1.S3ObjectLockBucketSpec) *models.BucketS3Ob
 		Enabled: &enabled,
 		DefaultRetentionSetting: &models.BucketS3ObjectLockDefaultRetentionSettings{
 			Mode: strings.ToLower(string(spec.Mode)),
-			Days: spec.RetentionInDays,
+			Days: json.Number(strconv.FormatInt(int64(spec.RetentionInDays), 10)),
 		},
 	}
 }
@@ -444,11 +446,26 @@ func UpdateBucketObjectLock(ctx context.Context, bucketName string, desired *mod
 }
 
 // DesiredBucketObjectLock builds the SDK settings struct from a bucket spec for use with UpdateBucketObjectLock.
-// When spec is nil/Disabled it returns settings with Enabled=false and no default retention.
-func DesiredBucketObjectLock(spec *s3v1alpha1.S3ObjectLockBucketSpec) *models.BucketS3ObjectLockSettings {
+//
+// Object Lock cannot be turned off once a bucket has it enabled; only the default retention
+// can be cleared. So when the spec asks for Disabled and the bucket currently has Object Lock
+// enabled, we send `{enabled: true, defaultRetentionSetting: null}` to drop the policy while
+// preserving the enabled flag. When the bucket has never had Object Lock enabled, we send
+// `{enabled: false}` so we don't accidentally activate it.
+func DesiredBucketObjectLock(spec *s3v1alpha1.S3ObjectLockBucketSpec, current *models.BucketS3ObjectLockSettings) *models.BucketS3ObjectLockSettings {
 	if settings := objectLockToSDK(spec); settings != nil {
 		return settings
 	}
+
+	currentlyEnabled := current != nil && current.Enabled != nil && *current.Enabled
+	if currentlyEnabled {
+		enabled := true
+		return &models.BucketS3ObjectLockSettings{
+			Enabled:                 &enabled,
+			DefaultRetentionSetting: nil,
+		}
+	}
+
 	disabled := false
 	return &models.BucketS3ObjectLockSettings{Enabled: &disabled}
 }
@@ -477,5 +494,22 @@ func ObjectLockSettingsEqual(a, b *models.BucketS3ObjectLockSettings) bool {
 	if defA == nil || defB == nil {
 		return false
 	}
-	return defA.Mode == defB.Mode && defA.Days == defB.Days && defA.Years == defB.Years
+	return defA.Mode == defB.Mode && jsonNumberEqual(defA.Days, defB.Days) && jsonNumberEqual(defA.Years, defB.Years)
+}
+
+// jsonNumberEqual compares two json.Number values numerically, tolerating differences
+// in textual representation (e.g. "30" vs "030", or empty string vs "0"). An empty
+// json.Number is treated as 0.
+func jsonNumberEqual(a, b json.Number) bool {
+	num := func(n json.Number) int64 {
+		if n == "" {
+			return 0
+		}
+		v, err := n.Int64()
+		if err != nil {
+			return 0
+		}
+		return v
+	}
+	return num(a) == num(b)
 }

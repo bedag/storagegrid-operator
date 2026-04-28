@@ -139,6 +139,13 @@ const (
 	EventBucketPolicyApplyFailed  = "PolicyApplyFailed"
 	EventBucketPolicyRemoveFailed = "PolicyRemoveFailed"
 
+	// Bucket Lifecycle Management Events.
+	EventBucketLifecycleApplied            = "LifecycleApplied"
+	EventBucketLifecycleRemoved            = "LifecycleRemoved"
+	EventBucketLifecycleApplyFailed        = "LifecycleApplyFailed"
+	EventBucketLifecycleRemoveFailed       = "LifecycleRemoveFailed"
+	EventBucketLifecycleObjectLockConflict = "LifecycleObjectLockConflict"
+
 	// Admin User Management Events.
 	EventBucketAdminUserCreated      = "AdminUserCreated"
 	EventBucketAdminUserCreateFailed = "AdminUserCreateFailed"

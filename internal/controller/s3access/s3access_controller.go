@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -35,6 +36,7 @@ import (
 	log "sigs.k8s.io/controller-runtime/pkg/log"
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
+	parentctrl "github.com/bedag/storagegrid-operator/internal/controller"
 	"github.com/bedag/storagegrid-operator/pkg/grid"
 	"github.com/bedag/storagegrid-operator/pkg/kube"
 )
@@ -205,10 +207,16 @@ func (r *S3AccessReconciler) doReconcile(ctx context.Context, rctx *s3AccessReco
 		r.Recorder.Event(rctx.S3Access, corev1.EventTypeNormal, "PolicyApplied", "Policy rendered and applied to access user")
 	}
 
-	// Reconcile credentials secret.
+	// Reconcile credentials secret (raw keypair, the operator's source of truth).
 	if err := r.reconcileSecret(ctx, rctx); err != nil {
 		r.setCondition(rctx.S3Access, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "SecretReconcileError", fmt.Sprintf("Failed to reconcile secret: %v", err))
 		return err
+	}
+
+	// Reconcile the operator-synthesized connection-details Secret. This is a user-facing
+	// projection of the credentials secret + bucket info; non-fatal on failure.
+	if err := r.reconcileConnectionDetails(ctx, rctx); err != nil {
+		r.setCondition(rctx.S3Access, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "ConnectionDetailsReconcileFailed", err.Error())
 	}
 
 	// Reconciliation completed successfully.
@@ -806,6 +814,131 @@ func (r *S3AccessReconciler) findS3AccessesForGlobalS3Policy(ctx context.Context
 	}
 
 	return requests
+}
+
+// accessConnectionDetailsSecretName returns the user-supplied destination secret name
+// when set, otherwise the default `<access>-connection-details`. This is a separate
+// Secret from the operator-managed credentials Secret (status.SecretRef) — it is a
+// user-facing projection of the credentials plus the bucket's endpoint info.
+func accessConnectionDetailsSecretName(access *s3v1alpha1.S3Access) string {
+	if access.Spec.ConnectionDetails != nil && access.Spec.ConnectionDetails.DestinationSecret != "" {
+		return access.Spec.ConnectionDetails.DestinationSecret
+	}
+	return fmt.Sprintf("%s-connection-details", access.Name)
+}
+
+// reconcileConnectionDetails dispatches to apply or remove based on
+// spec.connectionDetails.mode. The synthesized Secret is a projection only — the raw
+// keypair is owned by reconcileSecret.
+func (r *S3AccessReconciler) reconcileConnectionDetails(ctx context.Context, rctx *s3AccessReconcileContext) error {
+	mode := s3v1alpha1.ConnectionDetailsModeAll
+	if rctx.S3Access.Spec.ConnectionDetails != nil && rctx.S3Access.Spec.ConnectionDetails.Mode != "" {
+		mode = rctx.S3Access.Spec.ConnectionDetails.Mode
+	}
+	if mode == s3v1alpha1.ConnectionDetailsModeDisabled {
+		return r.reconcileConnectionDetailsRemove(ctx, rctx)
+	}
+	return r.reconcileConnectionDetailsApply(ctx, rctx)
+}
+
+func (r *S3AccessReconciler) reconcileConnectionDetailsApply(ctx context.Context, rctx *s3AccessReconcileContext) error {
+	logger := log.FromContext(ctx).WithValues("function", "reconcileConnectionDetailsApply")
+
+	// Bail out without flipping conditions when prerequisites aren't ready: earlier
+	// reconcile steps (or the bucket reconciler) will fill them in and we'll be requeued.
+	if rctx.S3Access.Status.SecretRef == nil || rctx.S3Access.Status.SecretRef.Name == "" {
+		logger.V(1).Info("Skipping connection details: credentials secret not yet known")
+		return nil
+	}
+	if rctx.S3Bucket == nil || rctx.S3Bucket.Status.BucketName == "" {
+		logger.V(1).Info("Skipping connection details: bucket not yet ready")
+		return nil
+	}
+	if rctx.S3Bucket.Status.S3EndpointConfig == nil || rctx.S3Bucket.Status.S3EndpointConfig.URL == "" {
+		logger.V(1).Info("Skipping connection details: endpoint URL not yet known")
+		return nil
+	}
+
+	accessKey, secretKey, err := kube.FetchKeyPairFromSecret(ctx, r.Client, rctx.S3Access.Namespace, rctx.S3Access.Status.SecretRef.Name)
+	if err != nil {
+		return fmt.Errorf("failed to read access keypair: %w", err)
+	}
+
+	inputs := kube.ConnectionDetailsInputs{
+		AccessKeyID:     accessKey,
+		SecretAccessKey: secretKey,
+		EndpointURL:     rctx.S3Bucket.Status.S3EndpointConfig.URL,
+		Region:          rctx.S3Bucket.Status.Region,
+		BucketName:      rctx.S3Bucket.Status.BucketName,
+	}
+
+	data := kube.BuildConnectionDetailsData(inputs)
+	desiredSecretName := accessConnectionDetailsSecretName(rctx.S3Access)
+
+	// Detect a destinationSecret rename so we can clean up the old projection after the
+	// new one is durably written. status.ConnectionDetailsSecretRef tracks the actually-
+	// deployed name; spec.connectionDetails.destinationSecret tracks the desired name.
+	previousSecretName := ""
+	if rctx.S3Access.Status.ConnectionDetailsSecretRef != nil {
+		previousSecretName = rctx.S3Access.Status.ConnectionDetailsSecretRef.Name
+	}
+	renamed := previousSecretName != "" && previousSecretName != desiredSecretName
+
+	changed, err := kube.ReconcileOwnedSecret(ctx, r.Client, rctx.S3Access.Namespace, desiredSecretName, data, rctx.S3Access)
+	if err != nil {
+		if errors.Is(err, kube.ErrSecretNotOwned) {
+			msg := fmt.Sprintf("Secret %s/%s exists and is not owned by this S3Access; refusing to overwrite. Set spec.connectionDetails.destinationSecret to a different name or remove the foreign secret.",
+				rctx.S3Access.Namespace, desiredSecretName)
+			r.setCondition(rctx.S3Access, s3v1alpha1.ConditionTypeOwnershipConflict, metav1.ConditionTrue, "ConnectionDetailsConflict", msg)
+			r.Recorder.Event(rctx.S3Access, corev1.EventTypeWarning, parentctrl.EventOwnershipConflict, msg)
+			return nil
+		}
+		r.Recorder.Eventf(rctx.S3Access, corev1.EventTypeWarning, parentctrl.EventConnectionDetailsApplyFailed,
+			"Failed to apply connection details secret %s: %v", desiredSecretName, err)
+		return fmt.Errorf("failed to reconcile connection details secret: %w", err)
+	}
+
+	// Rename: drop the old owned Secret only after the new one is durably written. We
+	// only ever delete Secrets we own, so foreign Secrets are left alone.
+	if renamed {
+		if _, derr := kube.DeleteOwnedSecret(ctx, r.Client, rctx.S3Access.Namespace, previousSecretName, rctx.S3Access); derr != nil {
+			logger.Error(derr, "Failed to delete previous connection-details secret after rename; it can be cleaned up manually", "secret", previousSecretName)
+		} else {
+			r.Recorder.Eventf(rctx.S3Access, corev1.EventTypeWarning, "ConnectionDetailsSecretRenamed",
+				"Connection-details secret renamed from %s to %s — workloads referencing the old name must be updated", previousSecretName, desiredSecretName)
+		}
+	}
+
+	rctx.S3Access.Status.ConnectionDetailsSecretRef = &corev1.LocalObjectReference{Name: desiredSecretName}
+	if changed {
+		r.Recorder.Eventf(rctx.S3Access, corev1.EventTypeNormal, parentctrl.EventConnectionDetailsApplied,
+			"Successfully applied connection details secret %s", desiredSecretName)
+	}
+	return nil
+}
+
+func (r *S3AccessReconciler) reconcileConnectionDetailsRemove(ctx context.Context, rctx *s3AccessReconcileContext) error {
+	logger := log.FromContext(ctx).WithValues("function", "reconcileConnectionDetailsRemove")
+
+	if rctx.S3Access.Status.ConnectionDetailsSecretRef == nil {
+		return nil
+	}
+
+	secretName := rctx.S3Access.Status.ConnectionDetailsSecretRef.Name
+	deleted, err := kube.DeleteOwnedSecret(ctx, r.Client, rctx.S3Access.Namespace, secretName, rctx.S3Access)
+	if err != nil {
+		r.Recorder.Eventf(rctx.S3Access, corev1.EventTypeWarning, parentctrl.EventConnectionDetailsRemoveFailed,
+			"Failed to remove connection details secret %s: %v", secretName, err)
+		return fmt.Errorf("failed to delete connection details secret: %w", err)
+	}
+
+	rctx.S3Access.Status.ConnectionDetailsSecretRef = nil
+	if deleted {
+		r.Recorder.Eventf(rctx.S3Access, corev1.EventTypeNormal, parentctrl.EventConnectionDetailsRemoved,
+			"Successfully removed connection details secret %s", secretName)
+	}
+	logger.V(1).Info("Connection details remove reconciliation completed", "deleted", deleted)
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

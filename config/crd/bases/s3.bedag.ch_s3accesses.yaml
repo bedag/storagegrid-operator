@@ -19,9 +19,9 @@ spec:
       jsonPath: .spec.s3BucketRef.name
       name: Bucket
       type: string
-    - description: Name of the credentials secret
-      jsonPath: .status.secretRef.name
-      name: Secret
+    - description: Name of the user-facing connection-details secret
+      jsonPath: .status.connectionDetailsSecretRef.name
+      name: ConnectionDetails
       type: string
     - description: Current lifecycle phase
       jsonPath: .status.phase
@@ -55,6 +55,37 @@ spec:
           spec:
             description: S3AccessSpec defines the desired state of S3Access.
             properties:
+              connectionDetails:
+                default:
+                  mode: All
+                description: |-
+                  ConnectionDetails controls a separate operator-synthesized Kubernetes Secret
+                  containing the data needed to connect to the bucket through this access
+                  (access key id, secret access key, endpoint URL, region, bucket name) for direct
+                  consumption by user workloads (mountable as `envFrom`). This is a projection of
+                  the credentials Secret referenced by SecretRef plus the bucket's endpoint info;
+                  the raw keypair Secret remains the operator's source of truth.
+                  Defaults to {mode: All}.
+                properties:
+                  destinationSecret:
+                    description: |-
+                      DestinationSecret optionally overrides the name of the synthesized Secret.
+                      When empty, the operator uses `<resource-name>-connection-details`.
+                      The Secret is always created in the same namespace as the source CR.
+                    type: string
+                  mode:
+                    default: All
+                    description: |-
+                      Mode controls whether a connection-details Secret is synthesized.
+                      Defaults to All
+                      Available options:
+                      - All: create/update a Secret containing all standard connection-detail keys.
+                      - Disabled: do not create such a Secret, and remove a previously-created one if present.
+                    enum:
+                    - All
+                    - Disabled
+                    type: string
+                type: object
               policyRefs:
                 description: |-
                   List of GlobalS3Policies and namespaced S3Policies to apply to the access.
@@ -101,9 +132,11 @@ spec:
                   rule: self == oldSelf
               secretRef:
                 description: |-
-                  Optionally specify the secret name for the access credentials.
+                  Optionally specify the secret name for the access credentials (raw keypair).
                   If not specified, a secret will be automatically generated and managed by the operator.
                   Changing this after creation will rename the secret (data is moved, old secret is deleted).
+                  This is the operator's internal credential store, separate from the user-facing
+                  connection-details Secret configured via spec.connectionDetails.
                 properties:
                   name:
                     default: ""
@@ -220,6 +253,23 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              connectionDetailsSecretRef:
+                description: |-
+                  ConnectionDetailsSecretRef is set to the user-facing connection-details Secret
+                  projected by the operator (when spec.connectionDetails.mode is All). Cleared when
+                  mode is Disabled.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               phase:
                 default: Pending
                 description: Phase represents the current lifecycle phase of the S3Access.
@@ -229,7 +279,9 @@ spec:
                   the referenced policies and subpath restrictions.
                 type: string
               secretRef:
-                description: Reference to the secret containing the access credentials.
+                description: |-
+                  SecretRef is the operator-managed credentials Secret holding the raw access keypair
+                  for this access. This is the operator's source of truth for the credentials.
                 properties:
                   name:
                     default: ""

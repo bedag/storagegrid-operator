@@ -85,6 +85,34 @@ spec:
                   specify a s3 bucketpolicy as json to apply to the bucket.
                   check the s3 documentation for the policy json format.
                 type: string
+              connectionDetails:
+                default:
+                  mode: All
+                description: |-
+                  ConnectionDetails controls whether the operator synthesizes a Kubernetes Secret
+                  containing the data needed to connect to this bucket (access key id, secret access key,
+                  endpoint URL, region, bucket name) for direct consumption by user workloads.
+                  Defaults to {mode: All}.
+                properties:
+                  destinationSecret:
+                    description: |-
+                      DestinationSecret optionally overrides the name of the synthesized Secret.
+                      When empty, the operator uses `<resource-name>-connection-details`.
+                      The Secret is always created in the same namespace as the source CR.
+                    type: string
+                  mode:
+                    default: All
+                    description: |-
+                      Mode controls whether a connection-details Secret is synthesized.
+                      Defaults to All
+                      Available options:
+                      - All: create/update a Secret containing all standard connection-detail keys.
+                      - Disabled: do not create such a Secret, and remove a previously-created one if present.
+                    enum:
+                    - All
+                    - Disabled
+                    type: string
+                type: object
               drainPollInterval:
                 description: |-
                   DrainPollInterval overrides the StorageGrid drain polling frequency for this bucket.
@@ -295,6 +323,24 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              connectionDetailsSecretRef:
+                description: |-
+                  ConnectionDetailsSecretRef is set to the user-facing connection-details Secret
+                  projected by the operator (when spec.connectionDetails.mode is All). Cleared when
+                  mode is Disabled. Tracks the actually-deployed Secret name so a destinationSecret
+                  rename or a re-enable after Disabled can clean up the previous Secret.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               drainStatus:
                 description: |-
                   DrainStatus tracks active drain operation progress.
@@ -412,10 +458,22 @@ spec:
                     description: Port is the HTTPS port for S3 API access.
                     format: int32
                     type: integer
+                  protocol:
+                    default: https
+                    description: Protocol indicates the protocol to use for S3 API
+                      access (e.g., "https").
+                    type: string
                   s3TenantClassName:
                     default: ""
                     description: TenantClassName which this S3EndpointConfig belongs
                       to.
+                    type: string
+                  url:
+                    description: |-
+                      URL is the fully-qualified S3 endpoint URL composed from DefaultAddress and Port,
+                      in the form `https://<defaultAddress>:<port>`. Populated by the operator whenever
+                      the endpoint config is (re)computed; consumers should prefer this field over
+                      re-composing the URL themselves.
                     type: string
                 type: object
             type: object

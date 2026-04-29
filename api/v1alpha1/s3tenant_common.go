@@ -225,6 +225,18 @@ type S3EndpointConfig struct {
 	// +optional
 	Port int32 `json:"port,omitempty"`
 
+	// URL is the fully-qualified S3 endpoint URL composed from DefaultAddress and Port,
+	// in the form `https://<defaultAddress>:<port>`. Populated by the operator whenever
+	// the endpoint config is (re)computed; consumers should prefer this field over
+	// re-composing the URL themselves.
+	// +optional
+	URL string `json:"url,omitempty"`
+
+	// Protocol indicates the protocol to use for S3 API access (e.g., "https").
+	// +optional
+	// +kubebuilder:default="https"
+	Protocol string `json:"protocol,omitempty"`
+
 	// PathStyleAccess indicates if path-style S3 access is required.
 	// When true, use path-style URLs (https://endpoint/bucket/key).
 	// When false, use virtual-hosted-style URLs (https://bucket.endpoint/key).

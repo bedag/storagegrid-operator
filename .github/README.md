@@ -986,16 +986,22 @@ When `subPaths` is set, object-scoped policy statements are expanded per subpath
 
 #### Custom Secret Name
 
-By default, the operator creates a credentials secret named `s3access-<name>-keypair`. You can override this:
+The operator manages two Secrets per S3Access:
+
+1. The **credentials Secret** (raw keypair, `accessKey` / `secretKey`) — the operator's source of truth, named `s3access-<name>-s3-keypair` by default. Override with `spec.secretRef`.
+2. The **connection-details Secret** — a user-facing projection of the credentials plus the bucket's endpoint info, mountable directly via `envFrom: - secretRef:`. Named `<name>-connection-details` by default; override with `spec.connectionDetails.destinationSecret`. Disable entirely with `spec.connectionDetails.mode: Disabled` (the credentials Secret is unaffected).
 
 ```yaml
 spec:
   secretRef:
-    name: my-custom-secret-name
+    name: my-custom-keypair
+  connectionDetails:
+    mode: All
+    destinationSecret: my-app-s3-conn
 ```
 
 > [!WARNING]
-> Changing `spec.secretRef` after the secret has been created will **rename** the secret: the credential data is moved to the new secret and the old one is deleted. Workloads referencing the old secret name must be updated.
+> Changing `spec.secretRef` after the secret has been created will **rename** the credentials secret: the credential data is moved to the new secret and the old one is deleted. Workloads referencing the old secret name must be updated.
 
 #### S3Access Status
 
@@ -1003,8 +1009,8 @@ Monitor your S3Access resources:
 
 ```bash
 kubectl get s3accesses
-# NAME            BUCKET      SECRET                          STATUS   AGE
-# my-app-access   my-bucket   s3access-my-app-access-keypair  Ready    5m
+# NAME            BUCKET      CONNECTIONDETAILS                   STATUS   AGE
+# my-app-access   my-bucket   my-app-access-connection-details    Ready    5m
 ```
 
 Lifecycle phases:

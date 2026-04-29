@@ -24,3 +24,10 @@ spec:
   # stranded delete-markers are reaped automatically.
   lifecycleManagement:
     expirationInDays: 30
+  # Operator-synthesized connection-details Secret containing AWS-style env vars
+  # (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL, AWS_REGION, S3_BUCKET).
+  # Defaults to {mode: All}; set mode: Disabled to opt out, or destinationSecret to pick
+  # a custom secret name (defaults to <bucket>-connection-details).
+  connectionDetails:
+    mode: All
+    # destinationSecret: my-bucket-conn

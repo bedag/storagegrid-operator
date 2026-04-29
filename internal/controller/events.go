@@ -146,6 +146,12 @@ const (
 	EventBucketLifecycleRemoveFailed       = "LifecycleRemoveFailed"
 	EventBucketLifecycleObjectLockConflict = "LifecycleObjectLockConflict"
 
+	// Connection Details Events (shared by S3Bucket and S3Access).
+	EventConnectionDetailsApplied      = "ConnectionDetailsApplied"
+	EventConnectionDetailsRemoved      = "ConnectionDetailsRemoved"
+	EventConnectionDetailsApplyFailed  = "ConnectionDetailsApplyFailed"
+	EventConnectionDetailsRemoveFailed = "ConnectionDetailsRemoveFailed"
+
 	// Admin User Management Events.
 	EventBucketAdminUserCreated      = "AdminUserCreated"
 	EventBucketAdminUserCreateFailed = "AdminUserCreateFailed"

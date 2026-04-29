@@ -1,0 +1,233 @@
+# S3Bucket connection-details secret synthesis:
+# Verify the operator-synthesized connection-details Secret end-to-end.
+# Steps:
+#   - default mode (All) → Secret created with all 5 AWS-style keys
+#   - rename via destinationSecret → new Secret created, fingerprint updates
+#   - opt out (mode: Disabled) → owned Secret removed
+#   - re-enable → Secret re-created
+#   - ownership conflict → preexisting foreign secret is NOT overwritten,
+#     OwnershipConflict event is emitted and condition reflects the conflict.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3bucket-connection-details
+spec:
+  bindings:
+    - name: tenantName
+      value: conn-details-tenant
+    - name: bucketName
+      value: conn-details-bucket
+    - name: defaultSecretName
+      value: conn-details-bucket-connection-details
+    - name: customSecretName
+      value: my-bucket-conn
+  steps:
+    # ── Step 1: Create tenant ─────────────────────────────────────────────
+    - name: create-tenant
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+                defaultBucketRegion: us-east-1
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    - name: verify-account
+      use:
+        template: ../../s3tenant/_step-templates/verify-account-set-delete-policy.yaml
+
+    # ── Step 2: Create bucket with default connectionDetails (mode: All) ──
+    - name: create-bucket-default-connection-details
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                region: us-east-1
+                s3TenantRef:
+                  name: ($tenantName)
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                phase: Ready
+                (connectionDetailsSecretRef.name != ''): true
+        - assert:
+            timeout: 1m
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: ($defaultSecretName)
+                labels:
+                  app.kubernetes.io/managed-by: storagegrid-operator
+                  s3.bedag.ch/secret-type: connection-details
+              (data.AWS_ACCESS_KEY_ID != ''): true
+              (data.AWS_SECRET_ACCESS_KEY != ''): true
+              (data.AWS_ENDPOINT_URL != ''): true
+              (data.AWS_REGION != ''): true
+              (data.S3_BUCKET != ''): true
+
+    # ── Step 3: Rename via destinationSecret ──────────────────────────────
+    - name: rename-destination-secret
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                connectionDetails:
+                  mode: All
+                  destinationSecret: ($customSecretName)
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: ($customSecretName)
+                labels:
+                  app.kubernetes.io/managed-by: storagegrid-operator
+                  s3.bedag.ch/secret-type: connection-details
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                (connectionDetailsSecretRef.name != ''): true
+
+    # ── Step 4: Disable connection details ────────────────────────────────
+    - name: disable-connection-details
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                connectionDetails:
+                  mode: Disabled
+                  destinationSecret: ($customSecretName)
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                connectionDetailsSecretRef: null
+        - error:
+            timeout: 1m
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: ($customSecretName)
+
+    # ── Step 5: Re-enable, then test ownership conflict ───────────────────
+    - name: pre-create-foreign-secret
+      try:
+        - create:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: ($defaultSecretName)
+              type: Opaque
+              data: {}
+
+    - name: enable-with-conflict
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                connectionDetails:
+                  mode: All
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                (conditions[?type == 'OwnershipConflict']):
+                  - status: "True"
+        # Foreign secret must NOT be overwritten (data still empty).
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: ($defaultSecretName)
+              data: {}
+
+    # ── Step 6: Cleanup ───────────────────────────────────────────────────
+    - name: delete-bucket
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              name: ($bucketName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+        - delete:
+            ref:
+              apiVersion: v1
+              kind: Secret
+              name: ($defaultSecretName)
+    - name: delete-tenant
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              name: ($tenantName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)

@@ -83,6 +83,14 @@ type S3BucketSpec struct {
 	// Use for buckets with expected slow drain rates (e.g., 24h+ for multi-billion object bucket).
 	// +optional
 	DrainStuckThreshold *metav1.Duration `json:"drainStuckThreshold,omitempty"`
+
+	// ConnectionDetails controls whether the operator synthesizes a Kubernetes Secret
+	// containing the data needed to connect to this bucket (access key id, secret access key,
+	// endpoint URL, region, bucket name) for direct consumption by user workloads.
+	// Defaults to {mode: All}.
+	// +kubebuilder:default={mode: All}
+	// +optional
+	ConnectionDetails *ConnectionDetailsSpec `json:"connectionDetails,omitempty"`
 }
 
 // S3BucketStatus defines the observed state of S3Bucket.
@@ -122,6 +130,13 @@ type S3BucketStatus struct {
 	// LastAppliedLifecycle is a fingerprint of the lifecycle configuration last successfully applied.
 	// Used by the operator for drift detection. Empty when no lifecycle configuration is managed.
 	LastAppliedLifecycle string `json:"lastAppliedLifecycle,omitempty"`
+
+	// ConnectionDetailsSecretRef is set to the user-facing connection-details Secret
+	// projected by the operator (when spec.connectionDetails.mode is All). Cleared when
+	// mode is Disabled. Tracks the actually-deployed Secret name so a destinationSecret
+	// rename or a re-enable after Disabled can clean up the previous Secret.
+	// +optional
+	ConnectionDetailsSecretRef *corev1.LocalObjectReference `json:"connectionDetailsSecretRef,omitempty"`
 
 	// Phase represents the current lifecycle phase of the bucket.
 	// +kubebuilder:default="Pending"

@@ -1188,12 +1188,13 @@ func (r *S3BucketReconciler) reconcileBucketConnectionDetails(ctx context.Contex
 }
 
 // connectionDetailsSecretName returns the user-supplied destination secret name when set,
-// otherwise the default `<bucket>-connection-details`.
+// otherwise the default `s3bucket-<bucket>-connection-details`. The kind prefix avoids
+// collisions with S3Access default names that would otherwise share the namespace.
 func bucketConnectionDetailsSecretName(bucket *s3v1alpha1.S3Bucket) string {
 	if bucket.Spec.ConnectionDetails != nil && bucket.Spec.ConnectionDetails.DestinationSecret != "" {
 		return bucket.Spec.ConnectionDetails.DestinationSecret
 	}
-	return fmt.Sprintf("%s-connection-details", bucket.Name)
+	return fmt.Sprintf("s3bucket-%s-connection-details", bucket.Name)
 }
 
 func (r *S3BucketReconciler) reconcileBucketConnectionDetailsApply(ctx context.Context, rctx *bucketReconcileContext) error {

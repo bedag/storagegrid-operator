@@ -817,14 +817,15 @@ func (r *S3AccessReconciler) findS3AccessesForGlobalS3Policy(ctx context.Context
 }
 
 // accessConnectionDetailsSecretName returns the user-supplied destination secret name
-// when set, otherwise the default `<access>-connection-details`. This is a separate
-// Secret from the operator-managed credentials Secret (status.SecretRef) — it is a
-// user-facing projection of the credentials plus the bucket's endpoint info.
+// when set, otherwise the default `s3access-<access>-connection-details`. The kind prefix
+// avoids collisions with S3Bucket default names that would otherwise share the namespace.
+// This is a separate Secret from the operator-managed credentials Secret (status.SecretRef)
+// — it is a user-facing projection of the credentials plus the bucket's endpoint info.
 func accessConnectionDetailsSecretName(access *s3v1alpha1.S3Access) string {
 	if access.Spec.ConnectionDetails != nil && access.Spec.ConnectionDetails.DestinationSecret != "" {
 		return access.Spec.ConnectionDetails.DestinationSecret
 	}
-	return fmt.Sprintf("%s-connection-details", access.Name)
+	return fmt.Sprintf("s3access-%s-connection-details", access.Name)
 }
 
 // reconcileConnectionDetails dispatches to apply or remove based on

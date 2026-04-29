@@ -989,7 +989,7 @@ When `subPaths` is set, object-scoped policy statements are expanded per subpath
 The operator manages two Secrets per S3Access:
 
 1. The **credentials Secret** (raw keypair, `accessKey` / `secretKey`) — the operator's source of truth, named `s3access-<name>-s3-keypair` by default. Override with `spec.secretRef`.
-2. The **connection-details Secret** — a user-facing projection of the credentials plus the bucket's endpoint info, mountable directly via `envFrom: - secretRef:`. Named `<name>-connection-details` by default; override with `spec.connectionDetails.destinationSecret`. Disable entirely with `spec.connectionDetails.mode: Disabled` (the credentials Secret is unaffected).
+2. The **connection-details Secret** — a user-facing projection of the credentials plus the bucket's endpoint info, mountable directly via `envFrom: - secretRef:`. Named `s3access-<name>-connection-details` (or `s3bucket-<name>-connection-details` for buckets) by default; override with `spec.connectionDetails.destinationSecret`. Disable entirely with `spec.connectionDetails.mode: Disabled` (the credentials Secret is unaffected).
 
 ```yaml
 spec:
@@ -1010,7 +1010,7 @@ Monitor your S3Access resources:
 ```bash
 kubectl get s3accesses
 # NAME            BUCKET      CONNECTIONDETAILS                   STATUS   AGE
-# my-app-access   my-bucket   my-app-access-connection-details    Ready    5m
+# my-app-access   my-bucket   s3access-my-app-access-connection-details    Ready    5m
 ```
 
 Lifecycle phases:

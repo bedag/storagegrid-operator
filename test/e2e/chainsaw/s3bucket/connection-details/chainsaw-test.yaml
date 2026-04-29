@@ -18,7 +18,7 @@ spec:
     - name: bucketName
       value: conn-details-bucket
     - name: defaultSecretName
-      value: conn-details-bucket-connection-details
+      value: s3bucket-conn-details-bucket-connection-details
     - name: customSecretName
       value: my-bucket-conn
   steps:

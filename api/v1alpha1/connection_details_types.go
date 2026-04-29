@@ -60,7 +60,8 @@ type ConnectionDetailsSpec struct {
 	Mode ConnectionDetailsMode `json:"mode,omitempty"`
 
 	// DestinationSecret optionally overrides the name of the synthesized Secret.
-	// When empty, the operator uses `<resource-name>-connection-details`.
+	// When empty, the operator uses `<kind>-<resource-name>-connection-details`
+	// (e.g. `s3bucket-foo-connection-details` or `s3access-foo-connection-details`).
 	// The Secret is always created in the same namespace as the source CR.
 	// +optional
 	DestinationSecret string `json:"destinationSecret,omitempty"`

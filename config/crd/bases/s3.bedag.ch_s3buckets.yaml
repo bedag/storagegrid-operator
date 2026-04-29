@@ -167,16 +167,21 @@ spec:
                   Note: changes to mode/retention apply to NEW objects only; existing objects keep their prior settings.
                 properties:
                   mode:
-                    default: Disabled
+                    allOf:
+                    - enum:
+                      - Disabled
+                      - Governance
+                      - Compliance
+                    - enum:
+                      - Disabled
+                      - Governance
+                      - Compliance
                     description: |-
                       Mode is the default retention mode applied to new objects.
                       - Disabled: object lock is not enabled on the bucket.
                       - Governance: privileged users may bypass retention.
-                      - Compliance: retention is strictly enforced; requires tenant.s3ObjectLock.mode=Compliance.
-                    enum:
-                    - Disabled
-                    - Governance
-                    - Compliance
+                      - Compliance: retention is strictly enforced
+                      Cannot be more restrictive than the tenant's s3ObjectLock.mode. When Compliance, the tenant must also have s3ObjectLock.mode=Compliance.
                     type: string
                   retentionInDays:
                     description: |-

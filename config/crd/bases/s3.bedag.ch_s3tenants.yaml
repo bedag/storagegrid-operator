@@ -212,7 +212,7 @@ spec:
                   Compliance requires the parent StorageGrid to have S3 Object Lock enabled grid-wide.
                 properties:
                   maxRetentionInDays:
-                    default: 90
+                    default: 0
                     description: |-
                       MaxRetentionInDays caps the retentionInDays a bucket in this tenant may request.
                       Mapped to the backend tenant policy MaxRetentionDays.
@@ -220,16 +220,21 @@ spec:
                     minimum: 0
                     type: integer
                   mode:
+                    allOf:
+                    - enum:
+                      - Disabled
+                      - Governance
+                      - Compliance
+                    - enum:
+                      - Disabled
+                      - Governance
+                      - Compliance
                     default: Disabled
                     description: |-
                       Mode is the maximum S3 Object Lock mode permitted for buckets owned by this tenant.
                       - Disabled: buckets in this tenant may not enable object lock.
                       - Governance: buckets may use Governance only.
-                      - Compliance: buckets may use either Governance or Compliance; sets allowComplianceMode=true on the backend tenant.
-                    enum:
-                    - Disabled
-                    - Governance
-                    - Compliance
+                      - Compliance: buckets may use either Governance or Compliance
                     type: string
                 type: object
               s3TenantAccountRef:

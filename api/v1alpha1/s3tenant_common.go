@@ -118,7 +118,7 @@ type S3ObjectLockTenantSpec struct {
 
 	// MaxRetentionInDays caps the retentionInDays a bucket in this tenant may request.
 	// Mapped to the backend tenant policy MaxRetentionDays.
-	// +kubebuilder:default=90
+	// +kubebuilder:default=0
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	MaxRetentionInDays int32 `json:"maxRetentionInDays,omitempty"`

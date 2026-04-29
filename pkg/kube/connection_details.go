@@ -37,7 +37,7 @@ import (
 // exists and is controlled by a different owner.
 var ErrSecretNotOwned = errors.New("secret exists and is controlled by a different owner")
 
-// ConnectionDetailsInputs holds the data points needed to render a connection-details
+// ConnectionDetailsInputs holds the data points needed to render a connection-details Secret.
 type ConnectionDetailsInputs struct {
 	AccessKeyID     string
 	SecretAccessKey string

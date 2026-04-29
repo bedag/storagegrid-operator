@@ -49,6 +49,8 @@ func objectLockModeRank(mode s3v1alpha1.S3ObjectLockMode) int {
 		return 2
 	case s3v1alpha1.S3ObjectLockModeGovernance:
 		return 1
+	case s3v1alpha1.S3ObjectLockModeDisabled:
+		return 0
 	default:
 		return 0
 	}
@@ -74,14 +76,15 @@ func gridObjectLockAvailable(ctx context.Context, c client.Client, storageGridNa
 }
 
 // listBucketsForTenant returns all S3Buckets across the cluster that reference the given tenant by name.
-// The tenant ref namespace is honoured when set, otherwise the tenant's own namespace is used.
+// The tenant ref namespace is honored when set, otherwise the tenant's own namespace is used.
 func listBucketsForTenant(ctx context.Context, c client.Client, tenantName, tenantNamespace string) ([]s3v1alpha1.S3Bucket, error) {
 	bucketList := &s3v1alpha1.S3BucketList{}
 	if err := c.List(ctx, bucketList); err != nil {
 		return nil, fmt.Errorf("failed to list S3Buckets: %w", err)
 	}
 	var matched []s3v1alpha1.S3Bucket
-	for _, b := range bucketList.Items {
+	for i := range bucketList.Items {
+		b := &bucketList.Items[i]
 		if b.Spec.S3TenantRef.Name != tenantName {
 			continue
 		}
@@ -90,7 +93,7 @@ func listBucketsForTenant(ctx context.Context, c client.Client, tenantName, tena
 			ns = b.Namespace
 		}
 		if ns == tenantNamespace {
-			matched = append(matched, b)
+			matched = append(matched, *b)
 		}
 	}
 	return matched, nil
@@ -124,7 +127,8 @@ func validateTenantObjectLockTransition(ctx context.Context, c client.Client, te
 		return err
 	}
 
-	for _, b := range buckets {
+	for i := range buckets {
+		b := &buckets[i]
 		bMode := effectiveBucketObjectLockMode(b.Spec.S3ObjectLock)
 		if modeLowered && objectLockModeRank(bMode) > objectLockModeRank(newMode) {
 			return fmt.Errorf("cannot lower tenant s3ObjectLock.mode to %s: bucket %s/%s currently uses mode %s",

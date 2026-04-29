@@ -276,7 +276,7 @@ func UpdateName(ctx context.Context, name string, tenant *Tenant, gridClient *Gr
 	return updateTenant(ctx, tenant, gridClient)
 }
 
-// UpdateTenantObjectLockPolicy synchronises the tenant's S3 Object Lock policy fields
+// UpdateTenantObjectLockPolicy synchronizes the tenant's S3 Object Lock policy fields
 // (AllowComplianceMode and MaxRetentionDays). Because the SDK only exposes a full PUT,
 // the supplied tenant must be a freshly-fetched object so all other Policy fields are
 // preserved. maxRetentionInDays may be nil to clear the cap.

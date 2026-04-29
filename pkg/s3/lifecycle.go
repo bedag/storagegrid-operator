@@ -132,7 +132,7 @@ func LifecycleFingerprint(cfg *s3types.BucketLifecycleConfiguration) string {
 	}
 	b, err := json.Marshal(cfg)
 	if err != nil {
-		// JSON marshalling of SDK structs cannot realistically fail; on the off-chance
+		// JSON marshaling of SDK structs cannot realistically fail; on the off-chance
 		// it does, fall back to a degenerate fingerprint that still differs from "".
 		return fmt.Sprintf("error:%v", err)
 	}

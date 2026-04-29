@@ -292,7 +292,8 @@ func (r *StorageGridReconciler) finalize(ctx context.Context, sg *s3v1alpha1.Sto
 	}
 
 	var boundAccounts []string
-	for _, account := range accountList.Items {
+	for i := range accountList.Items {
+		account := &accountList.Items[i]
 		if account.Spec.StorageGridRef.Name == sg.Name {
 			boundAccounts = append(boundAccounts, account.Name)
 		}

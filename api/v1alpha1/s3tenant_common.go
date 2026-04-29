@@ -110,8 +110,9 @@ type S3ObjectLockTenantSpec struct {
 	// Mode is the maximum S3 Object Lock mode permitted for buckets owned by this tenant.
 	// - Disabled: buckets in this tenant may not enable object lock.
 	// - Governance: buckets may use Governance only.
-	// - Compliance: buckets may use either Governance or Compliance; sets allowComplianceMode=true on the backend tenant.
+	// - Compliance: buckets may use either Governance or Compliance
 	// +kubebuilder:default="Disabled"
+	// +kubebuilder:validation:Enum=Disabled;Governance;Compliance
 	// +optional
 	Mode S3ObjectLockMode `json:"mode,omitempty"`
 

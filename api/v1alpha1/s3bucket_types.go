@@ -198,8 +198,9 @@ type S3ObjectLockBucketSpec struct {
 	// Mode is the default retention mode applied to new objects.
 	// - Disabled: object lock is not enabled on the bucket.
 	// - Governance: privileged users may bypass retention.
-	// - Compliance: retention is strictly enforced; requires tenant.s3ObjectLock.mode=Compliance.
-	// +kubebuilder:default="Disabled"
+	// - Compliance: retention is strictly enforced
+	// Cannot be more restrictive than the tenant's s3ObjectLock.mode. When Compliance, the tenant must also have s3ObjectLock.mode=Compliance.
+	// +kubebuilder:validation:Enum=Disabled;Governance;Compliance
 	// +optional
 	Mode S3ObjectLockMode `json:"mode,omitempty"`
 

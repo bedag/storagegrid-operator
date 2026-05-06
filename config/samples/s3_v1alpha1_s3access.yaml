@@ -12,3 +12,11 @@ spec:
       kind: S3Policy
   s3BucketRef:
     name: sample
+  # Operator-synthesized connection-details Secret containing AWS-style env vars
+  # (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL, AWS_REGION, S3_BUCKET).
+  # This is a projection of the credentials Secret (status.secretRef) plus the bucket
+  # endpoint info, mountable directly via `envFrom`. Defaults to {mode: All}; set
+  # mode: Disabled to opt out (the raw keypair Secret in status.secretRef remains).
+  connectionDetails:
+    mode: All
+    # destinationSecret: my-access-conn

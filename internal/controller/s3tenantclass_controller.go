@@ -464,11 +464,17 @@ func (r *S3TenantClassReconciler) reconcilePreferredEndpoints(ctx context.Contex
 	finalEndpoints = deduplicateEndpoints(finalEndpoints)
 
 	// Update status with processed endpoint configuration.
+	protocol := "https"
+	if !rctx.S3TenantClass.Status.Secure {
+		protocol = "http"
+	}
 	rctx.S3TenantClass.Status.S3EndpointConfig = &s3v1alpha1.S3EndpointConfig{
 		S3TenantClassName: rctx.S3TenantClass.Name,
 		Addresses:         finalEndpoints,
 		DefaultAddress:    defaultEndpoint,
 		Port:              rctx.S3TenantClass.Status.Port,
+		Protocol:          protocol,
+		URL:               fmt.Sprintf("%s://%s:%d", protocol, defaultEndpoint, rctx.S3TenantClass.Status.Port),
 		PathStyleAccess:   &pathStyleAccess,
 	}
 

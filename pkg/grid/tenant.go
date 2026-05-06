@@ -51,18 +51,21 @@ func generatePassword(length int, useLetters bool, useSpecial bool, useNum bool)
 	return string(b)
 }
 
-func CreateTenant(ctx context.Context, name string, description string, quota int64, gridClient *GridClient) (string, string, error) {
+func CreateTenant(ctx context.Context, name string, description string, quota int64, allowComplianceMode bool, maxRetentionInDays *int, gridClient *GridClient) (string, string, error) {
 	log := log.FromContext(ctx).WithValues("func", "CreateTenant")
-	log.V(1).Info(fmt.Sprintf("Creating tenant: name=%s, description=%s, quota=%d", name, description, quota))
+	log.V(1).Info(fmt.Sprintf("Creating tenant: name=%s, description=%s, quota=%d, allowComplianceMode=%v, maxRetentionInDays=%v", name, description, quota, allowComplianceMode, maxRetentionInDays))
 
 	pw := generatePassword(12, true, true, true)
 
+	allow := allowComplianceMode
 	tenant := models.Tenant{
 		Name:         &name,
 		Description:  &description,
 		Capabilities: []string{"s3", "management"},
 		Policy: &models.TenantPolicy{
-			QuotaObjectBytes: &quota,
+			QuotaObjectBytes:    &quota,
+			AllowComplianceMode: &allow,
+			MaxRetentionDays:    maxRetentionInDays,
 		},
 		Password: &pw,
 	}
@@ -271,6 +274,41 @@ func UpdateName(ctx context.Context, name string, tenant *Tenant, gridClient *Gr
 
 	tenant.Name = &name
 	return updateTenant(ctx, tenant, gridClient)
+}
+
+// UpdateTenantObjectLockPolicy synchronizes the tenant's S3 Object Lock policy fields
+// (AllowComplianceMode and MaxRetentionDays). Because the SDK only exposes a full PUT,
+// the supplied tenant must be a freshly-fetched object so all other Policy fields are
+// preserved. maxRetentionInDays may be nil to clear the cap.
+func UpdateTenantObjectLockPolicy(ctx context.Context, allowComplianceMode bool, maxRetentionInDays *int, tenant *Tenant, gridClient *GridClient) error {
+	log := log.FromContext(ctx).WithValues("func", "UpdateTenantObjectLockPolicy")
+	log.V(1).Info(fmt.Sprintf("Updating object lock policy: allowComplianceMode=%v, maxRetentionInDays=%v", allowComplianceMode, maxRetentionInDays))
+
+	if tenant.Policy == nil {
+		tenant.Policy = &models.TenantPolicy{}
+	}
+	allow := allowComplianceMode
+	tenant.Policy.AllowComplianceMode = &allow
+	tenant.Policy.MaxRetentionDays = maxRetentionInDays
+	return updateTenant(ctx, tenant, gridClient)
+}
+
+// GetConfiguredAllowComplianceMode returns whether the tenant currently allows compliance mode.
+// A nil pointer is treated as false (server default).
+func GetConfiguredAllowComplianceMode(tenant *Tenant) bool {
+	if tenant == nil || tenant.Policy == nil || tenant.Policy.AllowComplianceMode == nil {
+		return false
+	}
+	return *tenant.Policy.AllowComplianceMode
+}
+
+// GetConfiguredMaxRetentionDays returns the tenant's configured maximum retention in days.
+// A nil pointer means no cap is enforced server-side.
+func GetConfiguredMaxRetentionDays(tenant *Tenant) *int {
+	if tenant == nil || tenant.Policy == nil {
+		return nil
+	}
+	return tenant.Policy.MaxRetentionDays
 }
 
 // delete tenant in the backend.

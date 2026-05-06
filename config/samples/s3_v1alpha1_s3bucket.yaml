@@ -10,4 +10,24 @@ spec:
     name: s3tenant-sample
     namespace: default
   region: us-east-1
-  
+  # Optional S3 Object Lock configuration. Mode defaults to Disabled.
+  # Compliance requires the parent tenant to have s3ObjectLock.mode=Compliance and the
+  # parent StorageGrid to have S3 Object Lock enabled grid-wide.
+  # Changes to retentionInDays apply to NEW objects only; existing objects keep their prior retention.
+  s3ObjectLock:
+    mode: Governance
+    retentionInDays: 30
+  # Operator-managed bucket lifecycle. Setting expirationInDays > 0 instructs StorageGRID
+  # to delete objects that many days after ingestion. Set to 0 to explicitly disable
+  # lifecycle management; any previously applied configuration will be removed.
+  # Works on both unversioned and versioned buckets: noncurrent versions and
+  # stranded delete-markers are reaped automatically.
+  lifecycleManagement:
+    expirationInDays: 30
+  # Operator-synthesized connection-details Secret containing AWS-style env vars
+  # (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_ENDPOINT_URL, AWS_REGION, S3_BUCKET).
+  # Defaults to {mode: All}; set mode: Disabled to opt out, or destinationSecret to pick
+  # a custom secret name (defaults to s3bucket-<bucket>-connection-details).
+  connectionDetails:
+    mode: All
+    # destinationSecret: my-bucket-conn

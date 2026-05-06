@@ -18,10 +18,14 @@ package grid
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
 
 	models "github.com/bedag/storagegrid-sdk-go/models"
 )
@@ -29,25 +33,18 @@ import (
 type BucketUsage = models.BucketStats
 
 // CreateBucket creates a new bucket with the specified name and region and returns admin credentials for s3 access.
-func CreateBucket(ctx context.Context, name string, region string, retentionInDays int32, tenantClient *TenantClient) (err error) {
+// When objectLock is non-nil and Mode != Disabled, S3 Object Lock is enabled with the supplied default retention.
+func CreateBucket(ctx context.Context, name string, region string, objectLock *s3v1alpha1.S3ObjectLockBucketSpec, tenantClient *TenantClient) (err error) {
 	log := log.FromContext(ctx).WithValues("func", "CreateBucket")
-	log.V(1).Info(fmt.Sprintf("Creating bucket: name=%s, region=%s, retentionInDays=%d", name, region, retentionInDays))
+	log.V(1).Info(fmt.Sprintf("Creating bucket: name=%s, region=%s, objectLock=%+v", name, region, objectLock))
 
 	bucket := models.Bucket{
 		Name:   name,
 		Region: region,
 	}
 
-	// add retention settings if retentionInDays is configured.
-	if retentionInDays > 0 {
-		enabled := true
-		bucket.S3ObjectLock = &models.BucketS3ObjectLockSettings{
-			Enabled: &enabled,
-			DefaultRetentionSetting: &models.BucketS3ObjectLockDefaultRetentionSettings{
-				Mode: "compliance",
-				Days: retentionInDays,
-			},
-		}
+	if settings := objectLockToSDK(objectLock); settings != nil {
+		bucket.S3ObjectLock = settings
 	}
 
 	// no need to keep the result.
@@ -404,4 +401,115 @@ func CancelBucketDrain(ctx context.Context, bucketName string, tenantClient *Ten
 
 	log.V(1).Info("Bucket drain canceled successfully", "isDeletingObjects", *status.IsDeletingObjects)
 	return nil
+}
+
+// objectLockToSDK converts an S3ObjectLockBucketSpec into the SDK's BucketS3ObjectLockSettings.
+// Returns nil when the spec is nil or Mode is Disabled (omits the field from the request body).
+func objectLockToSDK(spec *s3v1alpha1.S3ObjectLockBucketSpec) *models.BucketS3ObjectLockSettings {
+	if spec == nil || spec.Mode == "" || spec.Mode == s3v1alpha1.S3ObjectLockModeDisabled {
+		return nil
+	}
+
+	enabled := true
+	return &models.BucketS3ObjectLockSettings{
+		Enabled: &enabled,
+		DefaultRetentionSetting: &models.BucketS3ObjectLockDefaultRetentionSettings{
+			Mode: strings.ToLower(string(spec.Mode)),
+			Days: json.Number(strconv.FormatInt(int64(spec.RetentionInDays), 10)),
+		},
+	}
+}
+
+// GetBucketObjectLock fetches the current S3 Object Lock configuration for a bucket.
+func GetBucketObjectLock(ctx context.Context, bucketName string, tenantClient *TenantClient) (*models.BucketS3ObjectLockSettings, error) {
+	log := log.FromContext(ctx).WithValues("func", "GetBucketObjectLock")
+	log.V(1).Info(fmt.Sprintf("Fetching object lock for bucket %s", bucketName))
+
+	settings, err := tenantClient.Bucket().GetObjectLock(ctx, bucketName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch object lock for bucket %s: %w", bucketName, err)
+	}
+	return settings, nil
+}
+
+// UpdateBucketObjectLock updates the S3 Object Lock configuration for an existing bucket.
+// Note: StorageGRID applies retention changes to NEW objects only; existing objects keep their prior settings.
+// The caller is responsible for translating the desired spec into SDK settings via DesiredBucketObjectLock.
+func UpdateBucketObjectLock(ctx context.Context, bucketName string, desired *models.BucketS3ObjectLockSettings, tenantClient *TenantClient) error {
+	log := log.FromContext(ctx).WithValues("func", "UpdateBucketObjectLock")
+	log.V(1).Info(fmt.Sprintf("Updating object lock for bucket %s", bucketName))
+
+	if _, err := tenantClient.Bucket().UpdateObjectLock(ctx, bucketName, desired); err != nil {
+		return fmt.Errorf("failed to update object lock for bucket %s: %w", bucketName, err)
+	}
+	return nil
+}
+
+// DesiredBucketObjectLock builds the SDK settings struct from a bucket spec for use with UpdateBucketObjectLock.
+//
+// Object Lock cannot be turned off once a bucket has it enabled; only the default retention
+// can be cleared. So when the spec asks for Disabled and the bucket currently has Object Lock
+// enabled, we send `{enabled: true, defaultRetentionSetting: null}` to drop the policy while
+// preserving the enabled flag. When the bucket has never had Object Lock enabled, we send
+// `{enabled: false}` so we don't accidentally activate it.
+func DesiredBucketObjectLock(spec *s3v1alpha1.S3ObjectLockBucketSpec, current *models.BucketS3ObjectLockSettings) *models.BucketS3ObjectLockSettings {
+	if settings := objectLockToSDK(spec); settings != nil {
+		return settings
+	}
+
+	currentlyEnabled := current != nil && current.Enabled != nil && *current.Enabled
+	if currentlyEnabled {
+		enabled := true
+		return &models.BucketS3ObjectLockSettings{
+			Enabled:                 &enabled,
+			DefaultRetentionSetting: nil,
+		}
+	}
+
+	disabled := false
+	return &models.BucketS3ObjectLockSettings{Enabled: &disabled}
+}
+
+// ObjectLockSettingsEqual compares two SDK object-lock settings for drift detection.
+// Treats nil and Disabled-with-no-retention as equivalent.
+func ObjectLockSettingsEqual(a, b *models.BucketS3ObjectLockSettings) bool {
+	enabled := func(s *models.BucketS3ObjectLockSettings) bool {
+		if s == nil || s.Enabled == nil {
+			return false
+		}
+		return *s.Enabled
+	}
+	if enabled(a) != enabled(b) {
+		return false
+	}
+	// When neither is enabled, default retention is irrelevant.
+	if !enabled(a) {
+		return true
+	}
+	defA := a.DefaultRetentionSetting
+	defB := b.DefaultRetentionSetting
+	if defA == nil && defB == nil {
+		return true
+	}
+	if defA == nil || defB == nil {
+		return false
+	}
+	return defA.Mode == defB.Mode && jsonNumberEqual(defA.Days, defB.Days) && jsonNumberEqual(defA.Years, defB.Years)
+}
+
+// jsonNumberEqual compares two json.Number values numerically, tolerating differences
+// in textual representation (e.g. "30" vs "030", or empty string vs "0"). An empty
+// json.Number is treated as 0.
+func jsonNumberEqual(a, b json.Number) bool {
+	num := func(n json.Number) int64 {
+		if n == "" {
+			return 0
+		}
+		v, err := n.Int64()
+		if err != nil {
+			return 0
+		}
+		return v
+	}
+	return num(a) == num(b)
 }

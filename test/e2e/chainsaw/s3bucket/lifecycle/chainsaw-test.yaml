@@ -1,0 +1,164 @@
+# S3Bucket lifecycle management:
+# verify the operator-managed bucket lifecycle configuration end-to-end.
+# Steps: enable expiration → assert applied, change days → assert reapplied,
+# disable (expirationInDays: 0) → assert removed.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3bucket-lifecycle
+spec:
+  bindings:
+    - name: tenantName
+      value: lifecycle-bucket-tenant
+    - name: bucketName
+      value: lifecycle-bucket
+  steps:
+    # ── Step 1: Create tenant ─────────────────────────────────────────────
+    - name: create-tenant
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+                defaultBucketRegion: us-east-1
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 2: Verify auto-created S3TenantAccount and set Delete policy ──
+    - name: verify-account
+      use:
+        template: ../../s3tenant/_step-templates/verify-account-set-delete-policy.yaml
+
+    # ── Step 3: Create bucket with lifecycle expirationInDays=30 ──────────
+    - name: create-bucket-with-lifecycle
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                region: us-east-1
+                s3TenantRef:
+                  name: ($tenantName)
+                lifecycleManagement:
+                  expirationInDays: 30
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                lifecycleManagement:
+                  expirationInDays: 30
+              status:
+                phase: Ready
+                (bucketName != ''): true
+                (lastAppliedLifecycle != ''): true
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+                (conditions[?type == 'LifecycleSynced']):
+                  - status: "True"
+                    reason: LifecycleApplied
+
+    # ── Step 4: Update expirationInDays=60, assert reapplied ──────────────
+    - name: update-lifecycle
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                lifecycleManagement:
+                  expirationInDays: 60
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                lifecycleManagement:
+                  expirationInDays: 60
+              status:
+                (lastAppliedLifecycle != ''): true
+                (conditions[?type == 'LifecycleSynced']):
+                  - status: "True"
+                    reason: LifecycleApplied
+
+    # ── Step 5: Disable lifecycle (expirationInDays: 0) and assert removal ─
+    - name: disable-lifecycle
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                lifecycleManagement:
+                  expirationInDays: 0
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                lastAppliedLifecycle: ""
+                (conditions[?type == 'LifecycleSynced']):
+                  - status: "True"
+                    reason: LifecycleDisabled
+
+    # ── Step 6: Delete bucket and tenant ──────────────────────────────────
+    - name: delete-bucket
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              name: ($bucketName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+    - name: delete-tenant
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              name: ($tenantName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)

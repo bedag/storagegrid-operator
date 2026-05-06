@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -275,11 +276,34 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 		return err
 	}
 
+	// Reconcile bucket object-lock drift. Sends spec verbatim; StorageGRID rejects invalid transitions.
+	if err := r.reconcileBucketObjectLock(ctx, rctx); err != nil {
+		log.Error(err, "Failed to reconcile bucket object lock")
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketObjectLockReconcileFailed", err.Error())
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeConfigurationSynced, metav1.ConditionFalse, "BucketObjectLockReconcileFailed", err.Error())
+		// Don't return error; continue with other reconciliation so policy and credentials can still progress.
+	}
+
 	// Reconcile bucket policy.
 	if err := r.reconcileBucketPolicy(ctx, rctx); err != nil {
 		log.Error(err, "Failed to reconcile bucket policy")
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketPolicyReconcileFailed", err.Error())
 		// Don't return error, continue with other reconciliation.
+	}
+
+	// Reconcile bucket lifecycle management.
+	if err := r.reconcileBucketLifecycle(ctx, rctx); err != nil {
+		log.Error(err, "Failed to reconcile bucket lifecycle")
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketLifecycleReconcileFailed", err.Error())
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeLifecycleSynced, metav1.ConditionFalse, "BucketLifecycleReconcileFailed", err.Error())
+		// Don't return error; continue so other reconcilers can still progress.
+	}
+
+	// Reconcile the operator-synthesized connection-details Secret. Non-fatal: any failure is
+	// surfaced via condition + event but does not block the rest of reconciliation.
+	if err := r.reconcileBucketConnectionDetails(ctx, rctx); err != nil {
+		log.Error(err, "Failed to reconcile bucket connection details")
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "ConnectionDetailsReconcileFailed", err.Error())
 	}
 
 	// Reconciliation completed successfully.
@@ -431,7 +455,7 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 		fmt.Sprintf("Creating bucket %s in region %s", rctx.Bucket.Status.BucketName, rctx.Bucket.Status.Region))
 
 	// Try to create bucket.
-	err := grid.CreateBucket(ctx, rctx.Bucket.Status.BucketName, rctx.Bucket.Spec.Region, *rctx.Bucket.Spec.RetentionInDays, rctx.TenantClient)
+	err := grid.CreateBucket(ctx, rctx.Bucket.Status.BucketName, rctx.Bucket.Spec.Region, rctx.Bucket.Spec.S3ObjectLock, rctx.TenantClient)
 	if err != nil {
 		if strings.Contains(err.Error(), "BucketAlreadyExists") {
 			r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionFalse, "BucketNameConflict", fmt.Sprintf("Bucket name %s is already taken, please choose a different name", rctx.Bucket.Status.BucketName))
@@ -462,6 +486,40 @@ func (r *S3BucketReconciler) reconcileBucketCreation(ctx context.Context, rctx *
 
 	log.V(1).Info("Bucket creation completed successfully")
 	rctx.DoRequeue = true // Requeue for further processing
+	return nil
+}
+
+// reconcileBucketObjectLock fetches the current object-lock configuration of the bucket and
+// issues an UpdateObjectLock when it diverges from the spec. Sends spec verbatim; the StorageGRID
+// backend rejects invalid transitions (e.g. disabling once enabled) — we surface those errors.
+// Note: StorageGRID applies retention changes to NEW objects only; an event is emitted to make
+// this explicit to operators.
+func (r *S3BucketReconciler) reconcileBucketObjectLock(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileBucketObjectLock")
+
+	current, err := grid.GetBucketObjectLock(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient)
+	if err != nil {
+		return fmt.Errorf("failed to fetch current object lock settings: %w", err)
+	}
+
+	desired := grid.DesiredBucketObjectLock(rctx.Bucket.Spec.S3ObjectLock, current)
+
+	if grid.ObjectLockSettingsEqual(current, desired) {
+		log.V(1).Info("Bucket object lock already in sync")
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeConfigurationSynced, metav1.ConditionTrue, "ObjectLockInSync", "Bucket S3 Object Lock configuration matches spec")
+		return nil
+	}
+
+	log.V(1).Info("Bucket object lock drift detected, updating", "bucketName", rctx.Bucket.Status.BucketName)
+
+	if err := grid.UpdateBucketObjectLock(ctx, rctx.Bucket.Status.BucketName, desired, rctx.TenantClient); err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketObjectLockUpdateFailed,
+			fmt.Sprintf("Failed to update S3 Object Lock for bucket %s: %v", rctx.Bucket.Status.BucketName, err))
+		return fmt.Errorf("failed to update bucket object lock: %w", err)
+	}
+
+	r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketObjectLockUpdated,
+		fmt.Sprintf("Updated S3 Object Lock configuration for bucket %s; the new default retention applies to NEW objects only — existing objects keep their prior retention", rctx.Bucket.Status.BucketName))
 	return nil
 }
 
@@ -862,7 +920,7 @@ func (r *S3BucketReconciler) initS3Client(ctx context.Context, rctx *bucketRecon
 		return err
 	}
 
-	endpointURL := fmt.Sprintf("https://%s:%d", endpointConfig.DefaultAddress, endpointConfig.Port)
+	endpointURL := endpointConfig.URL
 	s3client, err := s3.InitS3Client(ctx, endpointURL, accessKey, secretKey, rctx.Bucket.Status.Region, *endpointConfig.PathStyleAccess)
 	if err != nil {
 		log.Error(err, "Failed to initialize S3 client")
@@ -1013,6 +1071,233 @@ func (r *S3BucketReconciler) reconcileBucketPolicyRemove(ctx context.Context, rc
 		log.V(1).Info("Bucket policy removed successfully")
 	}
 
+	return nil
+}
+
+// reconcileBucketLifecycle drives the operator-managed S3 lifecycle configuration on the bucket.
+// It mirrors reconcileBucketPolicy: dispatches to apply or remove based on whether the spec
+// describes any rules, and tracks the last successfully applied configuration via a JSON
+// fingerprint stored in status.LastAppliedLifecycle for drift detection.
+func (r *S3BucketReconciler) reconcileBucketLifecycle(ctx context.Context, rctx *bucketReconcileContext) error {
+	desired := lifecycleSpecFromBucket(rctx.Bucket)
+	if desired.IsEmpty() {
+		return r.reconcileBucketLifecycleRemove(ctx, rctx)
+	}
+	return r.reconcileBucketLifecycleApply(ctx, rctx, desired)
+}
+
+func (r *S3BucketReconciler) reconcileBucketLifecycleApply(ctx context.Context, rctx *bucketReconcileContext, desired s3.LifecycleSpec) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileBucketLifecycleApply")
+
+	// Warn the user when lifecycle expiration is shorter than the bucket's configured object-lock retention.
+	// We do not block the apply: the grid will reject deletes of locked objects when the lifecycle fires.
+	r.warnLifecycleObjectLockConflict(rctx, desired)
+
+	desiredCfg := s3.BuildLifecycleConfiguration(desired)
+	desiredFingerprint := s3.LifecycleFingerprint(desiredCfg)
+
+	// Always observe the backend before acting: status.LastAppliedLifecycle is diagnostic only,
+	// it must not gate work, otherwise out-of-band drift (manual aws CLI changes, restores,
+	// other tooling) would be silently masked.
+	currentCfg, err := s3.GetLifecycle(ctx, rctx.Bucket.Status.BucketName, rctx.S3Client)
+	if err != nil {
+		return fmt.Errorf("failed to get current lifecycle configuration: %w", err)
+	}
+
+	if s3.LifecycleFingerprint(currentCfg) == desiredFingerprint {
+		log.V(1).Info("Lifecycle configuration already in sync, no changes needed")
+		rctx.Bucket.Status.LastAppliedLifecycle = desiredFingerprint
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeLifecycleSynced, metav1.ConditionTrue, "LifecycleApplied", "Bucket lifecycle configuration in sync")
+		return nil
+	}
+
+	log.V(1).Info("Applying bucket lifecycle configuration", "expirationInDays", desired.ExpirationInDays)
+	if err := s3.PutLifecycle(ctx, rctx.Bucket.Status.BucketName, desiredCfg, rctx.S3Client); err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketLifecycleApplyFailed,
+			fmt.Sprintf("Failed to apply bucket lifecycle configuration: %v", err))
+		return fmt.Errorf("failed to apply lifecycle: %w", err)
+	}
+
+	rctx.Bucket.Status.LastAppliedLifecycle = desiredFingerprint
+	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeLifecycleSynced, metav1.ConditionTrue, "LifecycleApplied", "Bucket lifecycle configuration applied successfully")
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketLifecycleApplied,
+		fmt.Sprintf("Successfully applied bucket lifecycle configuration (expirationInDays=%d)", desired.ExpirationInDays))
+	log.V(1).Info("Bucket lifecycle configuration applied successfully")
+	return nil
+}
+
+func (r *S3BucketReconciler) reconcileBucketLifecycleRemove(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileBucketLifecycleRemove")
+
+	// Fast path: if we never applied a lifecycle configuration, there's nothing to remove.
+	// This trades strict drift-correction (out-of-band rules added directly to the backend won't
+	// be reconciled away) for a cheaper steady state on buckets that don't use lifecycle at all.
+	if rctx.Bucket.Status.LastAppliedLifecycle == "" {
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeLifecycleSynced, metav1.ConditionTrue, "LifecycleDisabled", "Bucket lifecycle management disabled")
+		return nil
+	}
+
+	log.V(1).Info("Removing bucket lifecycle configuration")
+	if err := s3.DeleteLifecycle(ctx, rctx.Bucket.Status.BucketName, rctx.S3Client); err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketLifecycleRemoveFailed,
+			fmt.Sprintf("Failed to remove bucket lifecycle configuration: %v", err))
+		return fmt.Errorf("failed to delete lifecycle: %w", err)
+	}
+
+	rctx.Bucket.Status.LastAppliedLifecycle = ""
+	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeLifecycleSynced, metav1.ConditionTrue, "LifecycleDisabled", "Bucket lifecycle management disabled")
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketLifecycleRemoved,
+		"Successfully removed bucket lifecycle configuration")
+	return nil
+}
+
+// lifecycleSpecFromBucket extracts the operator-level lifecycle spec from the bucket CR.
+// Treats a nil pointer the same as an explicit {expirationInDays: 0} (disabled).
+func lifecycleSpecFromBucket(bucket *s3v1alpha1.S3Bucket) s3.LifecycleSpec {
+	if bucket.Spec.LifecycleManagement == nil {
+		return s3.LifecycleSpec{}
+	}
+	return s3.LifecycleSpec{
+		ExpirationInDays: bucket.Spec.LifecycleManagement.ExpirationInDays,
+	}
+}
+
+// warnLifecycleObjectLockConflict emits a warning event when the configured lifecycle
+// expiration is shorter than the bucket's object-lock retention. The grid will refuse to
+// delete locked objects when the lifecycle fires; we surface this so users notice early.
+func (r *S3BucketReconciler) warnLifecycleObjectLockConflict(rctx *bucketReconcileContext, desired s3.LifecycleSpec) {
+	lock := rctx.Bucket.Spec.S3ObjectLock
+	if lock == nil || lock.Mode == s3v1alpha1.S3ObjectLockModeDisabled {
+		return
+	}
+	if desired.ExpirationInDays > 0 && desired.ExpirationInDays < lock.RetentionInDays {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketLifecycleObjectLockConflict,
+			fmt.Sprintf("Lifecycle expirationInDays=%d is shorter than s3ObjectLock.retentionInDays=%d; StorageGRID will refuse to delete locked objects when the lifecycle fires",
+				desired.ExpirationInDays, lock.RetentionInDays))
+	}
+}
+
+// reconcileBucketConnectionDetails synthesizes (or removes) a Kubernetes Secret containing
+// the AWS-style connection details for this bucket, owned by the S3Bucket CR.
+func (r *S3BucketReconciler) reconcileBucketConnectionDetails(ctx context.Context, rctx *bucketReconcileContext) error {
+	mode := s3v1alpha1.ConnectionDetailsModeAll
+	if rctx.Bucket.Spec.ConnectionDetails != nil && rctx.Bucket.Spec.ConnectionDetails.Mode != "" {
+		mode = rctx.Bucket.Spec.ConnectionDetails.Mode
+	}
+	if mode == s3v1alpha1.ConnectionDetailsModeDisabled {
+		return r.reconcileBucketConnectionDetailsRemove(ctx, rctx)
+	}
+	return r.reconcileBucketConnectionDetailsApply(ctx, rctx)
+}
+
+// connectionDetailsSecretName returns the user-supplied destination secret name when set,
+// otherwise the default `s3bucket-<bucket>-connection-details`. The kind prefix avoids
+// collisions with S3Access default names that would otherwise share the namespace.
+func bucketConnectionDetailsSecretName(bucket *s3v1alpha1.S3Bucket) string {
+	if bucket.Spec.ConnectionDetails != nil && bucket.Spec.ConnectionDetails.DestinationSecret != "" {
+		return bucket.Spec.ConnectionDetails.DestinationSecret
+	}
+	return fmt.Sprintf("s3bucket-%s-connection-details", bucket.Name)
+}
+
+func (r *S3BucketReconciler) reconcileBucketConnectionDetailsApply(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileBucketConnectionDetailsApply")
+
+	// Need the admin keypair, the resolved endpoint URL, region and bucket name. Bail out (without
+	// flipping the condition to False) when prerequisites aren't ready yet — earlier reconcile steps
+	// will fill them in and we'll be requeued.
+	if rctx.Bucket.Status.S3AdminKeysSecretRef == nil || rctx.Bucket.Status.S3AdminKeysSecretRef.Name == "" {
+		log.V(1).Info("Skipping connection details: admin keypair secret not yet known")
+		return nil
+	}
+	if rctx.Bucket.Status.BucketName == "" {
+		log.V(1).Info("Skipping connection details: bucket name not yet known")
+		return nil
+	}
+	if rctx.Bucket.Status.S3EndpointConfig == nil || rctx.Bucket.Status.S3EndpointConfig.URL == "" {
+		log.V(1).Info("Skipping connection details: endpoint URL not yet known")
+		return nil
+	}
+
+	accessKey, secretKey, err := kube.FetchKeyPairFromSecret(ctx, r.Client, rctx.Bucket.Namespace, rctx.Bucket.Status.S3AdminKeysSecretRef.Name)
+	if err != nil {
+		return fmt.Errorf("failed to read bucket admin keypair: %w", err)
+	}
+
+	inputs := kube.ConnectionDetailsInputs{
+		AccessKeyID:     accessKey,
+		SecretAccessKey: secretKey,
+		EndpointURL:     rctx.Bucket.Status.S3EndpointConfig.URL,
+		Region:          rctx.Bucket.Status.Region,
+		BucketName:      rctx.Bucket.Status.BucketName,
+	}
+
+	data := kube.BuildConnectionDetailsData(inputs)
+	desiredSecretName := bucketConnectionDetailsSecretName(rctx.Bucket)
+
+	// Detect a destinationSecret rename
+	previousSecretName := ""
+	if rctx.Bucket.Status.ConnectionDetailsSecretRef != nil {
+		previousSecretName = rctx.Bucket.Status.ConnectionDetailsSecretRef.Name
+	}
+	renamed := previousSecretName != "" && previousSecretName != desiredSecretName
+
+	changed, err := kube.ReconcileOwnedSecret(ctx, r.Client, rctx.Bucket.Namespace, desiredSecretName, data, rctx.Bucket)
+	if err != nil {
+		if errors.Is(err, kube.ErrSecretNotOwned) {
+			msg := fmt.Sprintf("Secret %s/%s exists and is not owned by this S3Bucket; refusing to overwrite. Set spec.connectionDetails.destinationSecret to a different name or remove the foreign secret.",
+				rctx.Bucket.Namespace, desiredSecretName)
+			r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeOwnershipConflict, metav1.ConditionTrue, "ConnectionDetailsConflict", msg)
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventOwnershipConflict, msg)
+			// Non-fatal: user must resolve. Don't propagate as error.
+			return nil
+		}
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventConnectionDetailsApplyFailed,
+			fmt.Sprintf("Failed to apply connection details secret %s: %v", desiredSecretName, err))
+		return fmt.Errorf("failed to reconcile connection details secret: %w", err)
+	}
+
+	// Rename: drop the old owned Secret only after the new one is durably written. We
+	// only ever delete Secrets we own, so foreign Secrets are left alone.
+	if renamed {
+		if _, derr := kube.DeleteOwnedSecret(ctx, r.Client, rctx.Bucket.Namespace, previousSecretName, rctx.Bucket); derr != nil {
+			log.Error(derr, "Failed to delete previous connection-details secret after rename; it can be cleaned up manually", "secret", previousSecretName)
+		} else {
+			r.emitEvent(rctx, corev1.EventTypeWarning, "ConnectionDetailsSecretRenamed",
+				fmt.Sprintf("Connection-details secret renamed from %s to %s \u2014 workloads referencing the old name must be updated", previousSecretName, desiredSecretName))
+		}
+	}
+
+	rctx.Bucket.Status.ConnectionDetailsSecretRef = &corev1.LocalObjectReference{Name: desiredSecretName}
+	if changed {
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventConnectionDetailsApplied,
+			fmt.Sprintf("Successfully applied connection details secret %s", desiredSecretName))
+	}
+	return nil
+}
+
+func (r *S3BucketReconciler) reconcileBucketConnectionDetailsRemove(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileBucketConnectionDetailsRemove")
+
+	// Fast path: nothing to remove if we never wrote one.
+	if rctx.Bucket.Status.ConnectionDetailsSecretRef == nil {
+		return nil
+	}
+
+	secretName := rctx.Bucket.Status.ConnectionDetailsSecretRef.Name
+	deleted, err := kube.DeleteOwnedSecret(ctx, r.Client, rctx.Bucket.Namespace, secretName, rctx.Bucket)
+	if err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventConnectionDetailsRemoveFailed,
+			fmt.Sprintf("Failed to remove connection details secret %s: %v", secretName, err))
+		return fmt.Errorf("failed to delete connection details secret: %w", err)
+	}
+
+	rctx.Bucket.Status.ConnectionDetailsSecretRef = nil
+	if deleted {
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventConnectionDetailsRemoved,
+			fmt.Sprintf("Successfully removed connection details secret %s", secretName))
+	}
+	log.V(1).Info("Connection details remove reconciliation completed", "deleted", deleted)
 	return nil
 }
 

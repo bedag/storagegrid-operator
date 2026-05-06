@@ -183,6 +183,13 @@ type StorageGridStatus struct {
 	// +kubebuilder:default=false
 	Ready bool `json:"ready,omitempty"`
 
+	// S3ObjectLockAvailable indicates whether S3 Object Lock is enabled grid-wide.
+	// nil means the capability has not yet been probed (or last probe failed and no prior value exists).
+	// Derived from /grid/compliance-global complianceEnabled.
+	// +optional
+	// +kubebuilder:default=false
+	S3ObjectLockAvailable *bool `json:"s3ObjectLockAvailable,omitempty"`
+
 	// Track StorageGrid conditions.
 	// Track s3Tenant conditions.
 	// Conditions is an array of conditions.

@@ -43,11 +43,24 @@ type S3AccessSpec struct {
 	// +optional
 	SubPaths []string `json:"subPaths,omitempty"`
 
-	// Optionally specify the secret name for the access credentials.
+	// Optionally specify the secret name for the access credentials (raw keypair).
 	// If not specified, a secret will be automatically generated and managed by the operator.
 	// Changing this after creation will rename the secret (data is moved, old secret is deleted).
+	// This is the operator's internal credential store, separate from the user-facing
+	// connection-details Secret configured via spec.connectionDetails.
 	// +optional
 	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
+
+	// ConnectionDetails controls a separate operator-synthesized Kubernetes Secret
+	// containing the data needed to connect to the bucket through this access
+	// (access key id, secret access key, endpoint URL, region, bucket name) for direct
+	// consumption by user workloads (mountable as `envFrom`). This is a projection of
+	// the credentials Secret referenced by SecretRef plus the bucket's endpoint info;
+	// the raw keypair Secret remains the operator's source of truth.
+	// Defaults to {mode: All}.
+	// +kubebuilder:default={mode: All}
+	// +optional
+	ConnectionDetails *ConnectionDetailsSpec `json:"connectionDetails,omitempty"`
 }
 
 // PolicyRef references an S3Policy or GlobalS3Policy by name and kind.
@@ -104,9 +117,16 @@ type S3AccessStatus struct {
 	// S3 Access Key ID for the access.
 	AccessKeyId string `json:"accessKeyId,omitempty"`
 
-	// Reference to the secret containing the access credentials.
+	// SecretRef is the operator-managed credentials Secret holding the raw access keypair
+	// for this access. This is the operator's source of truth for the credentials.
 	// +optional
 	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
+
+	// ConnectionDetailsSecretRef is set to the user-facing connection-details Secret
+	// projected by the operator (when spec.connectionDetails.mode is All). Cleared when
+	// mode is Disabled.
+	// +optional
+	ConnectionDetailsSecretRef *corev1.LocalObjectReference `json:"connectionDetailsSecretRef,omitempty"`
 
 	// Applied policies for this access.
 	// +optional
@@ -124,7 +144,7 @@ type S3AccessStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Bucket",type="string",JSONPath=".spec.s3BucketRef.name",description="The bucket this access belongs to"
-// +kubebuilder:printcolumn:name="Secret",type="string",JSONPath=".status.secretRef.name",description="Name of the credentials secret"
+// +kubebuilder:printcolumn:name="ConnectionDetails",type="string",JSONPath=".status.connectionDetailsSecretRef.name",description="Name of the user-facing connection-details secret"
 // +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".status.phase",description="Current lifecycle phase"
 // +kubebuilder:printcolumn:JSONPath=`.metadata.creationTimestamp`,name=`AGE`,type=date
 

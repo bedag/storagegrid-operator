@@ -318,6 +318,11 @@ func (r *S3TenantAccountReconciler) doReconcile(ctx context.Context, rctx *accou
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "StorageQuotaReconcileFailed", fmt.Sprintf("Failed to reconcile storage quota: %s", err.Error()))
 	}
 
+	err = r.reconcileObjectLockPolicy(ctx, rctx)
+	if err != nil {
+		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "ObjectLockPolicyReconcileFailed", fmt.Sprintf("Failed to reconcile object lock policy: %s", err.Error()))
+	}
+
 	r.evaluateQuotaConditions(ctx, rctx)
 
 	// reconcile tenant admin credentials.
@@ -1083,7 +1088,7 @@ func (r *S3TenantAccountReconciler) reconcileCreate(ctx context.Context, rctx *a
 	// initial description will include some details about the account in case the reconcileDescription fails later.
 	initialDescription := fmt.Sprintf("Created by storagegrid-operator for S3TenantAccount %s in namespace %s at %s", rctx.Account.Name, rctx.Account.Namespace, time.Now().Format(time.RFC3339))
 
-	tenantID, password, err := grid.CreateTenant(ctx, *rctx.Account.Status.DesiredTenantBackendName, initialDescription, rctx.Account.Spec.StorageQuota.Value(), rctx.GridClient)
+	tenantID, password, err := grid.CreateTenant(ctx, *rctx.Account.Status.DesiredTenantBackendName, initialDescription, rctx.Account.Spec.StorageQuota.Value(), desiredAllowComplianceMode(rctx.Account.Spec.S3ObjectLock), desiredMaxRetentionDays(rctx.Account.Spec.S3ObjectLock), rctx.GridClient)
 	if err != nil {
 		r.emitEvent(rctx, corev1.EventTypeWarning, EventTenantCreateFailed,
 			fmt.Sprintf("Failed to create tenant: %v", err))
@@ -1349,6 +1354,68 @@ func (r *S3TenantAccountReconciler) reconcileStorageQuota(ctx context.Context, r
 
 	rctx.Account.Status.Quota.Limit = kube.ParseBytes(grid.GetConfiguredQuota(rctx.BackendTenant))
 	log.V(1).Info(fmt.Sprintf("Updated tenant quota to %s", rctx.Account.Spec.StorageQuota.String()))
+	return nil
+}
+
+// desiredAllowComplianceMode maps the spec object-lock mode to the backend tenant's
+// AllowComplianceMode flag. Only Compliance grants the capability.
+func desiredAllowComplianceMode(spec *s3v1alpha1.S3ObjectLockTenantSpec) bool {
+	if spec == nil {
+		return false
+	}
+	return spec.Mode == s3v1alpha1.S3ObjectLockModeCompliance
+}
+
+// desiredMaxRetentionDays maps the spec MaxRetentionInDays to the backend tenant's
+// MaxRetentionDays. Returns nil when object lock is Disabled (no per-tenant cap).
+func desiredMaxRetentionDays(spec *s3v1alpha1.S3ObjectLockTenantSpec) *int {
+	if spec == nil || spec.Mode == "" || spec.Mode == s3v1alpha1.S3ObjectLockModeDisabled {
+		return nil
+	}
+	v := int(spec.MaxRetentionInDays)
+	return &v
+}
+
+// intPtrEqual compares two *int values for equality, treating nil == nil as equal.
+func intPtrEqual(a, b *int) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
+// reconcileObjectLockPolicy syncs the backend tenant's S3 Object Lock policy fields
+// (AllowComplianceMode, MaxRetentionDays) with the spec. Issues a single full PUT on drift.
+func (r *S3TenantAccountReconciler) reconcileObjectLockPolicy(ctx context.Context, rctx *accountReconcileContext) error {
+	log := log.FromContext(ctx)
+
+	desiredAllow := desiredAllowComplianceMode(rctx.Account.Spec.S3ObjectLock)
+	desiredMax := desiredMaxRetentionDays(rctx.Account.Spec.S3ObjectLock)
+
+	currentAllow := grid.GetConfiguredAllowComplianceMode(rctx.BackendTenant)
+	currentMax := grid.GetConfiguredMaxRetentionDays(rctx.BackendTenant)
+
+	if currentAllow == desiredAllow && intPtrEqual(currentMax, desiredMax) {
+		log.V(1).Info("Object lock policy already in sync")
+		return nil
+	}
+
+	log.V(1).Info("Object lock policy drift detected, updating tenant",
+		"currentAllowComplianceMode", currentAllow, "desiredAllowComplianceMode", desiredAllow,
+		"currentMaxRetentionDays", currentMax, "desiredMaxRetentionDays", desiredMax)
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantUpdating,
+		fmt.Sprintf("Updating S3 Object Lock policy (allowComplianceMode=%v, maxRetentionDays=%v)", desiredAllow, desiredMax))
+
+	if err := grid.UpdateTenantObjectLockPolicy(ctx, desiredAllow, desiredMax, rctx.BackendTenant, rctx.GridClient); err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventTenantUpdateFailed,
+			fmt.Sprintf("Failed to update S3 Object Lock policy: %v", err))
+		return err
+	}
+
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantUpdated, "Successfully updated S3 Object Lock policy")
 	return nil
 }
 

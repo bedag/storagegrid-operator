@@ -1,0 +1,114 @@
+# S3Bucket with Governance object lock mode:
+# create the parent tenant (with Governance ceiling), then a bucket
+# configured with object-lock Mode=Governance, and verify both are Ready.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3bucket-governance
+spec:
+  bindings:
+    - name: tenantName
+      value: governance-bucket-tenant
+    - name: bucketName
+      value: governance-bucket
+  steps:
+    # ── Step 1: Create tenant that allows Governance object lock ──────────
+    - name: create-tenant
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+                defaultBucketRegion: us-east-1
+                s3ObjectLock:
+                  mode: Governance
+                  maxRetentionInDays: 365
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 2: Verify auto-created S3TenantAccount and set Delete policy ──
+    - name: verify-account
+      use:
+        template: ../../s3tenant/_step-templates/verify-account-set-delete-policy.yaml
+
+    # ── Step 3: Create the bucket with Governance object lock ─────────────
+    - name: create-bucket
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                region: us-east-1
+                s3TenantRef:
+                  name: ($tenantName)
+                s3ObjectLock:
+                  mode: Governance
+                  retentionInDays: 30
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                s3ObjectLock:
+                  mode: Governance
+                  retentionInDays: 30
+              status:
+                phase: Ready
+                region: us-east-1
+                (bucketName != ''): true
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 4: Delete the bucket and confirm cleanup ─────────────────────
+    - name: delete-bucket
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              name: ($bucketName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+
+    # ── Step 5: Delete the tenant and confirm cleanup ─────────────────────
+    - name: delete-tenant
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              name: ($tenantName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)

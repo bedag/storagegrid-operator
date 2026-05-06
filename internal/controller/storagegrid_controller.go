@@ -182,10 +182,35 @@ func (r *StorageGridReconciler) doReconcile(ctx context.Context, rctx *sgReconci
 	}
 	r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeReachable, metav1.ConditionTrue, "GridReachable", "Grid is reachable and healthy")
 
+	// probe grid-wide S3 Object Lock capability (transient failures must not flip Ready).
+	r.reconcileS3ObjectLockCapability(ctx, rctx)
+
 	// set the condition to true, as we successfully reconciled the storageGrid.
 	r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "ReconcileSucceeded", "StorageGrid reconciled successfully")
 
 	return nil
+}
+
+// reconcileS3ObjectLockCapability probes the grid for the compliance-global flag and updates
+// Status.S3ObjectLockAvailable plus the S3ObjectLockSupported condition. Probe failure is
+// transient: the previous Status value is preserved and the condition reason becomes ProbeFailed.
+// This must NOT cause Reconcile to return an error (would flip Ready to false).
+func (r *StorageGridReconciler) reconcileS3ObjectLockCapability(ctx context.Context, rctx *sgReconcileContext) {
+	log := log.FromContext(ctx)
+
+	available, err := grid.GetS3ObjectLockAvailable(ctx, rctx.GridClient)
+	if err != nil {
+		log.V(1).Info("Failed to probe S3 Object Lock capability, keeping previous value", "err", err.Error())
+		r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeS3ObjectLockSupported, metav1.ConditionUnknown, "ProbeFailed", fmt.Sprintf("Failed to probe grid S3 Object Lock capability: %v", err))
+		return
+	}
+
+	rctx.SG.Status.S3ObjectLockAvailable = &available
+	if available {
+		r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeS3ObjectLockSupported, metav1.ConditionTrue, "ComplianceEnabled", "S3 Object Lock is enabled grid-wide")
+	} else {
+		r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeS3ObjectLockSupported, metav1.ConditionFalse, "ComplianceDisabled", "S3 Object Lock is not enabled grid-wide")
+	}
 }
 
 func (r *StorageGridReconciler) deriveReadiness(ctx context.Context, sg *s3v1alpha1.StorageGrid) {
@@ -267,7 +292,8 @@ func (r *StorageGridReconciler) finalize(ctx context.Context, sg *s3v1alpha1.Sto
 	}
 
 	var boundAccounts []string
-	for _, account := range accountList.Items {
+	for i := range accountList.Items {
+		account := &accountList.Items[i]
 		if account.Spec.StorageGridRef.Name == sg.Name {
 			boundAccounts = append(boundAccounts, account.Name)
 		}

@@ -85,6 +85,35 @@ spec:
                   specify a s3 bucketpolicy as json to apply to the bucket.
                   check the s3 documentation for the policy json format.
                 type: string
+              connectionDetails:
+                default:
+                  mode: All
+                description: |-
+                  ConnectionDetails controls whether the operator synthesizes a Kubernetes Secret
+                  containing the data needed to connect to this bucket (access key id, secret access key,
+                  endpoint URL, region, bucket name) for direct consumption by user workloads.
+                  Defaults to {mode: All}.
+                properties:
+                  destinationSecret:
+                    description: |-
+                      DestinationSecret optionally overrides the name of the synthesized Secret.
+                      When empty, the operator uses `<kind>-<resource-name>-connection-details`
+                      (e.g. `s3bucket-foo-connection-details` or `s3access-foo-connection-details`).
+                      The Secret is always created in the same namespace as the source CR.
+                    type: string
+                  mode:
+                    default: All
+                    description: |-
+                      Mode controls whether a connection-details Secret is synthesized.
+                      Defaults to All
+                      Available options:
+                      - All: create/update a Secret containing all standard connection-detail keys.
+                      - Disabled: do not create such a Secret, and remove a previously-created one if present.
+                    enum:
+                    - All
+                    - Disabled
+                    type: string
+                type: object
               drainPollInterval:
                 description: |-
                   DrainPollInterval overrides the StorageGrid drain polling frequency for this bucket.
@@ -96,18 +125,72 @@ spec:
                   DrainStuckThreshold overrides when to consider this bucket's drain stuck.
                   Use for buckets with expected slow drain rates (e.g., 24h+ for multi-billion object bucket).
                 type: string
+              lifecycleManagement:
+                default:
+                  expirationInDays: 0
+                description: |-
+                  LifecycleManagement controls the operator-managed S3 bucket lifecycle configuration.
+                  Defaults to {expirationInDays: 0}, which disables lifecycle management for the bucket
+                  (any previously-applied lifecycle configuration will be removed by the operator).
+                  Setting expirationInDays > 0 instructs StorageGRID to delete current object versions
+                  after that many days from ingestion. Note: on versioned buckets, this only places a
+                  delete marker on the current version; previous versions are not removed (an event will be
+                  emitted in that case).
+                properties:
+                  expirationInDays:
+                    description: |-
+                      ExpirationInDays is the number of days from object ingestion after which the current
+                      version of an object is deleted by StorageGRID. Maps to the S3 lifecycle rule
+                      `Expiration.Days`.
+                      Set to 0 to explicitly disable lifecycle management for this bucket. Any previously
+                      applied lifecycle configuration will be removed by the operator.
+                      On versioned buckets, expiration only places a delete marker on the current version;
+                      noncurrent versions are NOT removed by this rule (a warning event is emitted).
+                    format: int32
+                    minimum: 0
+                    type: integer
+                required:
+                - expirationInDays
+                type: object
               region:
                 description: region of the S3 Bucket.
                 type: string
                 x-kubernetes-validations:
                 - message: region is immutable
                   rule: self == oldSelf
-              retentionInDays:
-                default: 0
-                description: Optional retention in days for objects in the bucket,
-                  defaults to 0, meaning unlimited retention.
-                format: int32
-                type: integer
+              s3ObjectLock:
+                description: |-
+                  S3ObjectLock configures S3 Object Lock for this bucket.
+                  When omitted, object lock is disabled (Mode=Disabled).
+                  Requires the parent StorageGrid to have S3 Object Lock enabled grid-wide.
+                  Compliance mode additionally requires the parent tenant's s3ObjectLock.mode to be Compliance.
+                  Note: changes to mode/retention apply to NEW objects only; existing objects keep their prior settings.
+                properties:
+                  mode:
+                    allOf:
+                    - enum:
+                      - Disabled
+                      - Governance
+                      - Compliance
+                    - enum:
+                      - Disabled
+                      - Governance
+                      - Compliance
+                    description: |-
+                      Mode is the default retention mode applied to new objects.
+                      - Disabled: object lock is not enabled on the bucket.
+                      - Governance: privileged users may bypass retention.
+                      - Compliance: retention is strictly enforced
+                      Cannot be more restrictive than the tenant's s3ObjectLock.mode. When Compliance, the tenant must also have s3ObjectLock.mode=Compliance.
+                    type: string
+                  retentionInDays:
+                    description: |-
+                      RetentionInDays is the default retention period applied to new objects when Mode is not Disabled.
+                      Must be greater than zero. Capped by the parent tenant's s3ObjectLock.maxRetentionInDays.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                type: object
               s3TenantRef:
                 description: tenant the bucket will be created in.
                 properties:
@@ -246,6 +329,24 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              connectionDetailsSecretRef:
+                description: |-
+                  ConnectionDetailsSecretRef is set to the user-facing connection-details Secret
+                  projected by the operator (when spec.connectionDetails.mode is All). Cleared when
+                  mode is Disabled. Tracks the actually-deployed Secret name so a destinationSecret
+                  rename or a re-enable after Disabled can clean up the previous Secret.
+                properties:
+                  name:
+                    default: ""
+                    description: |-
+                      Name of the referent.
+                      This field is effectively required, but due to backwards compatibility is
+                      allowed to be empty. Instances of this type with an empty value here are
+                      almost certainly wrong.
+                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                    type: string
+                type: object
+                x-kubernetes-map-type: atomic
               drainStatus:
                 description: |-
                   DrainStatus tracks active drain operation progress.
@@ -299,6 +400,11 @@ spec:
                 - isDeletingObjects
                 - nextPollInterval
                 type: object
+              lastAppliedLifecycle:
+                description: |-
+                  LastAppliedLifecycle is a fingerprint of the lifecycle configuration last successfully applied.
+                  Used by the operator for drift detection. Empty when no lifecycle configuration is managed.
+                type: string
               lastAppliedPolicy:
                 description: track last successfully applied policy.
                 type: string
@@ -358,10 +464,22 @@ spec:
                     description: Port is the HTTPS port for S3 API access.
                     format: int32
                     type: integer
+                  protocol:
+                    default: https
+                    description: Protocol indicates the protocol to use for S3 API
+                      access (e.g., "https").
+                    type: string
                   s3TenantClassName:
                     default: ""
                     description: TenantClassName which this S3EndpointConfig belongs
                       to.
+                    type: string
+                  url:
+                    description: |-
+                      URL is the fully-qualified S3 endpoint URL composed from DefaultAddress and Port,
+                      in the form `https://<defaultAddress>:<port>`. Populated by the operator whenever
+                      the endpoint config is (re)computed; consumers should prefer this field over
+                      re-composing the URL themselves.
                     type: string
                 type: object
             type: object

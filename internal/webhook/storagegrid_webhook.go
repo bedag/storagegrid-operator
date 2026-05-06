@@ -108,7 +108,8 @@ func (r *StorageGridValidator) ValidateDelete(ctx context.Context, obj runtime.O
 	}
 
 	var boundAccounts []string
-	for _, account := range accountList.Items {
+	for i := range accountList.Items {
+		account := &accountList.Items[i]
 		if account.Spec.StorageGridRef.Name == storagegrid.Name {
 			boundAccounts = append(boundAccounts, account.Name)
 		}

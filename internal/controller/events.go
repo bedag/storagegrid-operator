@@ -140,6 +140,19 @@ const (
 	EventBucketPolicyApplyFailed  = "PolicyApplyFailed"
 	EventBucketPolicyRemoveFailed = "PolicyRemoveFailed"
 
+	// Bucket Lifecycle Management Events.
+	EventBucketLifecycleApplied            = "LifecycleApplied"
+	EventBucketLifecycleRemoved            = "LifecycleRemoved"
+	EventBucketLifecycleApplyFailed        = "LifecycleApplyFailed"
+	EventBucketLifecycleRemoveFailed       = "LifecycleRemoveFailed"
+	EventBucketLifecycleObjectLockConflict = "LifecycleObjectLockConflict"
+
+	// Connection Details Events (shared by S3Bucket and S3Access).
+	EventConnectionDetailsApplied      = "ConnectionDetailsApplied"
+	EventConnectionDetailsRemoved      = "ConnectionDetailsRemoved"
+	EventConnectionDetailsApplyFailed  = "ConnectionDetailsApplyFailed"
+	EventConnectionDetailsRemoveFailed = "ConnectionDetailsRemoveFailed"
+
 	// Admin User Management Events.
 	EventBucketAdminUserCreated      = "AdminUserCreated"
 	EventBucketAdminUserCreateFailed = "AdminUserCreateFailed"
@@ -164,6 +177,10 @@ const (
 	EventBucketOwnershipCheckFailed   = "BucketOwnershipCheckFailed"
 	EventBucketOwnershipTaggingFailed = "BucketOwnershipTaggingFailed"
 	EventBucketNotOwnedByOperator     = "BucketNotOwnedByOperator"
+
+	// Bucket Object Lock Events.
+	EventBucketObjectLockUpdated      = "BucketObjectLockUpdated"
+	EventBucketObjectLockUpdateFailed = "BucketObjectLockUpdateFailed"
 
 	// Bucket Drain Events.
 	EventBucketDrainingStarted  = "BucketDrainingStarted"

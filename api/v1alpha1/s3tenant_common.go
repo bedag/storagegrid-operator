@@ -97,6 +97,31 @@ type CommonTenantSpec struct {
 	// StorageGrid reference.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="storageGridRef is immutable"
 	StorageGridRef corev1.LocalObjectReference `json:"storageGridRef,omitempty"`
+
+	// S3ObjectLock configures the maximum S3 Object Lock capabilities allowed for buckets in this tenant.
+	// Mode acts as the ceiling on bucket-level mode (Disabled < Governance < Compliance).
+	// Compliance requires the parent StorageGrid to have S3 Object Lock enabled grid-wide.
+	// +optional
+	S3ObjectLock *S3ObjectLockTenantSpec `json:"s3ObjectLock,omitempty"`
+}
+
+// S3ObjectLockTenantSpec configures the per-tenant S3 Object Lock policy.
+type S3ObjectLockTenantSpec struct {
+	// Mode is the maximum S3 Object Lock mode permitted for buckets owned by this tenant.
+	// - Disabled: buckets in this tenant may not enable object lock.
+	// - Governance: buckets may use Governance only.
+	// - Compliance: buckets may use either Governance or Compliance
+	// +kubebuilder:default="Disabled"
+	// +kubebuilder:validation:Enum=Disabled;Governance;Compliance
+	// +optional
+	Mode S3ObjectLockMode `json:"mode,omitempty"`
+
+	// MaxRetentionInDays caps the retentionInDays a bucket in this tenant may request.
+	// Mapped to the backend tenant policy MaxRetentionDays.
+	// +kubebuilder:default=0
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxRetentionInDays int32 `json:"maxRetentionInDays,omitempty"`
 }
 
 type CommonTenantStatus struct {
@@ -200,6 +225,18 @@ type S3EndpointConfig struct {
 	// Port is the HTTPS port for S3 API access.
 	// +optional
 	Port int32 `json:"port,omitempty"`
+
+	// URL is the fully-qualified S3 endpoint URL composed from DefaultAddress and Port,
+	// in the form `https://<defaultAddress>:<port>`. Populated by the operator whenever
+	// the endpoint config is (re)computed; consumers should prefer this field over
+	// re-composing the URL themselves.
+	// +optional
+	URL string `json:"url,omitempty"`
+
+	// Protocol indicates the protocol to use for S3 API access (e.g., "https").
+	// +optional
+	// +kubebuilder:default="https"
+	Protocol string `json:"protocol,omitempty"`
 
 	// PathStyleAccess indicates if path-style S3 access is required.
 	// When true, use path-style URLs (https://endpoint/bucket/key).

@@ -245,10 +245,22 @@ spec:
                     description: Port is the HTTPS port for S3 API access.
                     format: int32
                     type: integer
+                  protocol:
+                    default: https
+                    description: Protocol indicates the protocol to use for S3 API
+                      access (e.g., "https").
+                    type: string
                   s3TenantClassName:
                     default: ""
                     description: TenantClassName which this S3EndpointConfig belongs
                       to.
+                    type: string
+                  url:
+                    description: |-
+                      URL is the fully-qualified S3 endpoint URL composed from DefaultAddress and Port,
+                      in the form `https://<defaultAddress>:<port>`. Populated by the operator whenever
+                      the endpoint config is (re)computed; consumers should prefer this field over
+                      re-composing the URL themselves.
                     type: string
                 type: object
               secure:

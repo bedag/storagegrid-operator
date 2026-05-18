@@ -58,7 +58,11 @@ type tenantReconcileContext struct {
 }
 
 const (
-	tenantFinalizer = "kubernetes.io/foregroundDeletion"
+	s3TenantFinalizer = "s3tenant.s3.bedag.ch/finalizer"
+
+	// legacyForegroundFinalizer is the old finalizer that was incorrectly reused from the
+	// Kubernetes garbage collector. Existing resources are migrated automatically.
+	legacyForegroundFinalizer = "kubernetes.io/foregroundDeletion"
 )
 
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenants,verbs=get;list;watch;create;update;patch;delete
@@ -526,37 +530,44 @@ func (r *S3TenantReconciler) generateTenantAccount(s3Tenant *s3v1alpha1.S3Tenant
 	}
 }
 
+//nolint:dupl // structurally similar to S3TenantAccount's reconcileFinalizerAndDlelete but operates on different types.
 func (r *S3TenantReconciler) reconcileFinalizerAndDlelete(ctx context.Context, rctx *tenantReconcileContext) error {
 	log := log.FromContext(ctx)
 
+	// Migrate legacy finalizer to custom finalizer.
+	if controllerutil.ContainsFinalizer(rctx.S3Tenant, legacyForegroundFinalizer) {
+		controllerutil.RemoveFinalizer(rctx.S3Tenant, legacyForegroundFinalizer)
+		controllerutil.AddFinalizer(rctx.S3Tenant, s3TenantFinalizer)
+		log.Info("Migrated legacy finalizer to custom finalizer on S3Tenant")
+		rctx.ObjectUpdated = true
+		rctx.DoRequeue = true
+		return nil
+	}
+
 	// check if the object is being deleted.
 	if rctx.S3Tenant.DeletionTimestamp.IsZero() {
-		// if the object is not being deleted, add our finalizer if it is not already present.
-		if !controllerutil.ContainsFinalizer(rctx.S3Tenant, tenantFinalizer) {
-			controllerutil.AddFinalizer(rctx.S3Tenant, tenantFinalizer)
+		if !controllerutil.ContainsFinalizer(rctx.S3Tenant, s3TenantFinalizer) {
+			controllerutil.AddFinalizer(rctx.S3Tenant, s3TenantFinalizer)
 			log.V(1).Info("Adding finalizer to S3Tenant")
-			rctx.DoRequeue = true // we need to requeue to ensure the finalizer is added
+			rctx.DoRequeue = true
 			rctx.ObjectUpdated = true
 			return nil
 		}
 	} else {
-		log.V(1).Info("Object is being deleted")
-		if controllerutil.ContainsFinalizer(rctx.S3Tenant, tenantFinalizer) {
-			// our finalizer is present, so lets handle any external dependency.
+		log.V(1).Info("S3Tenant is being deleted")
+		if controllerutil.ContainsFinalizer(rctx.S3Tenant, s3TenantFinalizer) {
 			if err := r.finalize(ctx, rctx); err != nil {
-				log.Error(err, "Failed to finalize tenant")
+				log.Error(err, "Failed to finalize S3Tenant")
 				return err
 			}
 
-			// remove our finalizer from the list and update it.
-			controllerutil.RemoveFinalizer(rctx.S3Tenant, tenantFinalizer)
+			controllerutil.RemoveFinalizer(rctx.S3Tenant, s3TenantFinalizer)
 			log.V(1).Info("Removing finalizer from S3Tenant")
-			rctx.DoRequeue = true // we need to requeue to ensure the finalizer is added
+			rctx.DoRequeue = true
 			rctx.ObjectUpdated = true
 			return nil
 		}
 
-		// no finalizer is present, so we can proceed with deletion.
 		log.V(1).Info("Finalizer not present, deletion can proceed without further action")
 		return nil
 	}
@@ -630,7 +641,7 @@ func (r *S3TenantReconciler) reconcileLinkedBuckets(ctx context.Context, rctx *t
 	// fetch all buckets linked to this tenant.
 	buckets := &s3v1alpha1.S3BucketList{}
 	opts := []client.ListOption{
-		client.MatchingFields{"spec.s3TenantRef.name": rctx.S3Tenant.Name},
+		client.MatchingFields{"spec.s3TenantRef.namespacedName": rctx.S3Tenant.Namespace + "/" + rctx.S3Tenant.Name},
 	}
 	if err := r.List(ctx, buckets, opts...); err != nil {
 		if client.IgnoreNotFound(err) != nil {
@@ -673,16 +684,16 @@ func (r *S3TenantReconciler) finalize(ctx context.Context, rctx *tenantReconcile
 		ignoreUnmanaged = true
 	}
 
-	if ignoreUnmanaged {
-		// if there are any managed buckets linked to this tenant, abort deletion.
-		if len(rctx.S3Tenant.Status.LinkedBuckets) > 0 {
-			return fmt.Errorf("cannot delete tenant with linked buckets: %v", rctx.S3Tenant.Status.LinkedBuckets)
-		}
-	} else {
-		// if tenant still has any buckets, abort deletion.
-		if rctx.S3Tenant.Status.TenantUsage.BucketCount > 0 {
-			return fmt.Errorf("cannot delete tenant with buckets")
-		}
+	// Always block deletion if operator-managed buckets still reference this tenant.
+	// LinkedBuckets is freshly populated by reconcileLinkedBuckets via the field indexer.
+	if len(rctx.S3Tenant.Status.LinkedBuckets) > 0 {
+		return fmt.Errorf("cannot delete tenant with linked buckets: %v", rctx.S3Tenant.Status.LinkedBuckets)
+	}
+
+	// Additionally check backend bucket count for manually-created buckets (unless opted out).
+	if !ignoreUnmanaged && rctx.S3Tenant.Status.TenantUsage.BucketCount > 0 {
+		return fmt.Errorf("cannot delete tenant: backend still reports %d bucket(s). Use annotation %s=true to ignore unmanaged buckets",
+			rctx.S3Tenant.Status.TenantUsage.BucketCount, s3v1alpha1.AnnotationIgnoreUnmanagedBuckets)
 	}
 
 	// make sure the tenantref is removed from the account.
@@ -769,11 +780,15 @@ func (r *S3TenantReconciler) reconcileTenantAnnotations(ctx context.Context, rct
 // SetupWithManager sets up the controller with the Manager.
 func (r *S3TenantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	tenantRefFunc := func(obj client.Object) []string {
-		sg := obj.(*s3v1alpha1.S3Bucket)
-		return []string{sg.Spec.S3TenantRef.Name}
+		bucket := obj.(*s3v1alpha1.S3Bucket)
+		ns := bucket.Spec.S3TenantRef.Namespace
+		if ns == "" {
+			ns = bucket.Namespace
+		}
+		return []string{ns + "/" + bucket.Spec.S3TenantRef.Name}
 	}
 
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &s3v1alpha1.S3Bucket{}, "spec.s3TenantRef.name", tenantRefFunc); err != nil {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &s3v1alpha1.S3Bucket{}, "spec.s3TenantRef.namespacedName", tenantRefFunc); err != nil {
 		return err
 	}
 	return ctrl.NewControllerManagedBy(mgr).
@@ -781,7 +796,6 @@ func (r *S3TenantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			PredicateWithoutStatusChange(),
 		)).
 		Owns(&corev1.Secret{}).
-		Owns(&s3v1alpha1.S3Bucket{}).
 		Watches(
 			&s3v1alpha1.S3TenantAccount{},
 			handler.EnqueueRequestsFromMapFunc(r.mapAccountToTenant),

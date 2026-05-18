@@ -84,6 +84,10 @@ type conditionCheck struct {
 	resultVar     *bool
 }
 
+const (
+	s3TenantAccountFinalizer = "s3tenantaccount.s3.bedag.ch/finalizer"
+)
+
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenantaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenantaccounts/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=s3.bedag.ch,resources=s3tenantaccounts/finalizers,verbs=update
@@ -793,38 +797,44 @@ func (r *S3TenantAccountReconciler) checkRetentionConditions(ctx context.Context
 	return message
 }
 
+//nolint:dupl // structurally similar to S3Tenant's reconcileFinalizerAndDlelete but operates on different types.
 func (r *S3TenantAccountReconciler) reconcileFinalizerAndDlelete(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
+	// Migrate legacy finalizer to custom finalizer.
+	if controllerutil.ContainsFinalizer(rctx.Account, legacyForegroundFinalizer) {
+		controllerutil.RemoveFinalizer(rctx.Account, legacyForegroundFinalizer)
+		controllerutil.AddFinalizer(rctx.Account, s3TenantAccountFinalizer)
+		log.Info("Migrated legacy finalizer to custom finalizer on S3TenantAccount")
+		rctx.ObjectUpdated = true
+		rctx.DoRequeue = true
+		return nil
+	}
+
 	// check if the object is being deleted.
 	if rctx.Account.DeletionTimestamp.IsZero() {
-		// if the object is not being deleted, add our finalizer if it is not already present.
-		if !controllerutil.ContainsFinalizer(rctx.Account, tenantFinalizer) {
-			controllerutil.AddFinalizer(rctx.Account, tenantFinalizer)
-			log.V(1).Info("Adding finalizer to S3Tenant")
-			rctx.DoRequeue = true // we need to requeue to ensure the finalizer is added
+		if !controllerutil.ContainsFinalizer(rctx.Account, s3TenantAccountFinalizer) {
+			controllerutil.AddFinalizer(rctx.Account, s3TenantAccountFinalizer)
+			log.V(1).Info("Adding finalizer to S3TenantAccount")
+			rctx.DoRequeue = true
 			rctx.ObjectUpdated = true
 			return nil
 		}
 	} else {
-		// the object is being deleted.
-		log.V(1).Info("Object is being deleted")
-		if controllerutil.ContainsFinalizer(rctx.Account, tenantFinalizer) {
-			// our finalizer is present, so lets handle any external dependency.
+		log.V(1).Info("S3TenantAccount is being deleted")
+		if controllerutil.ContainsFinalizer(rctx.Account, s3TenantAccountFinalizer) {
 			if err := r.finalize(ctx, rctx); err != nil {
-				log.Error(err, "Failed to finalize tenant")
+				log.Error(err, "Failed to finalize S3TenantAccount")
 				return err
 			}
 
-			// remove our finalizer from the list and update it.
-			controllerutil.RemoveFinalizer(rctx.Account, tenantFinalizer)
-			log.V(1).Info("Removing finalizer from S3Tenant")
-			rctx.DoRequeue = true // we need to requeue to ensure the finalizer is removed on the next reconciliation
+			controllerutil.RemoveFinalizer(rctx.Account, s3TenantAccountFinalizer)
+			log.V(1).Info("Removing finalizer from S3TenantAccount")
+			rctx.DoRequeue = true
 			rctx.ObjectUpdated = true
 			return nil
 		}
 
-		// no finalizer is present, so we can proceed with deletion.
 		log.V(1).Info("Finalizer not present, deletion can proceed without further action")
 		return nil
 	}

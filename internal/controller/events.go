@@ -127,6 +127,7 @@ const (
 	// Tenant Dependency Events.
 	EventBucketTenantNotReady = "TenantNotReady"
 	EventBucketTenantReady    = "TenantReady"
+	EventBucketTenantGone     = "TenantGone"
 
 	// Bucket Credentials Events.
 	EventBucketCredentialsCreated         = "CredentialsCreated"

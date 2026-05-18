@@ -19,6 +19,7 @@ package webhook
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
 	"github.com/bedag/storagegrid-operator/internal/controller"
@@ -164,7 +165,35 @@ func (r *S3TenantValidator) ValidateDelete(ctx context.Context, obj runtime.Obje
 			s3tenant.Name, s3v1alpha1.AnnotationDeletionProtection, s3tenant.Name, s3v1alpha1.AnnotationDeletionProtection, s3tenant.Namespace)
 	}
 
+	// Block deletion if S3Buckets still reference this tenant.
+	if err := r.validateNoLinkedBuckets(ctx, s3tenant); err != nil {
+		return nil, err
+	}
+
 	return nil, nil
+}
+
+// validateNoLinkedBuckets checks if any S3Buckets reference this tenant and blocks deletion if so.
+// Uses the field indexer registered by the S3Tenant controller for efficient lookup.
+func (r *S3TenantValidator) validateNoLinkedBuckets(ctx context.Context, s3tenant *s3v1alpha1.S3Tenant) error {
+	buckets := &s3v1alpha1.S3BucketList{}
+	if err := r.k8sClient.List(ctx, buckets,
+		client.MatchingFields{"spec.s3TenantRef.namespacedName": s3tenant.Namespace + "/" + s3tenant.Name}); err != nil {
+		return fmt.Errorf("failed to list S3Buckets referencing tenant %s: %w", s3tenant.Name, err)
+	}
+
+	if len(buckets.Items) == 0 {
+		return nil
+	}
+
+	linked := make([]string, 0, len(buckets.Items))
+	for i := range buckets.Items {
+		b := &buckets.Items[i]
+		linked = append(linked, fmt.Sprintf("%s/%s", b.Namespace, b.Name))
+	}
+
+	return fmt.Errorf("cannot delete S3Tenant %s/%s: %d S3Bucket(s) still reference it: [%s]. Delete the buckets first",
+		s3tenant.Namespace, s3tenant.Name, len(linked), strings.Join(linked, ", "))
 }
 
 func (r *S3TenantValidator) tenantClassExists(ctx context.Context, tenantClassName string) (bool, error) {

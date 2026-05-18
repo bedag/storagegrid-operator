@@ -26,6 +26,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -167,6 +168,10 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 
 	// Fetch and validate S3Tenant.
 	if err := r.reconcileS3TenantReference(ctx, rctx); err != nil {
+		// If tenant is gone and bucket is being deleted, finalize without tenant.
+		if apierrors.IsNotFound(errors.Unwrap(err)) && !rctx.Bucket.DeletionTimestamp.IsZero() {
+			return r.finalizeWithoutTenant(ctx, rctx)
+		}
 		rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseFailed
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "TenantNotFound", err.Error())
 		r.setCondition(rctx.Bucket, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionFalse, "TenantNotFound", err.Error())
@@ -1352,6 +1357,32 @@ func (r *S3BucketReconciler) finalize(ctx context.Context, rctx *bucketReconcile
 	}
 
 	log.V(1).Info("Finalization completed successfully")
+	return nil
+}
+
+// finalizeWithoutTenant handles bucket deletion when the S3Tenant no longer exists.
+// Backend cleanup is skipped — the user must manually clean up StorageGrid if needed.
+// This prevents the bucket from being stuck indefinitely when the tenant is force-deleted.
+func (r *S3BucketReconciler) finalizeWithoutTenant(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "finalizeWithoutTenant")
+	log.Info("S3Tenant not found during bucket deletion, skipping backend cleanup")
+
+	rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseDeleting
+
+	r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketTenantGone,
+		fmt.Sprintf("S3Tenant %s not found during bucket deletion. Backend cleanup skipped — manual StorageGrid cleanup may be required for bucket %s",
+			rctx.Bucket.Spec.S3TenantRef.Name, rctx.Bucket.Status.BucketName))
+
+	r.setCondition(rctx.Bucket, s3v1alpha1.ContitionTypeBackingResourceReady, metav1.ConditionFalse,
+		"TenantGone", "S3Tenant no longer exists, backend cleanup skipped")
+
+	// Remove finalizer to allow the bucket CR to be garbage collected.
+	if controllerutil.ContainsFinalizer(rctx.Bucket, s3BucketFinalizer) {
+		controllerutil.RemoveFinalizer(rctx.Bucket, s3BucketFinalizer)
+		rctx.ObjectUpdated = true
+	}
+
+	rctx.DoRequeue = true
 	return nil
 }
 

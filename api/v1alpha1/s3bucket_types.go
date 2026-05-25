@@ -57,10 +57,18 @@ type S3BucketSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="s3TenantRef is immutable"
 	S3TenantRef corev1.ObjectReference `json:"s3TenantRef,omitempty"`
 
-	// specify a s3 bucketpolicy as json to apply to the bucket.
-	// check the s3 documentation for the policy json format.
+	// Deprecated: Use bucketPolicies instead for structured, validated, and reusable bucket policy management.
+	// Specify a raw S3 bucket policy as JSON to apply to the bucket.
+	// Mutually exclusive with bucketPolicies — setting both is rejected by the validating webhook.
 	// +optional
 	BucketPolicyJson string `json:"bucketPolicyJson,omitempty"`
+
+	// BucketPolicies defines structured S3 bucket policies by referencing S3Policy or GlobalS3Policy
+	// resources and specifying the Principal (who) at binding time. All entries are merged into a
+	// single S3 bucket policy document applied via PutBucketPolicy.
+	// Mutually exclusive with bucketPolicyJson — setting both is rejected by the validating webhook.
+	// +optional
+	BucketPolicies []BucketPolicyBinding `json:"bucketPolicies,omitempty"`
 
 	// LifecycleManagement controls the operator-managed S3 bucket lifecycle configuration.
 	// Defaults to {expirationInDays: 0}, which disables lifecycle management for the bucket
@@ -124,8 +132,12 @@ type S3BucketStatus struct {
 	// s3 endpoint configuration for the bucket.
 	S3EndpointConfig *S3EndpointConfig `json:"s3EndpointConfig,omitempty"`
 
-	// track last successfully applied policy.
+	// track last successfully applied policy (from deprecated bucketPolicyJson).
 	LastAppliedPolicy string `json:"lastAppliedPolicy,omitempty"`
+
+	// LastAppliedBucketPolicies is a fingerprint of the bucket policy last successfully applied
+	// from spec.bucketPolicies. Used for drift detection. Empty when no structured bucket policy is managed.
+	LastAppliedBucketPolicies string `json:"lastAppliedBucketPolicies,omitempty"`
 
 	// LastAppliedLifecycle is a fingerprint of the lifecycle configuration last successfully applied.
 	// Used by the operator for drift detection. Empty when no lifecycle configuration is managed.
@@ -162,6 +174,22 @@ type BucketUsage struct {
 
 	// total resources used by the S3 Bucket.
 	Bytes *resource.Quantity `json:"bytes,omitempty"`
+}
+
+// BucketPolicyBinding binds an S3Policy or GlobalS3Policy to a bucket with explicit principals.
+// The referenced policy defines the rules (actions, effect, scope); the binding adds the
+// Principal (who) context. All bindings on a bucket are merged into one S3 bucket policy document.
+type BucketPolicyBinding struct {
+	// Reference to the S3Policy or GlobalS3Policy that defines the rules.
+	// +kubebuilder:validation:Required
+	PolicyRef PolicyRef `json:"policyRef"`
+
+	// Principals specifies who the policy applies to.
+	// Use "*" for anonymous/public access, a tenant ID for all users in that tenant,
+	// or an ARN for specific identities (e.g. "arn:aws:iam::123456789012:user/JohnDoe").
+	// When omitted, defaults to the bucket's tenant account ID (all authenticated users in the tenant).
+	// +optional
+	Principals []string `json:"principals,omitempty"`
 }
 
 // S3ObjectLockMode represents the configured S3 Object Lock retention mode for a bucket

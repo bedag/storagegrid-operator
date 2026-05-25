@@ -93,6 +93,10 @@ func (r *S3BucketValidator) ValidateCreate(ctx context.Context, obj runtime.Obje
 		return nil, err
 	}
 
+	if err := validateBucketPolicyMutualExclusion(s3bucket); err != nil {
+		return nil, err
+	}
+
 	return nil, nil
 }
 
@@ -134,6 +138,10 @@ func (r *S3BucketValidator) ValidateUpdate(ctx context.Context, oldObj, newObj r
 	}
 
 	if err := r.validateBucketObjectLock(ctx, s3bucketNew, s3Teant); err != nil {
+		return nil, err
+	}
+
+	if err := validateBucketPolicyMutualExclusion(s3bucketNew); err != nil {
 		return nil, err
 	}
 
@@ -249,5 +257,15 @@ func (r *S3BucketValidator) validateBucketObjectLock(ctx context.Context, bucket
 		}
 	}
 
+	return nil
+}
+
+// validateBucketPolicyMutualExclusion ensures that spec.bucketPolicyJson and spec.bucketPolicies
+// are not both set simultaneously. They serve the same purpose (applying an S3 bucket policy)
+// but via different mechanisms — only one may be active at a time.
+func validateBucketPolicyMutualExclusion(bucket *s3v1alpha1.S3Bucket) error {
+	if bucket.Spec.BucketPolicyJson != "" && len(bucket.Spec.BucketPolicies) > 0 {
+		return fmt.Errorf("spec.bucketPolicyJson and spec.bucketPolicies are mutually exclusive; use spec.bucketPolicies (bucketPolicyJson is deprecated)")
+	}
 	return nil
 }

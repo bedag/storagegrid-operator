@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -25,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -293,6 +296,13 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 	if err := r.reconcileBucketPolicy(ctx, rctx); err != nil {
 		log.Error(err, "Failed to reconcile bucket policy")
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketPolicyReconcileFailed", err.Error())
+		// Don't return error, continue with other reconciliation.
+	}
+
+	// Reconcile structured bucket policies (spec.bucketPolicies).
+	if err := r.reconcileBucketPolicies(ctx, rctx); err != nil {
+		log.Error(err, "Failed to reconcile structured bucket policies")
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketPoliciesReconcileFailed", err.Error())
 		// Don't return error, continue with other reconciliation.
 	}
 
@@ -1019,6 +1029,8 @@ func (r *S3BucketReconciler) resolveS3Endpoint(ctx context.Context, rctx *bucket
 func (r *S3BucketReconciler) reconcileBucketPolicy(ctx context.Context, rctx *bucketReconcileContext) error {
 	// Handle policy reconciliation.
 	if rctx.Bucket.Spec.BucketPolicyJson != "" {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketPolicyDeprecated,
+			"spec.bucketPolicyJson is deprecated; migrate to spec.bucketPolicies for structured, validated bucket policy management")
 		return r.reconcileBucketPolicyApply(ctx, rctx)
 	} else {
 		return r.reconcileBucketPolicyRemove(ctx, rctx)
@@ -1077,6 +1089,159 @@ func (r *S3BucketReconciler) reconcileBucketPolicyRemove(ctx context.Context, rc
 	}
 
 	return nil
+}
+
+// reconcileBucketPolicies handles the structured bucket policy reconciliation via spec.bucketPolicies.
+// It fetches referenced S3Policy/GlobalS3Policy resources, renders a combined bucket policy document
+// with principals injected, and applies it via PutBucketPolicy. Uses fingerprint-based drift detection.
+func (r *S3BucketReconciler) reconcileBucketPolicies(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileBucketPolicies")
+
+	if len(rctx.Bucket.Spec.BucketPolicies) == 0 {
+		return r.reconcileBucketPoliciesRemove(ctx, rctx)
+	}
+	return r.reconcileBucketPoliciesApply(ctx, rctx, log)
+}
+
+func (r *S3BucketReconciler) reconcileBucketPoliciesApply(ctx context.Context, rctx *bucketReconcileContext, log logr.Logger) error {
+	bucketName := rctx.Bucket.Status.BucketName
+
+	allStatements := []grid.PolicyStatement{}
+
+	for _, binding := range rctx.Bucket.Spec.BucketPolicies {
+		renderedPolicy, err := r.fetchRenderedPolicy(ctx, rctx, binding.PolicyRef)
+		if err != nil {
+			return fmt.Errorf("failed to fetch policy %s/%s: %w", binding.PolicyRef.Kind, binding.PolicyRef.Name, err)
+		}
+
+		statements, err := parseBucketPolicyStatements(renderedPolicy, bucketName)
+		if err != nil {
+			return fmt.Errorf("failed to parse rendered policy from %s/%s: %w", binding.PolicyRef.Kind, binding.PolicyRef.Name, err)
+		}
+
+		// Inject principals into each statement.
+		// Default to tenant account ID (all authenticated users in the tenant) when omitted.
+		principals := binding.Principals
+		if len(principals) == 0 {
+			principals = []string{rctx.S3Tenant.Status.TenantID}
+		}
+		principal := &grid.PolicyPrincipal{AWS: principals}
+		for i := range statements {
+			statements[i].Principal = principal
+		}
+
+		allStatements = append(allStatements, statements...)
+	}
+
+	// Render the combined bucket policy document.
+	combinedPolicy := grid.Policy{
+		Statement: allStatements,
+	}
+	desiredDocument := grid.GeneratePolicyDocument(combinedPolicy)
+	desiredFingerprint := bucketPolicyFingerprint(desiredDocument)
+
+	// Compare with last applied fingerprint.
+	if rctx.Bucket.Status.LastAppliedBucketPolicies == desiredFingerprint {
+		log.V(1).Info("Bucket policies already in sync, no changes needed")
+		return nil
+	}
+
+	// Apply the bucket policy.
+	log.V(1).Info("Applying structured bucket policy", "statementCount", len(allStatements))
+	if err := s3.ApplyPolicy(ctx, bucketName, desiredDocument, rctx.S3Client); err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketPolicyApplyFailed,
+			fmt.Sprintf("Failed to apply structured bucket policy: %v", err))
+		return fmt.Errorf("failed to apply bucket policy: %w", err)
+	}
+
+	rctx.Bucket.Status.LastAppliedBucketPolicies = desiredFingerprint
+	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionTrue, "BucketPoliciesApplied", "Structured bucket policy applied successfully")
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketPolicyApplied,
+		fmt.Sprintf("Successfully applied structured bucket policy (%d statements)", len(allStatements)))
+	log.V(1).Info("Structured bucket policy applied successfully")
+	return nil
+}
+
+func (r *S3BucketReconciler) reconcileBucketPoliciesRemove(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileBucketPoliciesRemove")
+
+	if rctx.Bucket.Status.LastAppliedBucketPolicies == "" {
+		return nil
+	}
+
+	log.V(1).Info("Removing structured bucket policy")
+	if err := s3.DeletePolicy(ctx, rctx.Bucket.Status.BucketName, rctx.S3Client); err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketPolicyRemoveFailed,
+			fmt.Sprintf("Failed to remove structured bucket policy: %v", err))
+		return fmt.Errorf("failed to delete bucket policy: %w", err)
+	}
+
+	rctx.Bucket.Status.LastAppliedBucketPolicies = ""
+	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeCreated, metav1.ConditionTrue, "BucketPoliciesRemoved", "Structured bucket policy removed successfully")
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketPolicyRemoved,
+		"Successfully removed structured bucket policy")
+	log.V(1).Info("Structured bucket policy removed successfully")
+	return nil
+}
+
+// fetchRenderedPolicy retrieves the rendered policy JSON from the referenced S3Policy or GlobalS3Policy.
+func (r *S3BucketReconciler) fetchRenderedPolicy(ctx context.Context, rctx *bucketReconcileContext, ref s3v1alpha1.PolicyRef) (string, error) {
+	kind := ref.Kind
+	if kind == "" {
+		kind = "GlobalS3Policy"
+	}
+
+	switch kind {
+	case "S3Policy":
+		policy := &s3v1alpha1.S3Policy{}
+		policyKey := types.NamespacedName{
+			Name:      ref.Name,
+			Namespace: rctx.Bucket.Namespace,
+		}
+		if err := r.Get(ctx, policyKey, policy); err != nil {
+			return "", fmt.Errorf("failed to get S3Policy %s: %w", policyKey, err)
+		}
+		if !policy.Status.CommonPolicyStatus.Ready {
+			return "", fmt.Errorf("S3Policy %s is not ready", policyKey)
+		}
+		return policy.Status.CommonPolicyStatus.RenderedPolicy, nil
+
+	case "GlobalS3Policy":
+		policy := &s3v1alpha1.GlobalS3Policy{}
+		policyKey := types.NamespacedName{Name: ref.Name}
+		if err := r.Get(ctx, policyKey, policy); err != nil {
+			return "", fmt.Errorf("failed to get GlobalS3Policy %s: %w", ref.Name, err)
+		}
+		if !policy.Status.CommonPolicyStatus.Ready {
+			return "", fmt.Errorf("GlobalS3Policy %s is not ready", ref.Name)
+		}
+		return policy.Status.CommonPolicyStatus.RenderedPolicy, nil
+
+	default:
+		return "", fmt.Errorf("unsupported policy kind: %s", kind)
+	}
+}
+
+// parseBucketPolicyStatements parses a rendered policy JSON and returns grid.PolicyStatement slices,
+// replacing the BUCKET_NAME placeholder with the actual bucket name.
+func parseBucketPolicyStatements(renderedPolicy string, bucketName string) ([]grid.PolicyStatement, error) {
+	if renderedPolicy == "" {
+		return nil, fmt.Errorf("rendered policy is empty")
+	}
+
+	policyJSON := strings.ReplaceAll(renderedPolicy, "BUCKET_NAME", bucketName)
+
+	var policy grid.Policy
+	if err := json.Unmarshal([]byte(policyJSON), &policy); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal policy JSON: %w", err)
+	}
+
+	return policy.Statement, nil
+}
+
+// bucketPolicyFingerprint computes a stable fingerprint for drift detection.
+func bucketPolicyFingerprint(document string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(document)))
 }
 
 // reconcileBucketLifecycle drives the operator-managed S3 lifecycle configuration on the bucket.
@@ -1831,6 +1996,14 @@ func (r *S3BucketReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(r.mapTenantToBuckets),
 			builder.WithPredicates(r.tenantEndpointChangePredicate()),
 		).
+		Watches(
+			&s3v1alpha1.S3Policy{},
+			handler.EnqueueRequestsFromMapFunc(r.mapPolicyToBuckets),
+		).
+		Watches(
+			&s3v1alpha1.GlobalS3Policy{},
+			handler.EnqueueRequestsFromMapFunc(r.mapGlobalPolicyToBuckets),
+		).
 		Complete(r)
 }
 
@@ -1892,4 +2065,82 @@ func (r *S3BucketReconciler) mapTenantToBuckets(ctx context.Context, obj client.
 			"tenant", tenant.Name, "namespace", tenant.Namespace, "count", len(requests))
 	}
 	return requests
+}
+
+// mapPolicyToBuckets returns reconcile requests for all S3Buckets that
+// reference the given S3Policy in their spec.bucketPolicies.
+func (r *S3BucketReconciler) mapPolicyToBuckets(ctx context.Context, obj client.Object) []ctrl.Request {
+	log := log.FromContext(ctx)
+	policy, ok := obj.(*s3v1alpha1.S3Policy)
+	if !ok {
+		return nil
+	}
+
+	buckets := &s3v1alpha1.S3BucketList{}
+	if err := r.List(ctx, buckets, client.InNamespace(policy.Namespace)); err != nil {
+		log.Error(err, "Failed to list buckets for policy change", "policy", policy.Name)
+		return nil
+	}
+
+	var requests []ctrl.Request
+	for i := range buckets.Items {
+		b := &buckets.Items[i]
+		if bucketReferencesPolicyRef(b, "S3Policy", policy.Name) {
+			requests = append(requests, ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: b.Name, Namespace: b.Namespace},
+			})
+		}
+	}
+
+	if len(requests) > 0 {
+		log.V(1).Info("Enqueueing buckets due to S3Policy change",
+			"policy", policy.Name, "namespace", policy.Namespace, "count", len(requests))
+	}
+	return requests
+}
+
+// mapGlobalPolicyToBuckets returns reconcile requests for all S3Buckets that
+// reference the given GlobalS3Policy in their spec.bucketPolicies.
+func (r *S3BucketReconciler) mapGlobalPolicyToBuckets(ctx context.Context, obj client.Object) []ctrl.Request {
+	log := log.FromContext(ctx)
+	policy, ok := obj.(*s3v1alpha1.GlobalS3Policy)
+	if !ok {
+		return nil
+	}
+
+	buckets := &s3v1alpha1.S3BucketList{}
+	if err := r.List(ctx, buckets); err != nil {
+		log.Error(err, "Failed to list buckets for global policy change", "policy", policy.Name)
+		return nil
+	}
+
+	var requests []ctrl.Request
+	for i := range buckets.Items {
+		b := &buckets.Items[i]
+		if bucketReferencesPolicyRef(b, "GlobalS3Policy", policy.Name) {
+			requests = append(requests, ctrl.Request{
+				NamespacedName: types.NamespacedName{Name: b.Name, Namespace: b.Namespace},
+			})
+		}
+	}
+
+	if len(requests) > 0 {
+		log.V(1).Info("Enqueueing buckets due to GlobalS3Policy change",
+			"policy", policy.Name, "count", len(requests))
+	}
+	return requests
+}
+
+// bucketReferencesPolicyRef checks if a bucket's spec.bucketPolicies references the given policy.
+func bucketReferencesPolicyRef(bucket *s3v1alpha1.S3Bucket, kind, name string) bool {
+	for _, binding := range bucket.Spec.BucketPolicies {
+		refKind := binding.PolicyRef.Kind
+		if refKind == "" {
+			refKind = "GlobalS3Policy"
+		}
+		if refKind == kind && binding.PolicyRef.Name == name {
+			return true
+		}
+	}
+	return false
 }

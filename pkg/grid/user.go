@@ -125,6 +125,10 @@ func deleteUserByName(ctx context.Context, username string, tenantClient *Tenant
 
 	user, err := tenantClient.Users().GetByName(ctx, username)
 	if err != nil {
+		if isNotFound(err) {
+			log.V(1).Info(fmt.Sprintf("User %s already gone, nothing to delete", username))
+			return nil
+		}
 		log.Error(err, "Failed to get user by name")
 		return err
 	}
@@ -205,6 +209,10 @@ func deleteGroupByName(ctx context.Context, groupName string, tenantClient *Tena
 
 	group, err := tenantClient.Groups().GetByName(ctx, groupName)
 	if err != nil {
+		if isNotFound(err) {
+			log.V(1).Info(fmt.Sprintf("Group %s already gone, nothing to delete", groupName))
+			return nil
+		}
 		log.Error(err, "Failed to get group by name")
 		return err
 	}

@@ -303,7 +303,12 @@ func DeleteBucket(ctx context.Context, bucketName string, tenantClient *TenantCl
 	log := log.FromContext(ctx).WithValues("func", "DeleteBucket")
 	log.V(1).Info(fmt.Sprintf("Deleting bucket %s", bucketName))
 
-	return tenantClient.Bucket().Delete(ctx, bucketName)
+	err := tenantClient.Bucket().Delete(ctx, bucketName)
+	if err != nil && isNotFound(err) {
+		log.V(1).Info(fmt.Sprintf("Bucket %s already gone, nothing to delete", bucketName))
+		return nil
+	}
+	return err
 }
 
 func DeleteBucketAdmin(ctx context.Context, identifier string, tenantClient *TenantClient) error {

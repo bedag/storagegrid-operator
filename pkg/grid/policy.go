@@ -28,10 +28,46 @@ type Policy struct {
 	Statement []PolicyStatement `json:"Statement"`
 }
 
+// PolicyPrincipal represents the Principal element in an S3 bucket policy statement.
+// For anonymous access use "*". For specific identities use the AWS field with ARNs.
+type PolicyPrincipal struct {
+	// AWS is a list of AWS account or IAM ARNs. Use ["*"] for anonymous.
+	AWS []string `json:"AWS"`
+}
+
+// MarshalJSON implements custom JSON marshaling for PolicyPrincipal.
+// When the only principal is "*", it serializes as the S3 shorthand: "Principal": "*".
+// Otherwise it serializes as the structured form: "Principal": {"AWS": [...]}.
+func (p PolicyPrincipal) MarshalJSON() ([]byte, error) {
+	if len(p.AWS) == 1 && p.AWS[0] == "*" {
+		return json.Marshal("*")
+	}
+	type Alias PolicyPrincipal
+	return json.Marshal(Alias(p))
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for PolicyPrincipal.
+// Accepts both the shorthand "*" and the structured {"AWS": [...]} form.
+func (p *PolicyPrincipal) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		p.AWS = []string{s}
+		return nil
+	}
+	type Alias PolicyPrincipal
+	var alias Alias
+	if err := json.Unmarshal(data, &alias); err != nil {
+		return err
+	}
+	*p = PolicyPrincipal(alias)
+	return nil
+}
+
 type PolicyStatement struct {
-	Effect   string   `json:"Effect"`
-	Action   []string `json:"Action"`
-	Resource []string `json:"Resource"`
+	Effect    string           `json:"Effect"`
+	Action    []string         `json:"Action"`
+	Resource  []string         `json:"Resource"`
+	Principal *PolicyPrincipal `json:"Principal,omitempty"`
 }
 
 func GeneratePolicyDocument(policy Policy) string {

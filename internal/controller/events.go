@@ -130,16 +130,17 @@ const (
 	EventBucketTenantGone     = "TenantGone"
 
 	// Bucket Credentials Events.
-	EventBucketCredentialsCreated         = "CredentialsCreated"
-	EventBucketCredentialsRotated         = "CredentialsRotated"
-	EventBucketCredentialsRotationFailed  = "CredentialsRotationFailed"
-	EventBucketCredentialsSecretMissing   = "CredentialsSecretMissing"
+	EventBucketCredentialsCreated        = "CredentialsCreated"
+	EventBucketCredentialsRotated        = "CredentialsRotated"
+	EventBucketCredentialsRotationFailed = "CredentialsRotationFailed"
+	EventBucketCredentialsSecretMissing  = "CredentialsSecretMissing"
 
 	// Bucket Policy Events.
 	EventBucketPolicyApplied      = "PolicyApplied"
 	EventBucketPolicyRemoved      = "PolicyRemoved"
 	EventBucketPolicyApplyFailed  = "PolicyApplyFailed"
 	EventBucketPolicyRemoveFailed = "PolicyRemoveFailed"
+	EventBucketPolicyDeprecated   = "PolicyJsonDeprecated"
 
 	// Bucket Lifecycle Management Events.
 	EventBucketLifecycleApplied            = "LifecycleApplied"

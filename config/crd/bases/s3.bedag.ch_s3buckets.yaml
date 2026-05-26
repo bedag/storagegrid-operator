@@ -80,10 +80,55 @@ spec:
                   After successful creation, the effective name is recorded in status.bucketName
                   and further changes to this field are ignored.
                 type: string
+              bucketPolicies:
+                description: |-
+                  BucketPolicies defines structured S3 bucket policies by referencing S3Policy or GlobalS3Policy
+                  resources and specifying the Principal (who) at binding time. All entries are merged into a
+                  single S3 bucket policy document applied via PutBucketPolicy.
+                  Mutually exclusive with bucketPolicyJson — setting both is rejected by the validating webhook.
+                items:
+                  description: |-
+                    BucketPolicyBinding binds an S3Policy or GlobalS3Policy to a bucket with explicit principals.
+                    The referenced policy defines the rules (actions, effect, scope); the binding adds the
+                    Principal (who) context. All bindings on a bucket are merged into one S3 bucket policy document.
+                  properties:
+                    policyRef:
+                      description: Reference to the S3Policy or GlobalS3Policy that
+                        defines the rules.
+                      properties:
+                        kind:
+                          description: |-
+                            Kind of the policy. Must be "S3Policy" or "GlobalS3Policy".
+                            Defaults to "GlobalS3Policy" if not specified.
+                          enum:
+                          - S3Policy
+                          - GlobalS3Policy
+                          - ""
+                          type: string
+                        name:
+                          description: Name of the policy resource.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    principals:
+                      description: |-
+                        Principals specifies who the policy applies to.
+                        Use "*" for anonymous/public access, a tenant ID for all users in that tenant,
+                        or an ARN for specific identities (e.g. "arn:aws:iam::123456789012:user/JohnDoe").
+                        When omitted, defaults to the bucket's tenant account ID (all authenticated users in the tenant).
+                      items:
+                        type: string
+                      type: array
+                  required:
+                  - policyRef
+                  type: object
+                type: array
               bucketPolicyJson:
                 description: |-
-                  specify a s3 bucketpolicy as json to apply to the bucket.
-                  check the s3 documentation for the policy json format.
+                  Deprecated: Use bucketPolicies instead for structured, validated, and reusable bucket policy management.
+                  Specify a raw S3 bucket policy as JSON to apply to the bucket.
+                  Mutually exclusive with bucketPolicies — setting both is rejected by the validating webhook.
                 type: string
               connectionDetails:
                 default:
@@ -400,13 +445,19 @@ spec:
                 - isDeletingObjects
                 - nextPollInterval
                 type: object
+              lastAppliedBucketPolicies:
+                description: |-
+                  LastAppliedBucketPolicies is a fingerprint of the bucket policy last successfully applied
+                  from spec.bucketPolicies. Used for drift detection. Empty when no structured bucket policy is managed.
+                type: string
               lastAppliedLifecycle:
                 description: |-
                   LastAppliedLifecycle is a fingerprint of the lifecycle configuration last successfully applied.
                   Used by the operator for drift detection. Empty when no lifecycle configuration is managed.
                 type: string
               lastAppliedPolicy:
-                description: track last successfully applied policy.
+                description: track last successfully applied policy (from deprecated
+                  bucketPolicyJson).
                 type: string
               phase:
                 default: Pending

@@ -47,6 +47,18 @@ Describes the event recording implementation and design decisions:
 
 *Important for understanding observability and troubleshooting workflows.*
 
+#### [Policy System](./policy-system.md)
+Explains the S3 policy architecture covering both identity-based (group) and resource-based (bucket) policies:
+
+- **Policy Definitions**: S3Policy and GlobalS3Policy as reusable, consumer-agnostic rule sets
+- **Group Policies via S3Access**: Identity-based binding applied to StorageGrid tenant groups
+- **Bucket Policies via S3Bucket**: Resource-based binding with Principal, applied via PutBucketPolicy
+- **Policy Evaluation**: How StorageGrid evaluates both mechanisms together
+- **Deprecation**: Migration from raw `bucketPolicyJson` to structured `bucketPolicies`
+- **Render Pipeline**: How policies are rendered, resolved, and applied by each consumer
+
+*Essential for understanding the access control model and how policies flow from definition to enforcement.*
+
 #### [Drain Operations](./drain-operations.md)
 Explains the bucket drain functionality and why tenant-level drain was not implemented:
 

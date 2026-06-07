@@ -68,7 +68,6 @@ func policyInUse(ctx context.Context, k8sclient client.Client, policyName string
 	log := log.FromContext(ctx).WithValues("function", "policyInUse")
 
 	key := BuildPolicyKey(policyKind, policyNamespace, policyName)
-	var consumers []string
 
 	// Check S3Access references.
 	accessList := &s3v1alpha1.S3AccessList{}
@@ -80,6 +79,7 @@ func policyInUse(ctx context.Context, k8sclient client.Client, policyName string
 		return true, []string{}
 	}
 
+	consumers := []string{}
 	for _, access := range accessList.Items {
 		consumers = append(consumers, fmt.Sprintf("S3Access/%s/%s", access.Namespace, access.Name))
 	}
@@ -90,19 +90,20 @@ func policyInUse(ctx context.Context, k8sclient client.Client, policyName string
 	if policyKind == "S3Policy" && policyNamespace != "" {
 		listOpts = append(listOpts, client.InNamespace(policyNamespace))
 	}
-	if err := k8sclient.List(ctx, bucketList, listOpts...); client.IgnoreNotFound(err) != nil {
+	err = k8sclient.List(ctx, bucketList, listOpts...)
+	if client.IgnoreNotFound(err) != nil {
 		log.Error(err, "Failed to list S3Buckets for policy", "policyKey", key)
 		return true, []string{}
 	}
 
-	for _, bucket := range bucketList.Items {
-		for _, binding := range bucket.Spec.BucketPolicies {
+	for i := range bucketList.Items {
+		for _, binding := range bucketList.Items[i].Spec.BucketPolicies {
 			refKind := binding.PolicyRef.Kind
 			if refKind == "" {
 				refKind = "GlobalS3Policy"
 			}
 			if refKind == policyKind && binding.PolicyRef.Name == policyName {
-				consumers = append(consumers, fmt.Sprintf("S3Bucket/%s/%s", bucket.Namespace, bucket.Name))
+				consumers = append(consumers, fmt.Sprintf("S3Bucket/%s/%s", bucketList.Items[i].Namespace, bucketList.Items[i].Name))
 				break
 			}
 		}

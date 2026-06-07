@@ -2,11 +2,11 @@ name: "CodeQL Analysis"
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
   schedule:
-    - cron: '0 6 * * 1' # Run every Monday at 6 AM UTC
+    - cron: "0 6 * * 1" # Run every Monday at 6 AM UTC
 
 jobs:
   analyze:
@@ -20,39 +20,39 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'go' ]
+        language: ["go"]
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v6
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
 
-    - name: Set up Go
-      if: matrix.language == 'go'
-      uses: actions/setup-go@v6
-      with:
-        go-version-file: "go.mod"
-        cache: true
+      - name: Set up Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version-file: "go.mod"
+          cache: true
 
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v4
-      with:
-        languages: ${{ matrix.language }}
-        queries: security-extended,security-and-quality
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
 
-    - name: Download dependencies
-      if: matrix.language == 'go'
-      run: go mod download
+      - name: Download dependencies
+        if: matrix.language == 'go'
+        run: go mod download
 
-    - name: Generate manifests and code
-      if: matrix.language == 'go'
-      run: |
-        make manifests
-        make generate
+      - name: Generate manifests and code
+        if: matrix.language == 'go'
+        run: |
+          make manifests
+          make generate
 
-    - name: Autobuild
-      uses: github/codeql-action/autobuild@v4
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@8aad20d150bbac5944a9f9d289da16a4b0d87c1e
 
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v4
-      with:
-        category: "/language:${{matrix.language}}"
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e
+        with:
+          category: "/language:${{matrix.language}}"

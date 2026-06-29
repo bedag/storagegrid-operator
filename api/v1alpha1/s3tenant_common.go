@@ -106,6 +106,7 @@ type CommonTenantSpec struct {
 }
 
 // S3ObjectLockTenantSpec configures the per-tenant S3 Object Lock policy.
+// +kubebuilder:validation:XValidation:rule="self.mode == 'Disabled' || self.maxRetentionInDays > 0",message="spec.s3ObjectLock.maxRetentionInDays must be greater than 0 when mode is not Disabled"
 type S3ObjectLockTenantSpec struct {
 	// Mode is the maximum S3 Object Lock mode permitted for buckets owned by this tenant.
 	// - Disabled: buckets in this tenant may not enable object lock.

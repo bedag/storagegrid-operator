@@ -237,6 +237,10 @@ spec:
                       - Compliance: buckets may use either Governance or Compliance
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: spec.s3ObjectLock.maxRetentionInDays must be greater than
+                    0 when mode is not Disabled
+                  rule: self.mode == 'Disabled' || self.maxRetentionInDays > 0
               s3TenantAccountRef:
                 description: |-
                   S3TenantAccountRef is an optional reference to an existing S3TenantAccount to claim.

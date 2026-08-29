@@ -51,13 +51,17 @@ func generatePassword(length int, useLetters bool, useSpecial bool, useNum bool)
 	return string(b)
 }
 
-func CreateTenant(ctx context.Context, name string, description string, quota int64, allowComplianceMode bool, maxRetentionInDays *int, gridClient *GridClient) (string, string, error) {
+// CreateTenant creates a tenant in the backend. maxRetentionInDays is always sent explicitly:
+// StorageGrid applies a 100-year S3 Object Lock ceiling of its own whenever the field is absent
+// from the request body, so the caller must resolve a concrete value.
+func CreateTenant(ctx context.Context, name string, description string, quota int64, allowComplianceMode bool, maxRetentionInDays int, gridClient *GridClient) (string, string, error) {
 	log := log.FromContext(ctx).WithValues("func", "CreateTenant")
-	log.V(1).Info(fmt.Sprintf("Creating tenant: name=%s, description=%s, quota=%d, allowComplianceMode=%v, maxRetentionInDays=%v", name, description, quota, allowComplianceMode, maxRetentionInDays))
+	log.V(1).Info(fmt.Sprintf("Creating tenant: name=%s, description=%s, quota=%d, allowComplianceMode=%v, maxRetentionInDays=%d", name, description, quota, allowComplianceMode, maxRetentionInDays))
 
 	pw := generatePassword(12, true, true, true)
 
 	allow := allowComplianceMode
+	maxDays := maxRetentionInDays
 	tenant := models.Tenant{
 		Name:         &name,
 		Description:  &description,
@@ -65,7 +69,10 @@ func CreateTenant(ctx context.Context, name string, description string, quota in
 		Policy: &models.TenantPolicy{
 			QuotaObjectBytes:    &quota,
 			AllowComplianceMode: &allow,
-			MaxRetentionDays:    maxRetentionInDays,
+			MaxRetentionDays:    &maxDays,
+			// Left nil so omitempty drops it: the operator expresses the ceiling in days only,
+			// and StorageGrid clears years by itself once days is set.
+			MaxRetentionYears: nil,
 		},
 		Password: &pw,
 	}
@@ -291,17 +298,24 @@ func UpdateName(ctx context.Context, name string, tenant *Tenant, gridClient *Gr
 // UpdateTenantObjectLockPolicy synchronizes the tenant's S3 Object Lock policy fields
 // (AllowComplianceMode and MaxRetentionDays). Because the SDK only exposes a full PUT,
 // the supplied tenant must be a freshly-fetched object so all other Policy fields are
-// preserved. maxRetentionInDays may be nil to clear the cap.
-func UpdateTenantObjectLockPolicy(ctx context.Context, allowComplianceMode bool, maxRetentionInDays *int, tenant *Tenant, gridClient *GridClient) error {
+// preserved.
+//
+// MaxRetentionYears is reset to nil so omitempty drops it from the request. StorageGrid stores
+// the ceiling as either days or years, never both, and writing days clears years on its own.
+// The reset matters because the tenant handed in here was just fetched: a backend value of 100
+// years is not nil, so it would otherwise be written straight back alongside the days value.
+func UpdateTenantObjectLockPolicy(ctx context.Context, allowComplianceMode bool, maxRetentionInDays int, tenant *Tenant, gridClient *GridClient) error {
 	log := log.FromContext(ctx).WithValues("func", "UpdateTenantObjectLockPolicy")
-	log.V(1).Info(fmt.Sprintf("Updating object lock policy: allowComplianceMode=%v, maxRetentionInDays=%v", allowComplianceMode, maxRetentionInDays))
+	log.V(1).Info(fmt.Sprintf("Updating object lock policy: allowComplianceMode=%v, maxRetentionInDays=%d", allowComplianceMode, maxRetentionInDays))
 
 	if tenant.Policy == nil {
 		tenant.Policy = &models.TenantPolicy{}
 	}
 	allow := allowComplianceMode
+	maxDays := maxRetentionInDays
 	tenant.Policy.AllowComplianceMode = &allow
-	tenant.Policy.MaxRetentionDays = maxRetentionInDays
+	tenant.Policy.MaxRetentionDays = &maxDays
+	tenant.Policy.MaxRetentionYears = nil
 	return updateTenant(ctx, tenant, gridClient)
 }
 
@@ -315,12 +329,22 @@ func GetConfiguredAllowComplianceMode(tenant *Tenant) bool {
 }
 
 // GetConfiguredMaxRetentionDays returns the tenant's configured maximum retention in days.
-// A nil pointer means no cap is enforced server-side.
+// A nil pointer means the ceiling is not expressed in days server-side.
 func GetConfiguredMaxRetentionDays(tenant *Tenant) *int {
 	if tenant == nil || tenant.Policy == nil {
 		return nil
 	}
 	return tenant.Policy.MaxRetentionDays
+}
+
+// GetConfiguredMaxRetentionYears returns the tenant's configured maximum retention in years.
+// The operator never sets this, but StorageGrid populates it with 100 on any tenant created
+// without an explicit ceiling, so drift detection has to look at it.
+func GetConfiguredMaxRetentionYears(tenant *Tenant) *int {
+	if tenant == nil || tenant.Policy == nil {
+		return nil
+	}
+	return tenant.Policy.MaxRetentionYears
 }
 
 // delete tenant in the backend.

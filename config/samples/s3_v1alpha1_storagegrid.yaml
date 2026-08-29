@@ -23,3 +23,8 @@ spec:
   s3ApiEndpoint:
     pathStyleAccess: true
     url: https://s3.storagegrid.example.com:10443
+  # S3 Object Lock retention ceiling in days for tenants that do not set
+  # spec.s3ObjectLock.maxRetentionInDays themselves. Must be 1..36500 (100 years).
+  # StorageGrid applies a 100 year ceiling of its own when no value is sent, so the
+  # operator always writes this field explicitly.
+  defaultMaxRetentionInDays: 365

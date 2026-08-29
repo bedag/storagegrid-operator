@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
+	"github.com/bedag/storagegrid-operator/internal/controller"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -237,11 +238,11 @@ func (r *S3BucketValidator) validateBucketObjectLock(ctx context.Context, bucket
 
 	// Grid must support S3 Object Lock.
 	gridName := tenant.Spec.StorageGridRef.Name
-	available, err := gridObjectLockAvailable(ctx, r.k8sClient, gridName)
+	sg, err := fetchStorageGrid(ctx, r.k8sClient, gridName)
 	if err != nil {
 		return err
 	}
-	if !available {
+	if sg.Status.S3ObjectLockAvailable == nil || !*sg.Status.S3ObjectLockAvailable {
 		return fmt.Errorf("StorageGrid %s does not have S3 Object Lock enabled grid-wide", gridName)
 	}
 
@@ -251,12 +252,12 @@ func (r *S3BucketValidator) validateBucketObjectLock(ctx context.Context, bucket
 		return fmt.Errorf("spec.s3ObjectLock.mode=%s is not allowed: parent tenant %s/%s permits at most %s", bucketMode, tenant.Namespace, tenant.Name, tenantMode)
 	}
 
-	// Tenant maxRetentionInDays caps the bucket retention.
-	if tenant.Spec.S3ObjectLock != nil && tenant.Spec.S3ObjectLock.MaxRetentionInDays > 0 {
-		if bucket.Spec.S3ObjectLock.RetentionInDays > tenant.Spec.S3ObjectLock.MaxRetentionInDays {
-			return fmt.Errorf("spec.s3ObjectLock.retentionInDays=%d exceeds parent tenant %s/%s maxRetentionInDays=%d",
-				bucket.Spec.S3ObjectLock.RetentionInDays, tenant.Namespace, tenant.Name, tenant.Spec.S3ObjectLock.MaxRetentionInDays)
-		}
+	// The tenant's retention ceiling always caps the bucket. A tenant that sets no ceiling of its
+	// own inherits the grid-wide default, so there is never a case where a bucket goes unchecked.
+	maxRetention := controller.EffectiveMaxRetentionInDays(tenant.Spec.S3ObjectLock, sg)
+	if bucket.Spec.S3ObjectLock.RetentionInDays > maxRetention {
+		return fmt.Errorf("spec.s3ObjectLock.retentionInDays=%d exceeds parent tenant %s/%s maxRetentionInDays=%d",
+			bucket.Spec.S3ObjectLock.RetentionInDays, tenant.Namespace, tenant.Name, maxRetention)
 	}
 
 	return nil

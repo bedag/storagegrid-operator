@@ -1,0 +1,192 @@
+# S3Tenant object lock retention ceiling.
+#
+# StorageGrid silently stamps a 100 year ceiling onto any tenant created without an explicit
+# maxRetentionDays, so the operator always writes the field. This exercises the three cases that
+# matter: inheriting the grid default when the tenant says nothing, overriding it per tenant, and
+# capping what a bucket may request.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3tenant-objectlock-retention
+spec:
+  bindings:
+    - name: tenantName
+      value: objectlock-retention-test
+    - name: bucketName
+      value: objectlock-retention-bucket
+  steps:
+    # ── Step 1: Tenant with no s3ObjectLock block at all ─────────────────
+    # The customer opts out entirely; the backend still has to end up with a concrete ceiling.
+    - name: create-without-object-lock
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+                defaultBucketRegion: us-east-1
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 2: Verify auto-created S3TenantAccount and set Delete policy ─
+    - name: verify-account
+      use:
+        template: ../_step-templates/verify-account-set-delete-policy.yaml
+
+    # ── Step 3: Opt in to Governance with a tighter ceiling ──────────────
+    - name: set-object-lock
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3ObjectLock:
+                  mode: Governance
+                  maxRetentionInDays: 60
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3ObjectLock:
+                  mode: Governance
+                  maxRetentionInDays: 60
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+        # The account mirrors the tenant spec, and it is the account controller that writes the
+        # ceiling to the backend.
+        - script:
+            env:
+              - name: TENANT_NAME
+                value: ($tenantName)
+            content: |
+              kubectl get s3tenant "$TENANT_NAME" -n $NAMESPACE -o jsonpath='{.status.s3TenantAccountRef.name}'
+            outputs:
+              - name: accountName
+                value: ($stdout)
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3TenantAccount
+              metadata:
+                name: ($accountName)
+              spec:
+                s3ObjectLock:
+                  mode: Governance
+                  maxRetentionInDays: 60
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 4: A bucket may not exceed the tenant ceiling ───────────────
+    - name: reject-bucket-over-ceiling
+      try:
+        - error:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                region: us-east-1
+                s3TenantRef:
+                  name: ($tenantName)
+                s3ObjectLock:
+                  mode: Governance
+                  retentionInDays: 90
+
+    # ── Step 5: A bucket within the ceiling is accepted ──────────────────
+    - name: create-bucket-within-ceiling
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                region: us-east-1
+                s3TenantRef:
+                  name: ($tenantName)
+                s3ObjectLock:
+                  mode: Governance
+                  retentionInDays: 30
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                phase: Ready
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 6: Lowering the ceiling below a live bucket is rejected ─────
+    - name: reject-ceiling-below-existing-bucket
+      try:
+        - error:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3ObjectLock:
+                  mode: Governance
+                  maxRetentionInDays: 10
+
+    # ── Step 7: Clean up ─────────────────────────────────────────────────
+    - name: delete-bucket
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              name: ($bucketName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+
+    - name: delete-tenant
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              name: ($tenantName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)

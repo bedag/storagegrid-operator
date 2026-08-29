@@ -119,8 +119,11 @@ type S3ObjectLockTenantSpec struct {
 
 	// MaxRetentionInDays caps the retentionInDays a bucket in this tenant may request.
 	// Mapped to the backend tenant policy MaxRetentionDays.
+	// Zero means inherit the grid-wide StorageGrid spec.defaultMaxRetentionInDays; the backend
+	// always ends up with a concrete ceiling because StorageGrid does not accept an empty one.
 	// +kubebuilder:default=0
 	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=36500
 	// +optional
 	MaxRetentionInDays int32 `json:"maxRetentionInDays,omitempty"`
 }

@@ -1139,7 +1139,7 @@ func (r *S3TenantAccountReconciler) reconcileCreate(ctx context.Context, rctx *a
 	// initial description will include some details about the account in case the reconcileDescription fails later.
 	initialDescription := fmt.Sprintf("Created by storagegrid-operator for S3TenantAccount %s in namespace %s at %s", rctx.Account.Name, rctx.Account.Namespace, time.Now().Format(time.RFC3339))
 
-	tenantID, password, err := grid.CreateTenant(ctx, *rctx.Account.Status.DesiredTenantBackendName, initialDescription, rctx.Account.Spec.StorageQuota.Value(), desiredAllowComplianceMode(rctx.Account.Spec.S3ObjectLock), desiredMaxRetentionDays(rctx.Account.Spec.S3ObjectLock), rctx.GridClient)
+	tenantID, password, err := grid.CreateTenant(ctx, *rctx.Account.Status.DesiredTenantBackendName, initialDescription, rctx.Account.Spec.StorageQuota.Value(), desiredAllowComplianceMode(rctx.Account.Spec.S3ObjectLock), desiredMaxRetentionDays(rctx.Account.Spec.S3ObjectLock, rctx.SG), rctx.GridClient)
 	if err != nil {
 		r.emitEvent(rctx, corev1.EventTypeWarning, EventTenantCreateFailed,
 			fmt.Sprintf("Failed to create tenant: %v", err))
@@ -1417,48 +1417,58 @@ func desiredAllowComplianceMode(spec *s3v1alpha1.S3ObjectLockTenantSpec) bool {
 	return spec.Mode == s3v1alpha1.S3ObjectLockModeCompliance
 }
 
-// desiredMaxRetentionDays maps the spec MaxRetentionInDays to the backend tenant's
-// MaxRetentionDays. Returns nil when object lock is Disabled (no per-tenant cap).
-func desiredMaxRetentionDays(spec *s3v1alpha1.S3ObjectLockTenantSpec) *int {
-	if spec == nil || spec.Mode == "" || spec.Mode == s3v1alpha1.S3ObjectLockModeDisabled {
-		return nil
+// EffectiveMaxRetentionInDays resolves the S3 Object Lock retention ceiling for a tenant:
+// its own MaxRetentionInDays when set, otherwise the grid-wide default.
+//
+// Deliberately independent of Mode. Mode governs whether an S3Bucket may enable object lock at
+// all, but the ceiling also binds Governance retention a tenant can request directly over the S3
+// API, where the bucket-level gate never applies.
+//
+// Never returns zero: StorageGrid rejects an empty ceiling once S3 Object Lock is enabled
+// grid-wide, and silently substitutes 100 years for a request that carries no ceiling at all.
+func EffectiveMaxRetentionInDays(spec *s3v1alpha1.S3ObjectLockTenantSpec, sg *s3v1alpha1.StorageGrid) int32 {
+	if spec != nil && spec.MaxRetentionInDays > 0 {
+		return spec.MaxRetentionInDays
 	}
-	v := int(spec.MaxRetentionInDays)
-	return &v
+	if sg != nil && sg.Spec.DefaultMaxRetentionInDays > 0 {
+		return sg.Spec.DefaultMaxRetentionInDays
+	}
+	return s3v1alpha1.DefaultMaxRetentionInDays
 }
 
-// intPtrEqual compares two *int values for equality, treating nil == nil as equal.
-func intPtrEqual(a, b *int) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return *a == *b
+// desiredMaxRetentionDays adapts the resolved ceiling to the backend tenant's MaxRetentionDays.
+func desiredMaxRetentionDays(spec *s3v1alpha1.S3ObjectLockTenantSpec, sg *s3v1alpha1.StorageGrid) int {
+	return int(EffectiveMaxRetentionInDays(spec, sg))
 }
 
 // reconcileObjectLockPolicy syncs the backend tenant's S3 Object Lock policy fields
-// (AllowComplianceMode, MaxRetentionDays) with the spec. Issues a single full PUT on drift.
+// (AllowComplianceMode, MaxRetentionDays, MaxRetentionYears) with the spec.
+// Issues a single full PUT on drift.
+//
+// MaxRetentionYears participates in the comparison even though the operator never sets it:
+// StorageGrid stamps 100 years onto any tenant created without an explicit ceiling, and a
+// non-nil value there means the tenant is not yet expressed in the operator's terms.
 func (r *S3TenantAccountReconciler) reconcileObjectLockPolicy(ctx context.Context, rctx *accountReconcileContext) error {
 	log := log.FromContext(ctx)
 
 	desiredAllow := desiredAllowComplianceMode(rctx.Account.Spec.S3ObjectLock)
-	desiredMax := desiredMaxRetentionDays(rctx.Account.Spec.S3ObjectLock)
+	desiredMax := desiredMaxRetentionDays(rctx.Account.Spec.S3ObjectLock, rctx.SG)
 
 	currentAllow := grid.GetConfiguredAllowComplianceMode(rctx.BackendTenant)
 	currentMax := grid.GetConfiguredMaxRetentionDays(rctx.BackendTenant)
+	currentYears := grid.GetConfiguredMaxRetentionYears(rctx.BackendTenant)
 
-	if currentAllow == desiredAllow && intPtrEqual(currentMax, desiredMax) {
+	if currentAllow == desiredAllow && currentMax != nil && *currentMax == desiredMax && currentYears == nil {
 		log.V(1).Info("Object lock policy already in sync")
 		return nil
 	}
 
 	log.V(1).Info("Object lock policy drift detected, updating tenant",
 		"currentAllowComplianceMode", currentAllow, "desiredAllowComplianceMode", desiredAllow,
-		"currentMaxRetentionDays", currentMax, "desiredMaxRetentionDays", desiredMax)
+		"currentMaxRetentionDays", currentMax, "desiredMaxRetentionDays", desiredMax,
+		"currentMaxRetentionYears", currentYears)
 	r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantUpdating,
-		fmt.Sprintf("Updating S3 Object Lock policy (allowComplianceMode=%v, maxRetentionDays=%v)", desiredAllow, desiredMax))
+		fmt.Sprintf("Updating S3 Object Lock policy (allowComplianceMode=%v, maxRetentionDays=%d)", desiredAllow, desiredMax))
 
 	if err := grid.UpdateTenantObjectLockPolicy(ctx, desiredAllow, desiredMax, rctx.BackendTenant, rctx.GridClient); err != nil {
 		r.emitEvent(rctx, corev1.EventTypeWarning, EventTenantUpdateFailed,

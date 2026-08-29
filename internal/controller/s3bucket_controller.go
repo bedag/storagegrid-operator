@@ -1521,8 +1521,14 @@ func (r *S3BucketReconciler) finalize(ctx context.Context, rctx *bucketReconcile
 			// finalizer step, so reconcileDrain further down is unreachable once deletion
 			// has started. Without this, the guidance in the blocked message below would be
 			// a dead end for anyone who deleted the bucket first.
+			//
+			// A drain failure must not be fatal. Returning an error here would
+			// put the bucket back on the workqueue's exponential backoff
+			// Record it and keep polling on the bounded schedule.
 			if err := r.reconcileDrain(ctx, rctx); err != nil {
-				return fmt.Errorf("failed to reconcile drain during finalization: %w", err)
+				log.Error(err, "Failed to reconcile drain during finalization, continuing to wait")
+				r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeDraining, metav1.ConditionFalse,
+					"DrainFailed", fmt.Sprintf("Drain could not be started: %v. The bucket stays in Deleting until it is empty.", err))
 			}
 
 			// reconcileDrain may have completed or canceled the drain and reset the phase.

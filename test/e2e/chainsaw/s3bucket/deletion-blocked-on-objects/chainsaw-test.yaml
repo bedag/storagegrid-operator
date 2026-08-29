@@ -1,0 +1,234 @@
+# S3Bucket deletion while the bucket still holds objects.
+#
+# The load-bearing assertion is the DATA-SAFETY one: deleting a bucket must never
+# destroy its objects. The operator only ever drains when a human sets the drain
+# annotation - asking for deletion is not consent to delete data.
+#
+# Requires egress from the test namespace to the S3 endpoint (see
+# docs: S3aaS "Pod als CLI verwenden"). The seed step creates a CiliumNetworkPolicy
+# for the endpoint reported in the bucket's own status.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3bucket-deletion-blocked-on-objects
+spec:
+  bindings:
+    - name: tenantName
+      value: blocked-tenant
+    - name: bucketName
+      value: blocked-bucket
+  steps:
+    - name: create-tenant
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+
+    - name: verify-account-and-set-deletion-policy
+      use:
+        template: ../../s3tenant/_step-templates/verify-account-set-delete-policy.yaml
+
+    - name: create-bucket-and-access
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                s3TenantRef:
+                  name: ($tenantName)
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Access
+              metadata:
+                name: ($bucketName)
+              spec:
+                s3BucketRef:
+                  name: ($bucketName)
+                policyRefs:
+                  - name: admin
+                    kind: GlobalS3Policy
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                phase: Ready
+
+    # ── Seed objects: allow egress, then upload via the aws CLI ─────────
+    - name: seed-objects
+      try:
+        - script:
+            env:
+              - name: BUCKET_CR
+                value: ($bucketName)
+            content: |
+              set -e
+              EP=$(kubectl get s3bucket "$BUCKET_CR" -n "$NAMESPACE" \
+                    -o jsonpath='{.status.s3EndpointConfig.defaultAddress}')
+              PORT=$(kubectl get s3bucket "$BUCKET_CR" -n "$NAMESPACE" \
+                    -o jsonpath='{.status.s3EndpointConfig.port}')
+              cat <<POLICY | kubectl apply -n "$NAMESPACE" -f -
+              apiVersion: cilium.io/v2
+              kind: CiliumNetworkPolicy
+              metadata:
+                name: chainsaw-allow-egress-s3
+              spec:
+                endpointSelector: {}
+                egress:
+                  - toFQDNs:
+                      - matchName: ${EP}
+                    toPorts:
+                      - ports:
+                          - port: "${PORT}"
+                            protocol: TCP
+              POLICY
+              cat <<JOB | kubectl apply -n "$NAMESPACE" -f -
+              apiVersion: batch/v1
+              kind: Job
+              metadata:
+                name: chainsaw-seed
+              spec:
+                backoffLimit: 3
+                template:
+                  spec:
+                    restartPolicy: Never
+                    containers:
+                      - name: seed
+                        image: artifacts.bedag.cloud/dockerhub/amazon/aws-cli:latest
+                        resources:
+                          requests: {cpu: 50m, memory: 128Mi}
+                          limits: {cpu: 500m, memory: 512Mi}
+                        envFrom:
+                          - secretRef:
+                              name: s3access-${BUCKET_CR}-connection-details
+                        command: ["/bin/sh","-c"]
+                        args:
+                          - |
+                            set -e
+                            for i in 1 2 3; do
+                              echo "payload-\$i" > /tmp/o\$i.txt
+                              aws s3 cp --no-verify-ssl /tmp/o\$i.txt "s3://\$S3_BUCKET/o\$i.txt"
+                            done
+              JOB
+              kubectl wait --for=condition=complete job/chainsaw-seed -n "$NAMESPACE" --timeout=5m
+        # The operator must observe the objects before deletion is attempted,
+        # otherwise it would consider the bucket empty and delete it outright.
+        - assert:
+            timeout: 5m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                bucketUsage:
+                  objectCount: 3
+
+    # ── Deleting is accepted, but held, and destroys nothing ────────────
+    - name: delete-is-accepted-but-blocked
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              name: ($bucketName)
+            expect:
+              - check:
+                  ($error == null): true
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+                (finalizers[?@ == 'bucket.s3.bedag.ch/finalizer'] != null): true
+              status:
+                phase: Deleting
+                (conditions[?type == 'Deleting']):
+                  - status: "True"
+                    reason: BucketNotEmpty
+                (conditions[?type == 'ReconcileSucceeded']):
+                  - status: "True"
+                # DATA SAFETY: objects are untouched and no drain was started.
+                bucketUsage:
+                  objectCount: 3
+                (drainStatus == null): true
+
+    # ── Still no drain after several poll cycles ────────────────────────
+    - name: no-drain-is-ever-started-on-its-own
+      try:
+        - sleep:
+            duration: 60s
+        - assert:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                bucketUsage:
+                  objectCount: 3
+                (drainStatus == null): true
+
+    # ── Explicit opt-in drains it, and only then does it delete ─────────
+    # NOTE: requires storagegrid-sdk-go with the delete-objects boolean fix;
+    # earlier versions send deleteObjects as a JSON string and the grid answers 422.
+    - name: opt-in-drain-completes-the-deletion
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+                annotations:
+                  bucket.s3.bedag.ch/force-drain-bucket: "true"
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                phase: Deleting
+                (conditions[?type == 'Draining']):
+                  - status: "True"
+        - error:
+            timeout: 15m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+    - name: cleanup-seed-resources
+      try:
+        - script:
+            content: |
+              kubectl delete job chainsaw-seed -n "$NAMESPACE" --ignore-not-found
+              kubectl delete ciliumnetworkpolicy chainsaw-allow-egress-s3 -n "$NAMESPACE" --ignore-not-found

@@ -2123,14 +2123,21 @@ func parseMetadataFromDescription(description string) (map[string]string, error)
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *S3TenantAccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	tenantRefFunc := func(obj client.Object) []string {
-		sg := obj.(*s3v1alpha1.S3Bucket)
-		return []string{sg.Spec.S3TenantRef.Name}
+	// Index accounts by the S3Tenant they are bound to, so a bucket event can be mapped
+	// back to the account that reports that tenant's backend usage.
+	accountTenantRefFunc := func(obj client.Object) []string {
+		account := obj.(*s3v1alpha1.S3TenantAccount)
+		if account.Spec.S3TenantRef == nil {
+			return nil
+		}
+
+		return []string{account.Spec.S3TenantRef.Namespace + "/" + account.Spec.S3TenantRef.Name}
 	}
 
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &s3v1alpha1.S3Bucket{}, "spec.accountRef.name", tenantRefFunc); err != nil {
+	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &s3v1alpha1.S3TenantAccount{}, accountByTenantIndex, accountTenantRefFunc); err != nil {
 		return err
 	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&s3v1alpha1.S3TenantAccount{}, builder.WithPredicates(
 			PredicateWithoutStatusChange(),
@@ -2141,7 +2148,50 @@ func (r *S3TenantAccountReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(r.mapTenantClassToAccounts),
 			builder.WithPredicates(r.tenantClassEndpointChangePredicate()),
 		).
+		Watches(
+			&s3v1alpha1.S3Bucket{},
+			handler.EnqueueRequestsFromMapFunc(r.mapBucketToAccount),
+			builder.WithPredicates(bucketDeletionRelevantPredicate()),
+		).
 		Complete(r)
+}
+
+// accountByTenantIndex indexes S3TenantAccount by the "<namespace>/<name>" of the S3Tenant
+// bound to it.
+const accountByTenantIndex = "spec.s3TenantRef.namespacedName"
+
+// mapBucketToAccount enqueues the S3TenantAccount backing the bucket's tenant.
+//
+// Without this, a deleting S3Tenant can wait forever. Its second guard reads the backend
+// bucket count, which lives in the account's status and is only refreshed by the account's
+// reconcileTenantUsage. Nothing triggered that refresh once the last bucket went away - the
+// account does not see its own status writes (PredicateWithoutStatusChange), and the tenant
+// only clears the account's spec ref after passing this very check. The count stayed stale,
+// so the tenant polled a value that could never change until the next full resync.
+func (r *S3TenantAccountReconciler) mapBucketToAccount(ctx context.Context, obj client.Object) []ctrl.Request {
+	log := log.FromContext(ctx)
+
+	bucket, ok := obj.(*s3v1alpha1.S3Bucket)
+	if !ok {
+		return nil
+	}
+
+	tenantKey := resolveBucketTenantKey(bucket)
+
+	accounts := &s3v1alpha1.S3TenantAccountList{}
+	if err := r.List(ctx, accounts, client.MatchingFields{accountByTenantIndex: tenantKey.Namespace + "/" + tenantKey.Name}); err != nil {
+		log.Error(err, "Failed to list S3TenantAccounts for bucket", "bucket", bucket.Name)
+		return nil
+	}
+
+	requests := make([]ctrl.Request, 0, len(accounts.Items))
+	for i := range accounts.Items {
+		requests = append(requests, ctrl.Request{
+			NamespacedName: types.NamespacedName{Name: accounts.Items[i].Name},
+		})
+	}
+
+	return requests
 }
 
 // emitEvent emits a Kubernetes event immediately.

@@ -1,0 +1,120 @@
+# S3Tenant deletion while buckets still reference it.
+#
+# Regression cover for the deletion-latency rework:
+#   - the DELETE is ACCEPTED (it used to be denied by the validating webhook, which
+#     hung `kubectl delete namespace` because the call never landed)
+#   - the tenant is then held by its finalizer, reporting phase Deleting with
+#     Deleting=True/WaitingForBuckets
+#   - ReconcileSucceeded stays True: waiting is progress, not a failure
+#   - once the last bucket is gone the tenant disappears QUICKLY. The tight timeout in
+#     the final step is the point of this test: waits used to be signalled by returning
+#     an error, which made controller-runtime fall back to an exponential backoff that
+#     saturates at 16m40s, so this step would have taken up to ~17 minutes.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3tenant-deletion-waits-for-buckets
+spec:
+  bindings:
+    - name: tenantName
+      value: del-wait-tenant
+    - name: bucketName
+      value: del-wait-bucket
+  steps:
+    - name: create-tenant
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+
+    - name: verify-account-and-set-deletion-policy
+      use:
+        template: ../_step-templates/verify-account-set-delete-policy.yaml
+
+    - name: create-bucket
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                s3TenantRef:
+                  name: ($tenantName)
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                phase: Ready
+
+    # ── The webhook must ACCEPT this delete, not deny it ────────────────
+    - name: delete-tenant-is-accepted
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              name: ($tenantName)
+            expect:
+              - check:
+                  ($error == null): true
+
+    # ── Held by the finalizer, reported as in-progress not broken ───────
+    - name: tenant-waits-for-bucket
+      try:
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+                (finalizers[?@ == 's3tenant.s3.bedag.ch/finalizer'] != null): true
+              status:
+                phase: Deleting
+                (conditions[?type == 'Deleting']):
+                  - status: "True"
+                    reason: WaitingForBuckets
+                # A blocked deletion is expected progress, never a reconcile failure.
+                (conditions[?type == 'ReconcileSucceeded']):
+                  - status: "True"
+
+    # ── Removing the blocker must free the tenant promptly ──────────────
+    - name: delete-bucket-then-tenant-completes
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              name: ($bucketName)
+        - error:
+            # Deliberately tight. Pre-fix this took up to ~16m40s because the tenant
+            # had no watch on S3Bucket and only retried on a saturated backoff.
+            timeout: 90s
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)

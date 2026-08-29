@@ -159,6 +159,23 @@ spec:
                     - Disabled
                     type: string
                 type: object
+              consistency:
+                description: |-
+                  Consistency selects the StorageGRID consistency value for this bucket, trading
+                  read-after-write guarantees against availability across sites.
+                  When omitted the operator does not manage consistency at all: an imported or
+                  administrator-tuned bucket keeps whatever value it has. When set, the operator owns the
+                  setting and overrides any out-of-band change. When removed after having been set, the
+                  bucket is reverted to the grid default (ReadAfterNewWrite) and left unmanaged.
+                  A change applies only to objects ingested after it.
+                  The enum is declared on the BucketConsistency type.
+                enum:
+                - All
+                - StrongGlobal
+                - StrongSite
+                - ReadAfterNewWrite
+                - Available
+                type: string
               drainPollInterval:
                 description: |-
                   DrainPollInterval overrides the StorageGrid drain polling frequency for this bucket.
@@ -457,6 +474,19 @@ spec:
                 description: |-
                   LastAppliedBucketPolicies is a fingerprint of the bucket policy last successfully applied
                   from spec.bucketPolicies. Used for drift detection. Empty when no structured bucket policy is managed.
+                type: string
+              lastAppliedConsistency:
+                description: |-
+                  LastAppliedConsistency is the consistency value the operator last successfully applied.
+                  It decides whether clearing spec.consistency must revert the bucket to the grid default:
+                  empty means the operator has never set this bucket's consistency and must not change it.
+                  Diagnostic only — drift is always detected by reading the live value from the backend.
+                enum:
+                - All
+                - StrongGlobal
+                - StrongSite
+                - ReadAfterNewWrite
+                - Available
                 type: string
               lastAppliedLifecycle:
                 description: |-

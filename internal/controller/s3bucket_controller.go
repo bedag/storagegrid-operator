@@ -309,6 +309,14 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 		// Don't return error; continue with other reconciliation so policy and credentials can still progress.
 	}
 
+	// Reconcile bucket consistency drift.
+	if err := r.reconcileBucketConsistency(ctx, rctx); err != nil {
+		log.Error(err, "Failed to reconcile bucket consistency")
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionFalse, "BucketConsistencyReconcileFailed", err.Error())
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeConsistencySynced, metav1.ConditionFalse, "BucketConsistencyReconcileFailed", err.Error())
+		// Don't return error; continue so other reconcilers can still progress.
+	}
+
 	// Reconcile bucket policy.
 	if err := r.reconcileBucketPolicy(ctx, rctx); err != nil {
 		log.Error(err, "Failed to reconcile bucket policy")
@@ -1368,6 +1376,85 @@ func (r *S3BucketReconciler) warnLifecycleObjectLockConflict(rctx *bucketReconci
 			fmt.Sprintf("Lifecycle expirationInDays=%d is shorter than s3ObjectLock.retentionInDays=%d; StorageGRID will refuse to delete locked objects when the lifecycle fires",
 				desired.ExpirationInDays, lock.RetentionInDays))
 	}
+}
+
+// reconcileBucketConsistency applies spec.consistency to the bucket, or — when the field has
+// been cleared after previously being managed — reverts the bucket to the grid default and
+// stops managing it. An unset field on a bucket the operator never configured is a no-op, so
+// an imported bucket keeps whatever consistency it arrived with.
+func (r *S3BucketReconciler) reconcileBucketConsistency(ctx context.Context, rctx *bucketReconcileContext) error {
+	if rctx.Bucket.Spec.Consistency == "" {
+		return r.reconcileBucketConsistencyRevert(ctx, rctx)
+	}
+	return r.reconcileBucketConsistencyApply(ctx, rctx)
+}
+
+func (r *S3BucketReconciler) reconcileBucketConsistencyApply(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileBucketConsistencyApply")
+
+	desired, err := grid.ConsistencyFromSpec(rctx.Bucket.Spec.Consistency)
+	if err != nil {
+		// Unreachable while the CRD enum holds; surfaced rather than silently skipped.
+		return fmt.Errorf("invalid spec.consistency %q: %w", rctx.Bucket.Spec.Consistency, err)
+	}
+
+	// Always observe the backend before acting: status.LastAppliedConsistency is diagnostic
+	// only, it must not gate work, otherwise out-of-band drift (tenant manager, other tooling)
+	// would be silently masked.
+	current, err := grid.GetBucketConsistency(ctx, rctx.Bucket.Status.BucketName, rctx.TenantClient)
+	if err != nil {
+		return fmt.Errorf("failed to fetch current bucket consistency: %w", err)
+	}
+
+	if current == desired {
+		log.V(1).Info("Bucket consistency already in sync", "consistency", desired)
+		rctx.Bucket.Status.LastAppliedConsistency = rctx.Bucket.Spec.Consistency
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeConsistencySynced, metav1.ConditionTrue, "ConsistencyApplied",
+			fmt.Sprintf("Bucket consistency in sync (%s)", rctx.Bucket.Spec.Consistency))
+		return nil
+	}
+
+	log.V(1).Info("Bucket consistency drift detected, updating", "current", current, "desired", desired)
+	if err := grid.UpdateBucketConsistency(ctx, rctx.Bucket.Status.BucketName, desired, rctx.TenantClient); err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketConsistencyApplyFailed,
+			fmt.Sprintf("Failed to set consistency of bucket %s to %s: %v", rctx.Bucket.Status.BucketName, rctx.Bucket.Spec.Consistency, err))
+		return fmt.Errorf("failed to update bucket consistency: %w", err)
+	}
+
+	rctx.Bucket.Status.LastAppliedConsistency = rctx.Bucket.Spec.Consistency
+	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeConsistencySynced, metav1.ConditionTrue, "ConsistencyApplied",
+		fmt.Sprintf("Bucket consistency set to %s", rctx.Bucket.Spec.Consistency))
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketConsistencyApplied,
+		fmt.Sprintf("Set consistency of bucket %s to %s (%s); applies to newly ingested objects only",
+			rctx.Bucket.Status.BucketName, rctx.Bucket.Spec.Consistency, desired))
+	return nil
+}
+
+func (r *S3BucketReconciler) reconcileBucketConsistencyRevert(ctx context.Context, rctx *bucketReconcileContext) error {
+	log := log.FromContext(ctx).WithValues("function", "reconcileBucketConsistencyRevert")
+
+	// Fast path: the operator has never set this bucket's consistency, so it has no business
+	// changing it now. This is what keeps an imported bucket's pre-existing value intact and
+	// avoids a GET against every bucket on every loop for a feature nobody opted into.
+	if rctx.Bucket.Status.LastAppliedConsistency == "" {
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeConsistencySynced, metav1.ConditionTrue, "ConsistencyUnmanaged",
+			"Bucket consistency is not managed by the operator")
+		return nil
+	}
+
+	log.V(1).Info("spec.consistency cleared, reverting bucket to the grid default", "default", grid.ConsistencyDefault)
+	if err := grid.UpdateBucketConsistency(ctx, rctx.Bucket.Status.BucketName, grid.ConsistencyDefault, rctx.TenantClient); err != nil {
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketConsistencyRevertFailed,
+			fmt.Sprintf("Failed to revert consistency of bucket %s to the grid default: %v", rctx.Bucket.Status.BucketName, err))
+		return fmt.Errorf("failed to revert bucket consistency: %w", err)
+	}
+
+	rctx.Bucket.Status.LastAppliedConsistency = ""
+	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeConsistencySynced, metav1.ConditionTrue, "ConsistencyUnmanaged",
+		"Bucket consistency reverted to the grid default and is no longer managed")
+	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketConsistencyReverted,
+		fmt.Sprintf("Reverted consistency of bucket %s to the grid default (%s)", rctx.Bucket.Status.BucketName, grid.ConsistencyDefault))
+	return nil
 }
 
 // reconcileBucketConnectionDetails synthesizes (or removes) a Kubernetes Secret containing

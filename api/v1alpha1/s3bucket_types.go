@@ -53,6 +53,17 @@ type S3BucketSpec struct {
 	// +optional
 	S3ObjectLock *S3ObjectLockBucketSpec `json:"s3ObjectLock,omitempty"`
 
+	// Consistency selects the StorageGRID consistency value for this bucket, trading
+	// read-after-write guarantees against availability across sites.
+	// When omitted the operator does not manage consistency at all: an imported or
+	// administrator-tuned bucket keeps whatever value it has. When set, the operator owns the
+	// setting and overrides any out-of-band change. When removed after having been set, the
+	// bucket is reverted to the grid default (ReadAfterNewWrite) and left unmanaged.
+	// A change applies only to objects ingested after it.
+	// The enum is declared on the BucketConsistency type.
+	// +optional
+	Consistency BucketConsistency `json:"consistency,omitempty"`
+
 	// tenant the bucket will be created in.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="s3TenantRef is immutable"
 	S3TenantRef corev1.ObjectReference `json:"s3TenantRef,omitempty"`
@@ -147,6 +158,13 @@ type S3BucketStatus struct {
 	// Used by the operator for drift detection. Empty when no lifecycle configuration is managed.
 	LastAppliedLifecycle string `json:"lastAppliedLifecycle,omitempty"`
 
+	// LastAppliedConsistency is the consistency value the operator last successfully applied.
+	// It decides whether clearing spec.consistency must revert the bucket to the grid default:
+	// empty means the operator has never set this bucket's consistency and must not change it.
+	// Diagnostic only — drift is always detected by reading the live value from the backend.
+	// +optional
+	LastAppliedConsistency BucketConsistency `json:"lastAppliedConsistency,omitempty"`
+
 	// ConnectionDetailsSecretRef is set to the user-facing connection-details Secret
 	// projected by the operator (when spec.connectionDetails.mode is All). Cleared when
 	// mode is Disabled. Tracks the actually-deployed Secret name so a destinationSecret
@@ -195,6 +213,27 @@ type BucketPolicyBinding struct {
 	// +optional
 	Principals []string `json:"principals,omitempty"`
 }
+
+// BucketConsistency selects the StorageGRID consistency value for a bucket. It controls the
+// trade-off between the availability of objects in the bucket and the guarantee that a read
+// returns the most recently written data.
+// +kubebuilder:validation:Enum=All;StrongGlobal;StrongSite;ReadAfterNewWrite;Available
+type BucketConsistency string
+
+const (
+	// BucketConsistencyAll requires all nodes to receive the data immediately, or the request fails.
+	BucketConsistencyAll BucketConsistency = "All"
+	// BucketConsistencyStrongGlobal guarantees read-after-write for all client requests across all sites.
+	BucketConsistencyStrongGlobal BucketConsistency = "StrongGlobal"
+	// BucketConsistencyStrongSite guarantees read-after-write for all client requests within a site.
+	BucketConsistencyStrongSite BucketConsistency = "StrongSite"
+	// BucketConsistencyReadAfterNewWrite guarantees read-after-write for new objects and eventual
+	// consistency for object updates. This is the grid default and is recommended for most cases.
+	BucketConsistencyReadAfterNewWrite BucketConsistency = "ReadAfterNewWrite"
+	// BucketConsistencyAvailable provides eventual consistency for both new objects and updates.
+	// Not supported for S3 FabricPool buckets.
+	BucketConsistencyAvailable BucketConsistency = "Available"
+)
 
 // S3ObjectLockMode represents the configured S3 Object Lock retention mode for a bucket
 // or the maximum allowed mode for a tenant.

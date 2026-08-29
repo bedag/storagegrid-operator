@@ -1,0 +1,186 @@
+# S3Bucket consistency:
+# verify the operator-managed StorageGrid bucket consistency end-to-end.
+# Steps: create without the field → assert unmanaged, set StrongSite → assert applied,
+# change to Available → assert reapplied, remove the field → assert reverted to the grid default.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3bucket-consistency
+spec:
+  bindings:
+    - name: tenantName
+      value: consistency-bucket-tenant
+    - name: bucketName
+      value: consistency-bucket
+  steps:
+    # ── Step 1: Create tenant ─────────────────────────────────────────────
+    - name: create-tenant
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+                defaultBucketRegion: us-east-1
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 2: Verify auto-created S3TenantAccount and set Delete policy ──
+    - name: verify-account
+      use:
+        template: ../../s3tenant/_step-templates/verify-account-set-delete-policy.yaml
+
+    # ── Step 3: Create bucket WITHOUT spec.consistency ────────────────────
+    # The operator must leave consistency alone entirely: this is what keeps an imported or
+    # administrator-tuned bucket's value intact.
+    - name: create-bucket-without-consistency
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                region: us-east-1
+                s3TenantRef:
+                  name: ($tenantName)
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                phase: Ready
+                (bucketName != ''): true
+                lastAppliedConsistency: ""
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+                (conditions[?type == 'ConsistencySynced']):
+                  - status: "True"
+                    reason: ConsistencyUnmanaged
+
+    # ── Step 4: Set consistency=StrongSite, assert applied ────────────────
+    - name: set-consistency
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                consistency: StrongSite
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                consistency: StrongSite
+              status:
+                lastAppliedConsistency: StrongSite
+                (conditions[?type == 'ConsistencySynced']):
+                  - status: "True"
+                    reason: ConsistencyApplied
+
+    # ── Step 5: Change consistency=Available, assert reapplied ────────────
+    - name: update-consistency
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                consistency: Available
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                consistency: Available
+              status:
+                lastAppliedConsistency: Available
+                (conditions[?type == 'ConsistencySynced']):
+                  - status: "True"
+                    reason: ConsistencyApplied
+
+    # ── Step 6: Remove the field, assert revert to the grid default ───────
+    # A JSON merge patch with a null value drops the key, which is what returns the bucket to
+    # read-after-new-write and hands ownership back to the user.
+    - name: unset-consistency
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                consistency: null
+        - assert:
+            timeout: 2m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                lastAppliedConsistency: ""
+                (conditions[?type == 'ConsistencySynced']):
+                  - status: "True"
+                    reason: ConsistencyUnmanaged
+
+    # ── Step 7: Delete bucket and tenant ──────────────────────────────────
+    - name: delete-bucket
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              name: ($bucketName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+    - name: delete-tenant
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              name: ($tenantName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)

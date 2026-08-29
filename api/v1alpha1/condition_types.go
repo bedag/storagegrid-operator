@@ -34,6 +34,7 @@ const (
 	ConditionTypeOwnershipConflict        = "OwnershipConflict"
 	ConditionTypeS3ObjectLockSupported    = "S3ObjectLockSupported"
 	ConditionTypeLifecycleSynced          = "LifecycleSynced"
+	ConditionTypeConsistencySynced        = "ConsistencySynced"
 
 	// ConditionTypeDeleting is set while a resource is being deleted. It carries the
 	// reason the deletion has not completed yet (waiting for linked buckets, waiting

@@ -656,6 +656,61 @@ Monitor bucket phase:
 kubectl get s3bucket my-bucket -o jsonpath='{.status.phase}'
 ```
 
+#### Bucket Consistency
+
+Every bucket has a consistency value that trades read-after-write guarantees against
+availability across sites. StorageGrid defaults new buckets to `read-after-new-write`, which is
+the right choice for most workloads. Set `spec.consistency` only when a client application
+genuinely needs different behavior:
+
+| Value | Guarantee |
+|-------|-----------|
+| `All` | All nodes receive the data immediately, or the request fails. |
+| `StrongGlobal` | Read-after-write for all client requests across all sites. |
+| `StrongSite` | Read-after-write for all client requests within a site. |
+| `ReadAfterNewWrite` | Read-after-write for new objects, eventual consistency for updates. The grid default. |
+| `Available` | Eventual consistency for both new objects and updates. Highest availability. Not supported for S3 FabricPool buckets. |
+
+```yaml
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3Bucket
+metadata:
+  name: my-bucket
+  namespace: default
+spec:
+  s3TenantRef:
+    name: my-tenant
+  region: "us-east-1"
+  consistency: StrongGlobal
+```
+
+**Ownership semantics** — the operator only manages what you ask it to manage:
+
+- **Omitted**: the operator never reads or writes the bucket's consistency. A bucket whose value
+  was set through the Tenant Manager, the S3 API, or an import keeps it.
+- **Set**: the operator owns the value and corrects any out-of-band change on the next reconcile.
+- **Removed after having been set**: the operator resets the bucket to the grid default
+  (`ReadAfterNewWrite`) once, then stops managing it.
+
+`status.lastAppliedConsistency` records what the operator last applied and is what distinguishes
+the last two cases from the first:
+
+```bash
+kubectl get s3bucket my-bucket -o jsonpath='{.status.lastAppliedConsistency}'
+```
+
+The `ConsistencySynced` condition reports the outcome, with reason `ConsistencyApplied` or
+`ConsistencyUnmanaged`.
+
+**Caveats:**
+
+- A change applies **only to objects ingested after it**. Objects already in the bucket keep
+  their prior behavior.
+- This setting governs **object** operations only. Bucket versioning, S3 Object Lock and bucket
+  encryption always use strong consistency internally regardless of it, so combining a relaxed
+  value such as `Available` with S3 Object Lock is supported: the object data is eventually
+  consistent while the retention metadata stays strongly consistent.
+
 #### Draining Buckets
 
 Buckets cannot be deleted while they contain objects. Use the drain annotation to automatically delete all objects before bucket deletion:
@@ -972,6 +1027,8 @@ After successful import:
 - Bucket policies can be applied via `spec.bucketPolicyJson`
 - The bucket can be drained and deleted like any operator-created bucket
 - Ownership tags are maintained and re-applied if externally modified
+- The bucket keeps its existing consistency value; the operator only manages it once you set
+  `spec.consistency` (see [Bucket Consistency](#bucket-consistency))
 
 For detailed architecture information on bucket import and the S3 tagging implementation, see [Bucket Import Architecture](../docs/architecture/bucket-import.md).
 

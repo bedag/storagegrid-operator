@@ -149,6 +149,12 @@ const (
 	EventBucketLifecycleRemoveFailed       = "LifecycleRemoveFailed"
 	EventBucketLifecycleObjectLockConflict = "LifecycleObjectLockConflict"
 
+	// Bucket Consistency Events.
+	EventBucketConsistencyApplied      = "ConsistencyApplied"
+	EventBucketConsistencyReverted     = "ConsistencyReverted"
+	EventBucketConsistencyApplyFailed  = "ConsistencyApplyFailed"
+	EventBucketConsistencyRevertFailed = "ConsistencyRevertFailed"
+
 	// Connection Details Events (shared by S3Bucket and S3Access).
 	EventConnectionDetailsApplied      = "ConnectionDetailsApplied"
 	EventConnectionDetailsRemoved      = "ConnectionDetailsRemoved"

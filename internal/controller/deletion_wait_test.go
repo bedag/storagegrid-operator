@@ -701,3 +701,107 @@ var _ = Describe("S3TenantAccount phase reflects reality", func() {
 		Expect(rctx.Account.Status.Phase).To(Equal(s3v1alpha1.PhaseRetainThenDelete))
 	})
 })
+
+var _ = Describe("A failed drain must not stall a terminating bucket", func() {
+	ctx := context.Background()
+	It("keeps a bounded poll and records the failure instead of erroring out", func() {
+		now := metav1.Now()
+		bucket := &s3v1alpha1.S3Bucket{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "logs",
+				Namespace:         "default",
+				DeletionTimestamp: &now,
+				Finalizers:        []string{s3BucketFinalizer},
+				Annotations:       map[string]string{s3v1alpha1.AnnotationDrainBucket: "true"},
+			},
+			Status: s3v1alpha1.S3BucketStatus{BucketName: "logs"},
+		}
+
+		r := &S3BucketReconciler{
+			Client:   fake.NewClientBuilder().WithScheme(scheme.Scheme).Build(),
+			Scheme:   scheme.Scheme,
+			Recorder: record.NewFakeRecorder(10),
+		}
+		rctx := &bucketReconcileContext{Bucket: bucket}
+
+		// Stand in for the post-drain-failure state: still terminating, still not empty.
+		r.setCondition(bucket, s3v1alpha1.ConditionTypeDraining, metav1.ConditionFalse,
+			"DrainFailed", "Drain could not be started")
+		r.waitForDeletion(ctx, rctx, "BucketNotEmpty",
+			"Bucket logs still contains 3 object(s).", 3*time.Minute)
+
+		By("still scheduling a bounded requeue rather than relying on error backoff")
+		Expect(rctx.RequeAfter.Duration).To(Equal(3 * time.Minute))
+
+		By("surfacing the drain failure without claiming the reconcile failed")
+		draining := meta.FindStatusCondition(bucket.Status.Conditions, s3v1alpha1.ConditionTypeDraining)
+		Expect(draining).NotTo(BeNil())
+		Expect(draining.Status).To(Equal(metav1.ConditionFalse))
+		Expect(draining.Reason).To(Equal("DrainFailed"))
+		Expect(meta.FindStatusCondition(bucket.Status.Conditions, s3v1alpha1.ConditionTypeReconcileSucceeded).Status).
+			To(Equal(metav1.ConditionTrue))
+	})
+})
+
+var _ = Describe("Waking the account when its tenant's buckets change", func() {
+	ctx := context.Background()
+
+	// Regression: a deleting S3Tenant's second guard reads the backend bucket count, which
+	// lives in the account's status and is only refreshed by the account's own reconcile.
+	// Nothing woke the account once the last bucket was gone, so the count stayed stale and
+	// the tenant waited on a value that could never change until the next full resync -
+	// verified against a live grid, where the grid reported zero buckets while the account
+	// still reported one.
+	accountIndex := func(obj client.Object) []string {
+		account := obj.(*s3v1alpha1.S3TenantAccount)
+		if account.Spec.S3TenantRef == nil {
+			return nil
+		}
+		return []string{account.Spec.S3TenantRef.Namespace + "/" + account.Spec.S3TenantRef.Name}
+	}
+
+	newAccountReconciler := func(objs ...client.Object) *S3TenantAccountReconciler {
+		return &S3TenantAccountReconciler{
+			Client: fake.NewClientBuilder().
+				WithScheme(scheme.Scheme).
+				WithIndex(&s3v1alpha1.S3TenantAccount{}, accountByTenantIndex, accountIndex).
+				WithObjects(objs...).
+				Build(),
+			Scheme:   scheme.Scheme,
+			Recorder: record.NewFakeRecorder(10),
+		}
+	}
+
+	boundAccount := func(name, tenantNs, tenantName string) *s3v1alpha1.S3TenantAccount {
+		return &s3v1alpha1.S3TenantAccount{
+			ObjectMeta: metav1.ObjectMeta{Name: name},
+			Spec: s3v1alpha1.S3TenantAccountSpec{
+				S3TenantRef: &corev1.ObjectReference{Namespace: tenantNs, Name: tenantName},
+			},
+		}
+	}
+
+	It("enqueues the account bound to the bucket's tenant", func() {
+		r := newAccountReconciler(
+			boundAccount("acct-a", "default", "my-tenant"),
+			boundAccount("acct-b", "default", "other-tenant"),
+		)
+
+		requests := r.mapBucketToAccount(ctx, bucketFor("logs", "my-tenant"))
+
+		Expect(requests).To(HaveLen(1))
+		Expect(requests[0].Name).To(Equal("acct-a"))
+		Expect(requests[0].Namespace).To(BeEmpty(), "S3TenantAccount is cluster-scoped")
+	})
+
+	It("returns nothing when no account is bound to that tenant", func() {
+		r := newAccountReconciler(boundAccount("acct-b", "default", "other-tenant"))
+		Expect(r.mapBucketToAccount(ctx, bucketFor("logs", "my-tenant"))).To(BeEmpty())
+	})
+
+	It("ignores unbound accounts and non-bucket objects", func() {
+		r := newAccountReconciler(&s3v1alpha1.S3TenantAccount{ObjectMeta: metav1.ObjectMeta{Name: "unbound"}})
+		Expect(r.mapBucketToAccount(ctx, bucketFor("logs", "my-tenant"))).To(BeEmpty())
+		Expect(r.mapBucketToAccount(ctx, &s3v1alpha1.S3Tenant{})).To(BeNil())
+	})
+})

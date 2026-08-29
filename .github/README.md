@@ -207,7 +207,35 @@ spec:
   credentialsSecret:
     name: storagegrid-credentials
     namespace: storagegrid-operator-system
+
+  # Grid-wide S3 Object Lock retention ceiling, in days, for tenants that do not
+  # set spec.s3ObjectLock.maxRetentionInDays themselves. Defaults to 365.
+  # Must be between 1 and 36500 (100 years). See "S3 Object Lock retention" below.
+  defaultMaxRetentionInDays: 365
 ```
+
+#### S3 Object Lock retention
+
+StorageGrid requires every tenant to carry an S3 Object Lock retention ceiling once Object Lock
+is enabled grid-wide, and **silently applies a 100-year ceiling to any tenant created without
+one**. The operator therefore always writes the field explicitly, resolving it as:
+
+| Setting | Effect |
+| --- | --- |
+| `S3Tenant.spec.s3ObjectLock.maxRetentionInDays` > 0 | That value is used |
+| `S3Tenant.spec.s3ObjectLock.maxRetentionInDays` unset or `0` | Inherits `StorageGrid.spec.defaultMaxRetentionInDays` |
+| Neither set | Falls back to 365 days |
+
+The ceiling is independent of `s3ObjectLock.mode`. Mode governs whether an `S3Bucket` may enable
+Object Lock at all, but the retention ceiling also caps Governance-mode retention that a tenant
+can request directly over the S3 API, where the operator's bucket-level checks do not apply.
+
+The operator owns this field: it is reconciled on every loop, so a value changed by hand in the
+Tenant Manager is reset to what the spec requires. It also expresses the ceiling in days only,
+clearing StorageGrid's `maxRetentionYears` whenever it writes.
+
+An `S3Bucket`'s `s3ObjectLock.retentionInDays` may never exceed its tenant's effective ceiling;
+the admission webhook rejects the bucket otherwise.
 
 ### 2. Define an S3TenantClass
 
@@ -250,6 +278,16 @@ spec:
     project: "my-project"
     environment: "production"
     owner: "team-alpha"
+
+  # Optional: S3 Object Lock. Omit the whole block if the tenant does not need it -
+  # the operator still applies the grid's retention ceiling in the backend.
+  s3ObjectLock:
+    # Maximum mode buckets in this tenant may use: Disabled (default), Governance, Compliance.
+    # Compliance requires the parent StorageGrid to have Object Lock enabled grid-wide.
+    mode: Governance
+    # Caps retentionInDays on every bucket in this tenant.
+    # 0 or omitted inherits StorageGrid.spec.defaultMaxRetentionInDays.
+    maxRetentionInDays: 90
 ```
 
 #### Available Annotations

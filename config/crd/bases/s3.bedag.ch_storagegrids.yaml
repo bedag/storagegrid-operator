@@ -58,6 +58,18 @@ spec:
                 description: Default region for buckets created in the StorageGrid,
                   defaults to the first region in the list.
                 type: string
+              defaultMaxRetentionInDays:
+                default: 365
+                description: |-
+                  DefaultMaxRetentionInDays is the S3 Object Lock retention ceiling applied to tenants on this
+                  grid that do not set spec.s3ObjectLock.maxRetentionInDays themselves.
+                  StorageGrid requires a value between 1 day and 100 years once S3 Object Lock is enabled
+                  grid-wide, and silently applies 100 years when no value is sent, so the operator always
+                  writes this field explicitly.
+                format: int32
+                maximum: 36500
+                minimum: 1
+                type: integer
               defaultTenantDeletionPolicy:
                 default:
                   retentionDuration: 168h
@@ -303,6 +315,12 @@ spec:
               defaultBucketRegion:
                 description: DefaultRegion for buckets created in the StorageGrid.
                 type: string
+              defaultMaxRetentionInDays:
+                description: |-
+                  Currently active default S3 Object Lock retention ceiling in days, applied to tenants
+                  that do not set spec.s3ObjectLock.maxRetentionInDays themselves.
+                format: int32
+                type: integer
               defaultTenantDeletionPolicy:
                 default: {}
                 description: Currently active tenant deletion policy.

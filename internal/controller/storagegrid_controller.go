@@ -185,6 +185,9 @@ func (r *StorageGridReconciler) doReconcile(ctx context.Context, rctx *sgReconci
 	// probe grid-wide S3 Object Lock capability (transient failures must not flip Ready).
 	r.reconcileS3ObjectLockCapability(ctx, rctx)
 
+	// mirror the grid-wide S3 Object Lock retention default into the status.
+	r.reconcileDefaultMaxRetention(ctx, rctx)
+
 	// set the condition to true, as we successfully reconciled the storageGrid.
 	r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "ReconcileSucceeded", "StorageGrid reconciled successfully")
 
@@ -390,6 +393,23 @@ func (r *StorageGridReconciler) reconcileDeletionPolicy(ctx context.Context, sg 
 	if DefaultTenantDeletionPolicy.Policy != sg.Status.DefaultTenantDeletionPolicy.Policy {
 		log.V(1).Info(fmt.Sprintf("Updating deletion policy from %s to %s", sg.Status.DefaultTenantDeletionPolicy.Policy, DefaultTenantDeletionPolicy.Policy))
 		sg.Status.DefaultTenantDeletionPolicy.Policy = DefaultTenantDeletionPolicy.Policy
+	}
+}
+
+// reconcileDefaultMaxRetention mirrors the grid-wide S3 Object Lock retention default into the
+// status so it is visible via kubectl. The S3TenantAccount controller resolves against the spec
+// directly, so this mirror is purely informational and never gates a backend write.
+func (r *StorageGridReconciler) reconcileDefaultMaxRetention(ctx context.Context, rctx *sgReconcileContext) {
+	log := log.FromContext(ctx)
+
+	desired := rctx.SG.Spec.DefaultMaxRetentionInDays
+	if desired <= 0 {
+		desired = s3v1alpha1.DefaultMaxRetentionInDays
+	}
+
+	if rctx.SG.Status.DefaultMaxRetentionInDays != desired {
+		log.V(1).Info(fmt.Sprintf("Updating default max retention from %d to %d days", rctx.SG.Status.DefaultMaxRetentionInDays, desired))
+		rctx.SG.Status.DefaultMaxRetentionInDays = desired
 	}
 }
 

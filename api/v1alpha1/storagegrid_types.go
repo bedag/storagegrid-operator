@@ -27,6 +27,11 @@ const (
 	DefaultRetentionDuration       = "168h"                     // 7 days
 	DefaultTenantDeletionProcedure = TenantDeletionPolicyRetain // Default policy for tenant deletion
 
+	// DefaultMaxRetentionInDays is the fallback S3 Object Lock retention ceiling applied when
+	// neither the tenant nor the StorageGrid specifies one. StorageGrid itself would default to
+	// 100 years, so the operator pins one year instead, matching what the Tenant Manager writes.
+	DefaultMaxRetentionInDays int32 = 365
+
 	// Default bucket drain operation intervals.
 	DefaultDrainInitialPollInterval     = 3 * time.Minute
 	DefaultDrainLongRunningPollInterval = 30 * time.Minute
@@ -96,6 +101,17 @@ type StorageGridSpec struct {
 	// +optional
 	// +kubebuilder:default={retentionDuration: "168h"}
 	DefaultTenantDeletionPolicy *TenantDeletionPolicy `json:"defaultTenantDeletionPolicy,omitempty"`
+
+	// DefaultMaxRetentionInDays is the S3 Object Lock retention ceiling applied to tenants on this
+	// grid that do not set spec.s3ObjectLock.maxRetentionInDays themselves.
+	// StorageGrid requires a value between 1 day and 100 years once S3 Object Lock is enabled
+	// grid-wide, and silently applies 100 years when no value is sent, so the operator always
+	// writes this field explicitly.
+	// +kubebuilder:default=365
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=36500
+	// +optional
+	DefaultMaxRetentionInDays int32 `json:"defaultMaxRetentionInDays,omitempty"`
 
 	// Amount of nodes (default: 1) that can be unavailable before the StorageGrid is considered not ready.
 	// This is a safeguard to prevent operations when the StorageGrid is not fully available.
@@ -210,6 +226,11 @@ type StorageGridStatus struct {
 	// +optional
 	// +kubebuilder:default={}
 	DefaultTenantDeletionPolicy *TenantDeletionPolicy `json:"defaultTenantDeletionPolicy,omitempty"`
+
+	// Currently active default S3 Object Lock retention ceiling in days, applied to tenants
+	// that do not set spec.s3ObjectLock.maxRetentionInDays themselves.
+	// +optional
+	DefaultMaxRetentionInDays int32 `json:"defaultMaxRetentionInDays,omitempty"`
 
 	// Usage of the StorageGrid summarizes the usage of all tenants.
 	// +optional

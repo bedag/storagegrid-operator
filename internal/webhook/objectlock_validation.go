@@ -56,18 +56,28 @@ func objectLockModeRank(mode s3v1alpha1.S3ObjectLockMode) int {
 	}
 }
 
-// gridObjectLockAvailable reports whether the named StorageGrid currently has S3 Object Lock enabled.
-// A nil/unreported status flag is treated as false.
-func gridObjectLockAvailable(ctx context.Context, c client.Client, storageGridName string) (bool, error) {
+// fetchStorageGrid resolves a StorageGrid by name, turning the usual client errors into messages
+// that make sense in an admission response.
+func fetchStorageGrid(ctx context.Context, c client.Client, storageGridName string) (*s3v1alpha1.StorageGrid, error) {
 	if storageGridName == "" {
-		return false, fmt.Errorf("storageGridRef.name is empty")
+		return nil, fmt.Errorf("storageGridRef.name is empty")
 	}
 	sg := &s3v1alpha1.StorageGrid{}
 	if err := c.Get(ctx, client.ObjectKey{Name: storageGridName}, sg); err != nil {
 		if apierrors.IsNotFound(err) {
-			return false, fmt.Errorf("StorageGrid %s not found", storageGridName)
+			return nil, fmt.Errorf("StorageGrid %s not found", storageGridName)
 		}
-		return false, fmt.Errorf("failed to get StorageGrid %s: %w", storageGridName, err)
+		return nil, fmt.Errorf("failed to get StorageGrid %s: %w", storageGridName, err)
+	}
+	return sg, nil
+}
+
+// gridObjectLockAvailable reports whether the named StorageGrid currently has S3 Object Lock enabled.
+// A nil/unreported status flag is treated as false.
+func gridObjectLockAvailable(ctx context.Context, c client.Client, storageGridName string) (bool, error) {
+	sg, err := fetchStorageGrid(ctx, c, storageGridName)
+	if err != nil {
+		return false, err
 	}
 	if sg.Status.S3ObjectLockAvailable == nil {
 		return false, nil
@@ -115,7 +125,10 @@ func validateTenantObjectLockTransition(ctx context.Context, c client.Client, te
 	}
 
 	modeLowered := objectLockModeRank(newMode) < objectLockModeRank(oldMode)
-	maxLowered := newMode != s3v1alpha1.S3ObjectLockModeDisabled && newMax > 0 && newMax < oldMax
+	// The retention ceiling binds regardless of mode - it also caps Governance retention a tenant
+	// can request straight over the S3 API - so a reduction must be checked even when the mode is
+	// being set to Disabled at the same time.
+	maxLowered := newMax > 0 && newMax < oldMax
 
 	if !modeLowered && !maxLowered {
 		return nil

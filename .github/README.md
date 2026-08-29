@@ -607,9 +607,11 @@ Buckets have the following lifecycle phases:
 
 - **Pending**: Initial state, waiting for StorageGrid confirmation
 - **Ready**: Normal operation, bucket available for object storage
-- **Draining**: Automatically deleting all objects (see Draining Buckets below)
+- **Draining**: Deleting all objects on request (see Draining Buckets below)
 - **Failed**: Error condition requiring intervention
-- **Deleting**: Finalizer cleanup, removing from StorageGrid
+- **Deleting**: Being deleted — either waiting for the bucket to empty, or performing finalizer
+  cleanup. The `Deleting` condition carries the reason; a drain running while the bucket
+  terminates is reported by the `Draining` condition and `status.drainStatus`.
 
 Monitor bucket phase:
 ```bash
@@ -677,11 +679,95 @@ spec:
 - Automatically removes annotation when drain completes
 - Returns bucket to Ready phase after successful drain
 
+> [!IMPORTANT]
+> A drain runs **only** while you have set the drain annotation. The operator never deletes
+> objects on its own — deleting an `S3Bucket` or `S3Tenant` is not treated as consent to
+> destroy data. A bucket that still holds objects simply waits in the `Deleting` phase.
+
+The drain annotation also works on a bucket that is already terminating: if you run
+`kubectl delete s3bucket` first and add the annotation afterwards, the drain starts and the
+bucket is removed once it is empty.
+
 For drain architecture details, see [Drain Operations Architecture](../docs/architecture/drain-operations.md).
+
+#### How Deletion Behaves
+
+Deleting an `S3Bucket` or `S3Tenant` is always **accepted** — the resource gets a deletion
+timestamp immediately and is then held by a finalizer until it is safe to remove. This mirrors
+how Kubernetes protects a PersistentVolumeClaim that is still in use: the object enters the
+`Deleting` phase and stays there, rather than the deletion being rejected.
+
+While a deletion is blocked, the resource reports what it is waiting for:
+
+```bash
+$ kubectl get s3tenant my-tenant
+NAME        PHASE      READY   AGE
+my-tenant   Deleting   False   4h
+
+$ kubectl describe s3tenant my-tenant
+Status:
+  Phase: Deleting
+  Conditions:
+    Type: Deleting            Status: True   Reason: WaitingForBuckets
+      Message: Waiting for 2 linked S3Bucket(s) to be deleted: [logs, backups]
+```
+
+A blocked deletion is progress, not an error: `ReconcileSucceeded` stays `True` and the reason
+on the `Deleting` condition explains what is outstanding. The operator re-checks on a bounded
+schedule and reacts immediately when the blocker clears.
+
+**Configure deletion polling:**
+
+```yaml
+# Grid-level configuration
+apiVersion: s3.bedag.ch/v1alpha1
+kind: StorageGrid
+metadata:
+  name: my-storagegrid
+spec:
+  operations:
+    deletion:
+      pollInterval: "30s"                  # Re-check a blocked deletion this often
+      backendConfirmationInterval: "1m"    # Poll StorageGrid for delete confirmation
+
+---
+# Tenant-level override (highest priority)
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3Tenant
+metadata:
+  name: my-tenant
+spec:
+  deletionPollInterval: "15s"
+```
+
+These are backstops — an `S3Tenant` blocked on linked buckets is also woken directly when one of
+those buckets is deleted, so it usually proceeds without waiting for the next poll. All interval
+fields must be at least `5s`; a zero interval would mean "never re-check".
+
+`deletionPollInterval` exists only on `S3Tenant`, because the tenant is the only resource that
+waits on other Kubernetes objects (its linked `S3Bucket`s). The `S3TenantAccount` waits on
+StorageGrid confirming a backend delete, which is a property of the grid rather than of one
+account, so it is configured grid-wide via `backendConfirmationInterval`.
+
+**Deleting an S3TenantAccount**
+
+Deleting an `S3TenantAccount` removes the tenant from StorageGrid. Two things guard that:
+
+1. A **bound** account (one with `status.s3TenantRef` set) is rejected at admission — delete the
+   claiming `S3Tenant` first. Unlike the namespaced resources this stays a hard denial: the
+   account is cluster-scoped, so it is never swept up by a namespace deletion.
+2. StorageGrid itself refuses to delete a tenant that still holds buckets, so an account whose
+   backend tenant is non-empty cannot remove it. The rejection surfaces as a `TenantDeleteFailed`
+   event and on the account's conditions.
+
+Note the `S3TenantAccount` owns the `S3Tenant` it is bound to, so deleting an account also
+garbage-collects its tenant.
 
 #### Deleting Tenants with Buckets
 
-To delete a tenant that has buckets:
+Deleting a tenant with buckets is blocked until those buckets are gone (see
+[How Deletion Behaves](#how-deletion-behaves)). The tenant is accepted for deletion and waits in
+the `Deleting` phase. To delete a tenant that has buckets:
 
 1. **Drain all tenant buckets:**
    ```bash

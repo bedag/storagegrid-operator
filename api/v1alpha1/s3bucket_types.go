@@ -84,11 +84,15 @@ type S3BucketSpec struct {
 	// DrainPollInterval overrides the StorageGrid drain polling frequency for this bucket.
 	// When set, replaces the two-tier polling strategy with this single interval.
 	// Use for buckets needing different polling behavior (e.g., huge bucket = 4h+, urgent = 1m).
+	// A zero interval would translate to "never requeue" and silently stall the drain,
+	// so a lower bound is enforced.
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('5s')",message="drainPollInterval must be at least 5s"
 	// +optional
 	DrainPollInterval *metav1.Duration `json:"drainPollInterval,omitempty"`
 
 	// DrainStuckThreshold overrides when to consider this bucket's drain stuck.
 	// Use for buckets with expected slow drain rates (e.g., 24h+ for multi-billion object bucket).
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('5s')",message="drainStuckThreshold must be at least 5s"
 	// +optional
 	DrainStuckThreshold *metav1.Duration `json:"drainStuckThreshold,omitempty"`
 

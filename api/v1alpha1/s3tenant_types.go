@@ -36,6 +36,14 @@ type S3TenantSpec struct {
 	// +optional
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="s3TenantAccountRef is immutable"
 	S3TenantAccountRef *corev1.LocalObjectReference `json:"s3TenantAccountRef,omitempty"`
+
+	// DeletionPollInterval overrides how often this tenant re-checks whether its blocked
+	// deletion can proceed (for example while waiting for linked S3Buckets to be deleted).
+	// Falls back to the StorageGrid spec.operations.deletion.pollInterval, then to 30s.
+	// This is only a backstop: the tenant is also woken directly by its watch on S3Bucket.
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('5s')",message="deletionPollInterval must be at least 5s"
+	// +optional
+	DeletionPollInterval *metav1.Duration `json:"deletionPollInterval,omitempty"`
 }
 
 // S3TenantStatus defines the observed state of S3Tenant.
@@ -95,6 +103,24 @@ type S3TenantList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []S3Tenant `json:"items"`
+}
+
+// CanServeBackendOperations reports whether a dependent resource (S3Bucket, S3Access) may
+// use this tenant to reach the StorageGrid backend. Pass dependentTerminating=true when the
+// caller is itself being deleted.
+//
+// A terminating tenant still serves cleanup. Its backend tenant and admin credentials live
+// until the S3TenantAccount finalizes, and the tenant blocks its own deletion on exactly
+// these dependents - so refusing them while it terminates would deadlock the pair: the
+// bucket could never finalize, and the tenant would wait on it forever. A dependent that is
+// not being deleted is still refused, since there is no point starting new work against a
+// tenant that is going away.
+func (t *S3Tenant) CanServeBackendOperations(dependentTerminating bool) bool {
+	if t.Status.Phase == PhaseBound {
+		return true
+	}
+
+	return dependentTerminating && t.Status.Phase == PhaseDeleting
 }
 
 func init() {

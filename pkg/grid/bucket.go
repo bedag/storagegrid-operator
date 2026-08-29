@@ -280,6 +280,11 @@ func GetBucketObjectCount(bucketUsage *BucketUsage) int {
 		return 0
 	}
 
+	if bucketUsage.ObjectCount == nil {
+		log.V(1).Info("Bucket usage has no object count, returning 0")
+		return 0
+	}
+
 	count := *bucketUsage.ObjectCount
 	log.V(1).Info(fmt.Sprintf("Bucket object count: %d", count))
 	return count
@@ -291,6 +296,11 @@ func GetBucketUsedBytes(bucketUsage *BucketUsage) int64 {
 
 	if bucketUsage == nil {
 		log.V(1).Info("Bucket usage not fetched, returning 0")
+		return 0
+	}
+
+	if bucketUsage.DataBytes == nil {
+		log.V(1).Info("Bucket usage has no data bytes, returning 0")
 		return 0
 	}
 

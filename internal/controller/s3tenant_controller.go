@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -32,8 +33,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
 )
@@ -55,6 +58,13 @@ type tenantReconcileContext struct {
 	ObjectUpdated bool
 	// track if we need to requeue the reconciliation loop.
 	DoRequeue bool
+	// RequeAfter schedules a bounded requeue for an expected wait (for example a
+	// deletion blocked on linked buckets). Waiting is not a failure, so it must not be
+	// signaled by returning an error: controller-runtime discards the Result whenever
+	// the error is non-nil and falls back to exponential backoff that saturates at
+	// 16m40s and never resets. Returning RequeueAfter with a nil error instead makes
+	// the workqueue Forget the item and poll on this schedule.
+	RequeAfter metav1.Duration
 }
 
 const (
@@ -132,6 +142,11 @@ func (r *S3TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			rctx.DoRequeue = true // requeue to ensure status is updated
 		}
 		// if an error already occurred during reconciliation, we just return that error.
+	}
+
+	if rctx.RequeAfter.Duration > 0 {
+		log.V(1).Info("Requeuing reconciliation after duration", "duration", rctx.RequeAfter.Duration)
+		return ctrl.Result{RequeueAfter: rctx.RequeAfter.Duration}, err
 	}
 
 	return ctrl.Result{Requeue: rctx.DoRequeue}, err
@@ -216,6 +231,10 @@ func (r *S3TenantReconciler) doReconcile(ctx context.Context, rctx *tenantReconc
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "FinalizerReconcileSucceeded", "Finalizer and deletion timestamp reconciled successfully, requeuing")
 		return nil
 	}
+	if rctx.RequeAfter.Duration > 0 {
+		// Finalization is waiting on a precondition; conditions were already set by finalize.
+		return nil
+	}
 
 	// get all the buckets linked to this tenant.
 	err = r.reconcileLinkedBuckets(ctx, rctx)
@@ -253,6 +272,22 @@ func (r *S3TenantReconciler) setCondition(s3Tenant *s3v1alpha1.S3Tenant, condTyp
 
 func (r *S3TenantReconciler) deriveReadiness(ctx context.Context, s3Tenant *s3v1alpha1.S3Tenant) {
 	log := log.FromContext(ctx)
+
+	// A terminating tenant is not Bound, whatever the readiness conditions say. Report the
+	// lifecycle intent so `kubectl get` shows Deleting; the ConditionTypeDeleting reason
+	// carries why it has not completed yet.
+	if !s3Tenant.DeletionTimestamp.IsZero() {
+		log.V(1).Info("S3Tenant is being deleted")
+		s3Tenant.Status.Phase = s3v1alpha1.PhaseDeleting
+
+		message := "Deletion in progress"
+		if deleting := meta.FindStatusCondition(s3Tenant.Status.Conditions, s3v1alpha1.ConditionTypeDeleting); deleting != nil {
+			message = deleting.Message
+		}
+		r.setCondition(s3Tenant, s3v1alpha1.ConditionTypeReady, metav1.ConditionFalse, "Deleting", message)
+
+		return
+	}
 
 	// all of these conditions need to be be in state true for this method to return true.
 	reconciliation := false
@@ -561,6 +596,12 @@ func (r *S3TenantReconciler) reconcileFinalizerAndDlelete(ctx context.Context, r
 				return err
 			}
 
+			if rctx.RequeAfter.Duration > 0 {
+				// Finalization is waiting on a precondition. Keep the finalizer and poll again.
+				log.V(1).Info("Finalization is waiting, keeping finalizer", "requeueAfter", rctx.RequeAfter.Duration)
+				return nil
+			}
+
 			controllerutil.RemoveFinalizer(rctx.S3Tenant, s3TenantFinalizer)
 			log.V(1).Info("Removing finalizer from S3Tenant")
 			rctx.DoRequeue = true
@@ -618,6 +659,7 @@ func (r *S3TenantReconciler) reconcileTenantAccountStatus(ctx context.Context, r
 	}
 
 	// Set AccountReady condition based on account phase
+	previous := meta.FindStatusCondition(rctx.S3Tenant.Status.Conditions, s3v1alpha1.ConditionTypeAccountReady)
 	if rctx.Account.Status.Phase == s3v1alpha1.PhaseBound {
 		log.V(1).Info("S3TenantAccount is bound and ready")
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeAccountReady, metav1.ConditionTrue,
@@ -630,8 +672,14 @@ func (r *S3TenantReconciler) reconcileTenantAccountStatus(ctx context.Context, r
 			"AccountNotReady", fmt.Sprintf("S3TenantAccount %s is in phase %s", rctx.Account.Name, rctx.Account.Status.Phase))
 		r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypePending, metav1.ConditionTrue,
 			"TenantAccountNotPhaseBound", fmt.Sprintf("S3TenantAccount %s is still in state %s", rctx.Account.Name, rctx.Account.Status.Phase))
-		r.emitEvent(rctx, corev1.EventTypeWarning, EventAccountNotReady,
-			fmt.Sprintf("S3TenantAccount %s is not ready (current phase: %s)", rctx.Account.Name, rctx.Account.Status.Phase))
+
+		// Emit only on entry. This runs before the finalizer step, so a tenant whose deletion
+		// is blocked reaches it on every poll - every 30s now that waits are bounded, rather
+		// than every ~17m under the old backoff.
+		if previous == nil || previous.Status != metav1.ConditionFalse {
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventAccountNotReady,
+				fmt.Sprintf("S3TenantAccount %s is not ready (current phase: %s)", rctx.Account.Name, rctx.Account.Status.Phase))
+		}
 	}
 }
 
@@ -686,14 +734,25 @@ func (r *S3TenantReconciler) finalize(ctx context.Context, rctx *tenantReconcile
 
 	// Always block deletion if operator-managed buckets still reference this tenant.
 	// LinkedBuckets is freshly populated by reconcileLinkedBuckets via the field indexer.
+	//
+	// This is a wait, not a failure: the tenant is held here until the buckets are gone.
+	// It is signaled through rctx.RequeAfter rather than by returning an error so the
+	// workqueue polls on a bounded schedule instead of backing off exponentially, and so
+	// the status reads as "deleting" rather than "broken". The watch on S3Bucket wakes us
+	// as soon as the last bucket disappears; this interval is only a backstop.
 	if len(rctx.S3Tenant.Status.LinkedBuckets) > 0 {
-		return fmt.Errorf("cannot delete tenant with linked buckets: %v", rctx.S3Tenant.Status.LinkedBuckets)
+		r.waitForDeletion(ctx, rctx, "WaitingForBuckets",
+			fmt.Sprintf("Waiting for %d linked S3Bucket(s) to be deleted: [%s]",
+				len(rctx.S3Tenant.Status.LinkedBuckets), strings.Join(rctx.S3Tenant.Status.LinkedBuckets, ", ")))
+		return nil
 	}
 
 	// Additionally check backend bucket count for manually-created buckets (unless opted out).
 	if !ignoreUnmanaged && rctx.S3Tenant.Status.TenantUsage.BucketCount > 0 {
-		return fmt.Errorf("cannot delete tenant: backend still reports %d bucket(s). Use annotation %s=true to ignore unmanaged buckets",
-			rctx.S3Tenant.Status.TenantUsage.BucketCount, s3v1alpha1.AnnotationIgnoreUnmanagedBuckets)
+		r.waitForDeletion(ctx, rctx, "WaitingForBuckets",
+			fmt.Sprintf("Backend still reports %d bucket(s). Delete them, or set annotation %s=true to ignore unmanaged buckets",
+				rctx.S3Tenant.Status.TenantUsage.BucketCount, s3v1alpha1.AnnotationIgnoreUnmanagedBuckets))
+		return nil
 	}
 
 	// make sure the tenantref is removed from the account.
@@ -704,6 +763,48 @@ func (r *S3TenantReconciler) finalize(ctx context.Context, rctx *tenantReconcile
 	}
 
 	return nil
+}
+
+// waitForDeletion records that deletion is blocked on a precondition and schedules a
+// bounded requeue. It deliberately leaves ConditionTypeReconcileSucceeded true: waiting
+// for linked buckets is expected progress, not a reconciliation failure, and reporting it
+// as a failure is what previously made a normal deletion look broken.
+//
+// The event is emitted only when the reason changes, per the state-change emission
+// convention in docs/architecture/events.md - with bounded polling this path runs every
+// 30s rather than every ~17m, so emitting per pass would be pure spam.
+func (r *S3TenantReconciler) waitForDeletion(ctx context.Context, rctx *tenantReconcileContext, reason, message string) {
+	log := log.FromContext(ctx)
+	log.V(1).Info("Deletion is waiting on a precondition", "reason", reason, "message", message)
+
+	existing := meta.FindStatusCondition(rctx.S3Tenant.Status.Conditions, s3v1alpha1.ConditionTypeDeleting)
+	if existing == nil || existing.Reason != reason || existing.Status != metav1.ConditionTrue {
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantDeleting, message)
+	}
+
+	r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeDeleting, metav1.ConditionTrue, reason, message)
+	r.setCondition(rctx.S3Tenant, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, reason, message)
+	rctx.RequeAfter = metav1.Duration{Duration: r.computeDeletionPollInterval(ctx, rctx)}
+}
+
+// computeDeletionPollInterval resolves how often a blocked deletion re-checks its
+// precondition. Precedence mirrors the drain configuration in the S3Bucket controller:
+// resource spec > StorageGrid spec.operations.deletion > hardcoded default.
+func (r *S3TenantReconciler) computeDeletionPollInterval(ctx context.Context, rctx *tenantReconcileContext) time.Duration {
+	if rctx.S3Tenant.Spec.DeletionPollInterval != nil {
+		return rctx.S3Tenant.Spec.DeletionPollInterval.Duration
+	}
+
+	sg := &s3v1alpha1.StorageGrid{}
+	if err := r.Get(ctx, client.ObjectKey{Name: rctx.S3Tenant.Spec.StorageGridRef.Name}, sg); err != nil {
+		return s3v1alpha1.DefaultDeletionPollInterval
+	}
+
+	if sg.Spec.Operations != nil && sg.Spec.Operations.Deletion != nil && sg.Spec.Operations.Deletion.PollInterval != nil {
+		return sg.Spec.Operations.Deletion.PollInterval.Duration
+	}
+
+	return s3v1alpha1.DefaultDeletionPollInterval
 }
 
 // shouldKeepOnTenant checks if an annotation should remain on S3Tenant
@@ -800,7 +901,43 @@ func (r *S3TenantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&s3v1alpha1.S3TenantAccount{},
 			handler.EnqueueRequestsFromMapFunc(r.mapAccountToTenant),
 		).
+		Watches(
+			&s3v1alpha1.S3Bucket{},
+			handler.EnqueueRequestsFromMapFunc(r.mapBucketToTenant),
+			builder.WithPredicates(bucketDeletionRelevantPredicate()),
+		).
 		Complete(r)
+}
+
+// bucketDeletionRelevantPredicate limits the S3Bucket watch to the events that can change
+// a tenant's LinkedBuckets or unblock its deletion. Delete is the one that matters most:
+// without it nothing wakes a terminating tenant when its last bucket disappears, and it
+// only reconciles again on the workqueue backoff. Status-only bucket updates are ignored so
+// a tenant with many buckets is not reconciled on every usage refresh.
+//
+// Note PredicateWithoutStatusChange is applied to For(), not to Watches(), so this watch
+// needs its own predicate.
+func bucketDeletionRelevantPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool { return true },
+		DeleteFunc: func(e event.DeleteEvent) bool { return true },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			// Only the moment a bucket starts terminating is interesting.
+			return e.ObjectOld.GetDeletionTimestamp().IsZero() && !e.ObjectNew.GetDeletionTimestamp().IsZero()
+		},
+		GenericFunc: func(e event.GenericEvent) bool { return false },
+	}
+}
+
+// mapBucketToTenant enqueues the S3Tenant that the given S3Bucket references, so that a
+// tenant blocked on linked buckets reacts immediately when one is created or deleted.
+func (r *S3TenantReconciler) mapBucketToTenant(ctx context.Context, obj client.Object) []ctrl.Request {
+	bucket, ok := obj.(*s3v1alpha1.S3Bucket)
+	if !ok {
+		return nil
+	}
+
+	return []ctrl.Request{{NamespacedName: resolveBucketTenantKey(bucket)}}
 }
 
 func (r *S3TenantReconciler) mapAccountToTenant(ctx context.Context, obj client.Object) []ctrl.Request {

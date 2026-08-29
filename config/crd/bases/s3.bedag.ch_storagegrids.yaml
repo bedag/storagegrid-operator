@@ -110,6 +110,31 @@ spec:
                   Operations configures execution parameters for long-running StorageGrid operations.
                   These settings tune how operations execute, not what operations to perform.
                 properties:
+                  deletion:
+                    description: |-
+                      Deletion configures how often blocked deletions re-check their preconditions.
+                      Used by all resources of this grid unless overridden at resource level.
+                    properties:
+                      backendConfirmationInterval:
+                        default: 1m
+                        description: |-
+                          BackendConfirmationInterval defines how often to poll StorageGrid for confirmation
+                          that a tenant deletion has completed on the backend.
+                        type: string
+                        x-kubernetes-validations:
+                        - message: backendConfirmationInterval must be at least 5s
+                          rule: duration(self) >= duration('5s')
+                      pollInterval:
+                        default: 30s
+                        description: |-
+                          PollInterval defines how often to re-check whether a blocked deletion can proceed,
+                          e.g. an S3Tenant waiting for its linked S3Buckets to be deleted. This is a backstop:
+                          the tenant is also woken directly by its watch on S3Bucket.
+                        type: string
+                        x-kubernetes-validations:
+                        - message: pollInterval must be at least 5s
+                          rule: duration(self) >= duration('5s')
+                    type: object
                   drain:
                     description: |-
                       Drain configures bucket drain operation execution parameters.
@@ -121,18 +146,27 @@ spec:
                           InitialPollInterval defines how often to check drain progress during.
                           the first hour of operation (when StorageGrid typically makes faster progress).
                         type: string
+                        x-kubernetes-validations:
+                        - message: initialPollInterval must be at least 5s
+                          rule: duration(self) >= duration('5s')
                       longRunningPollInterval:
                         default: 30m
                         description: |-
                           LongRunningPollInterval defines how often to check drain progress after
                           the first hour (when operations typically slow down for large buckets).
                         type: string
+                        x-kubernetes-validations:
+                        - message: longRunningPollInterval must be at least 5s
+                          rule: duration(self) >= duration('5s')
                       stuckThreshold:
                         default: 3h
                         description: |-
                           StuckThreshold defines how long without progress before considering a drain stuck.
                           If object count doesn't decrease within this duration, a warning event is emitted.
                         type: string
+                        x-kubernetes-validations:
+                        - message: stuckThreshold must be at least 5s
+                          rule: duration(self) >= duration('5s')
                     type: object
                 type: object
               s3OperationsTenantClass:

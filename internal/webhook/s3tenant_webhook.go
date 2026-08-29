@@ -165,21 +165,25 @@ func (r *S3TenantValidator) ValidateDelete(ctx context.Context, obj runtime.Obje
 			s3tenant.Name, s3v1alpha1.AnnotationDeletionProtection, s3tenant.Name, s3v1alpha1.AnnotationDeletionProtection, s3tenant.Namespace)
 	}
 
-	// Block deletion if S3Buckets still reference this tenant.
-	if err := r.validateNoLinkedBuckets(ctx, s3tenant); err != nil {
-		return nil, err
-	}
-
-	return nil, nil
+	// Warn (but do not block) if S3Buckets still reference this tenant.
+	return r.warnOnLinkedBuckets(ctx, s3tenant), nil
 }
 
-// validateNoLinkedBuckets checks if any S3Buckets reference this tenant and blocks deletion if so.
+// warnOnLinkedBuckets returns a warning if any S3Buckets still reference this tenant.
 // Uses the field indexer registered by the S3Tenant controller for efficient lookup.
-func (r *S3TenantValidator) validateNoLinkedBuckets(ctx context.Context, s3tenant *s3v1alpha1.S3Tenant) error {
+//
+// This deliberately warns instead of denying the DELETE. Denying it would leave the
+// namespace controller retrying a call that admission keeps rejecting, so a
+// `kubectl delete namespace` holding such a tenant would hang in Terminating forever
+// with no finalizer to force-remove. The actual protection lives in the finalizer:
+// S3TenantReconciler.finalize refuses to complete while linked buckets exist, so the
+// tenant is accepted for deletion and then held in the Deleting phase until it is safe.
+func (r *S3TenantValidator) warnOnLinkedBuckets(ctx context.Context, s3tenant *s3v1alpha1.S3Tenant) admission.Warnings {
 	buckets := &s3v1alpha1.S3BucketList{}
 	if err := r.k8sClient.List(ctx, buckets,
 		client.MatchingFields{"spec.s3TenantRef.namespacedName": s3tenant.Namespace + "/" + s3tenant.Name}); err != nil {
-		return fmt.Errorf("failed to list S3Buckets referencing tenant %s: %w", s3tenant.Name, err)
+		s3tenantlog.Error(err, "Unable to list S3Buckets referencing tenant", "tenant", s3tenant.Name)
+		return nil
 	}
 
 	if len(buckets.Items) == 0 {
@@ -192,8 +196,10 @@ func (r *S3TenantValidator) validateNoLinkedBuckets(ctx context.Context, s3tenan
 		linked = append(linked, fmt.Sprintf("%s/%s", b.Namespace, b.Name))
 	}
 
-	return fmt.Errorf("cannot delete S3Tenant %s/%s: %d S3Bucket(s) still reference it: [%s]. Delete the buckets first",
-		s3tenant.Namespace, s3tenant.Name, len(linked), strings.Join(linked, ", "))
+	return admission.Warnings{fmt.Sprintf(
+		"S3Tenant %s/%s is still referenced by %d S3Bucket(s): [%s]. "+
+			"Deletion is accepted but the tenant will remain in the Deleting phase until those buckets are gone.",
+		s3tenant.Namespace, s3tenant.Name, len(linked), strings.Join(linked, ", "))}
 }
 
 func (r *S3TenantValidator) tenantClassExists(ctx context.Context, tenantClassName string) (bool, error) {

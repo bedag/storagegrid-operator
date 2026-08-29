@@ -72,6 +72,12 @@ type bucketReconcileContext struct {
 	S3Tenant      *s3v1alpha1.S3Tenant
 	ObjectUpdated bool
 	DoRequeue     bool
+	// RequeAfter schedules a bounded requeue for an expected wait (for example a deletion
+	// blocked on remaining objects). Waiting is not a failure, so it must not be signaled
+	// by returning an error: controller-runtime discards the Result whenever the error is
+	// non-nil and falls back to exponential backoff that saturates at 16m40s and never
+	// resets. Returning RequeueAfter with a nil error makes the workqueue Forget the item.
+	RequeAfter metav1.Duration
 	// keep the backend bucketUsage to avoid multiple calls to the backend.
 	// while making sure they are consistent within one reconciliation loop.
 	BucketUsage *grid.BucketUsage
@@ -148,6 +154,13 @@ func (r *S3BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// if an error already occurred during reconciliation, we just return that error.
 	}
 
+	// An expected wait (deletion blocked on objects, or draining while terminating) sets
+	// its own bounded interval.
+	if rctx.RequeAfter.Duration > 0 {
+		log.V(1).Info("Requeuing reconciliation after duration", "duration", rctx.RequeAfter.Duration)
+		return ctrl.Result{RequeueAfter: rctx.RequeAfter.Duration}, err
+	}
+
 	// Return with appropriate requeue interval for draining buckets
 	if rctx.Bucket.Status.Phase == s3v1alpha1.BucketPhaseDraining {
 		if rctx.Bucket.Status.DrainStatus != nil {
@@ -211,6 +224,10 @@ func (r *S3BucketReconciler) doReconcile(ctx context.Context, rctx *bucketReconc
 	}
 	if rctx.DoRequeue {
 		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "ReconcileSucceeded", "Finalizer reconciled, requeuing")
+		return nil
+	}
+	if rctx.RequeAfter.Duration > 0 {
+		// Finalization is waiting on a precondition; conditions were already set by finalize.
 		return nil
 	}
 
@@ -366,6 +383,12 @@ func (r *S3BucketReconciler) reconcileFinalizerAndDelete(ctx context.Context, rc
 				return err
 			}
 
+			if rctx.RequeAfter.Duration > 0 {
+				// Finalization is waiting on a precondition. Keep the finalizer and poll again.
+				log.V(1).Info("Finalization is waiting, keeping finalizer", "requeueAfter", rctx.RequeAfter.Duration)
+				return nil
+			}
+
 			log.V(1).Info("Removing finalizer from S3Bucket")
 			controllerutil.RemoveFinalizer(rctx.Bucket, s3BucketFinalizer)
 			rctx.DoRequeue = true // we need to requeue to ensure the finalizer is removed on the next reconciliation
@@ -419,7 +442,7 @@ func (r *S3BucketReconciler) reconcileS3TenantReference(ctx context.Context, rct
 func (r *S3BucketReconciler) reconcileTenantReadiness(ctx context.Context, rctx *bucketReconcileContext) error {
 	log := log.FromContext(ctx).WithValues("function", "reconcileTenantReadiness")
 
-	if rctx.S3Tenant.Status.Phase != s3v1alpha1.PhaseBound {
+	if !rctx.S3Tenant.CanServeBackendOperations(!rctx.Bucket.DeletionTimestamp.IsZero()) {
 		log.V(1).Info("Tenant is not ready",
 			"currentPhase", rctx.S3Tenant.Status.Phase,
 			"requiredPhase", s3v1alpha1.PhaseBound)
@@ -1483,13 +1506,49 @@ func (r *S3BucketReconciler) finalize(ctx context.Context, rctx *bucketReconcile
 		// Continue with finalization even if usage reconciliation fails.
 	}
 
-	// if bucket still has objects, we cannot delete it.
+	// A bucket that still holds objects cannot be deleted. This is a wait, not a failure:
+	// it is signaled through rctx.RequeAfter so the workqueue polls on a bounded schedule
+	// instead of backing off exponentially, and so the status reads as "deleting" rather
+	// than "broken".
+	//
+	// The operator never destroys objects on its own. A drain runs only while the user has
+	// explicitly set the drain annotation - requesting deletion is not consent to delete data.
 	if rctx.Bucket.Status.BucketUsage.ObjectCount > 0 {
-		err := fmt.Errorf("bucket %s still has %d objects, cannot delete. Delete objects first or drain bucket using the drain-bucket-force annotation", rctx.Bucket.Status.BucketName, rctx.Bucket.Status.BucketUsage.ObjectCount)
-		log.Error(err, "Bucket not empty, cannot finalize")
-		r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketNotEmpty,
-			fmt.Sprintf("Cannot delete bucket %s: still contains %d objects", rctx.Bucket.Status.BucketName, rctx.Bucket.Status.BucketUsage.ObjectCount))
-		return err
+		_, wantsDrain := rctx.Bucket.Annotations[s3v1alpha1.AnnotationDrainBucket]
+
+		if wantsDrain || rctx.Bucket.Status.DrainStatus != nil {
+			// Run the drain state machine here: doReconcile returns right after the
+			// finalizer step, so reconcileDrain further down is unreachable once deletion
+			// has started. Without this, the guidance in the blocked message below would be
+			// a dead end for anyone who deleted the bucket first.
+			if err := r.reconcileDrain(ctx, rctx); err != nil {
+				return fmt.Errorf("failed to reconcile drain during finalization: %w", err)
+			}
+
+			// reconcileDrain may have completed or canceled the drain and reset the phase.
+			rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseDeleting
+
+			if rctx.Bucket.Status.DrainStatus != nil {
+				r.waitForDeletion(ctx, rctx, "DrainInProgress",
+					fmt.Sprintf("Draining bucket %s, %d object(s) remaining",
+						rctx.Bucket.Status.BucketName, rctx.Bucket.Status.BucketUsage.ObjectCount),
+					rctx.Bucket.Status.DrainStatus.NextPollInterval.Duration)
+				r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeDraining, metav1.ConditionTrue,
+					"DrainInProgress",
+					fmt.Sprintf("StorageGrid is deleting the objects in bucket %s", rctx.Bucket.Status.BucketName))
+
+				return nil
+			}
+		}
+
+		// Blocked: objects remain and no drain was requested. Say so, and do not touch them.
+		r.waitForDeletion(ctx, rctx, "BucketNotEmpty",
+			fmt.Sprintf("Bucket %s still contains %d object(s). Empty the bucket, or set annotation %s=true to delete them. No objects are removed automatically.",
+				rctx.Bucket.Status.BucketName, rctx.Bucket.Status.BucketUsage.ObjectCount, s3v1alpha1.AnnotationDrainBucket),
+			r.computeNextPollInterval(ctx, rctx, 0))
+		meta.RemoveStatusCondition(&rctx.Bucket.Status.Conditions, s3v1alpha1.ConditionTypeDraining)
+
+		return nil
 	}
 
 	// If no AccessKeyId, the bucket was never fully created.
@@ -1523,6 +1582,33 @@ func (r *S3BucketReconciler) finalize(ctx context.Context, rctx *bucketReconcile
 
 	log.V(1).Info("Finalization completed successfully")
 	return nil
+}
+
+// waitForDeletion records that deletion is blocked on a precondition and schedules a bounded
+// requeue. It deliberately leaves ConditionTypeReconcileSucceeded true: waiting for a bucket to
+// empty is expected progress, not a reconciliation failure.
+//
+// The event is emitted only when the reason changes, per the state-change emission convention in
+// docs/architecture/events.md - with bounded polling this path runs every few minutes rather than
+// every ~17m, so emitting per pass would be spam.
+func (r *S3BucketReconciler) waitForDeletion(ctx context.Context, rctx *bucketReconcileContext, reason, message string, interval time.Duration) {
+	log := log.FromContext(ctx)
+	log.V(1).Info("Deletion is waiting on a precondition", "reason", reason, "message", message)
+
+	existing := meta.FindStatusCondition(rctx.Bucket.Status.Conditions, s3v1alpha1.ConditionTypeDeleting)
+	if existing == nil || existing.Reason != reason || existing.Status != metav1.ConditionTrue {
+		eventType := corev1.EventTypeNormal
+		event := EventBucketDeleting
+		if reason == "BucketNotEmpty" {
+			eventType = corev1.EventTypeWarning
+			event = EventBucketNotEmpty
+		}
+		r.emitEvent(rctx, eventType, event, message)
+	}
+
+	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeDeleting, metav1.ConditionTrue, reason, message)
+	r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, reason, message)
+	rctx.RequeAfter = metav1.Duration{Duration: interval}
 }
 
 // finalizeWithoutTenant handles bucket deletion when the S3Tenant no longer exists.
@@ -1700,7 +1786,8 @@ func (r *S3BucketReconciler) completeDrain(ctx context.Context, rctx *bucketReco
 
 	// Clean up drain status completely
 	rctx.Bucket.Status.DrainStatus = nil
-	rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseReady
+	rctx.Bucket.Status.Phase = r.phaseAfterDrain(rctx)
+	meta.RemoveStatusCondition(&rctx.Bucket.Status.Conditions, s3v1alpha1.ConditionTypeDraining)
 
 	// Remove annotation
 	delete(rctx.Bucket.Annotations, s3v1alpha1.AnnotationDrainBucket)
@@ -1724,12 +1811,24 @@ func (r *S3BucketReconciler) cancelDrain(ctx context.Context, rctx *bucketReconc
 
 	// Clean up drain status
 	rctx.Bucket.Status.DrainStatus = nil
-	rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseReady
+	rctx.Bucket.Status.Phase = r.phaseAfterDrain(rctx)
+	meta.RemoveStatusCondition(&rctx.Bucket.Status.Conditions, s3v1alpha1.ConditionTypeDraining)
 
 	r.emitEvent(rctx, corev1.EventTypeNormal, EventBucketDrainingCanceled,
 		"Drain operation canceled by user")
 
 	return nil
+}
+
+// phaseAfterDrain returns the phase a bucket goes back to once a drain finishes or is
+// canceled. A bucket that is being deleted stays in Deleting: the drain was only ever a step
+// towards removing it, and flipping it back to Ready would misreport a terminating object.
+func (r *S3BucketReconciler) phaseAfterDrain(rctx *bucketReconcileContext) s3v1alpha1.BucketPhase {
+	if !rctx.Bucket.DeletionTimestamp.IsZero() {
+		return s3v1alpha1.BucketPhaseDeleting
+	}
+
+	return s3v1alpha1.BucketPhaseReady
 }
 
 // cancelOrphanedDrain cancels drain operations not initiated by the operator.
@@ -1919,7 +2018,17 @@ func (r *S3BucketReconciler) deriveReadiness(ctx context.Context, rctx *bucketRe
 	if !rctx.Bucket.DeletionTimestamp.IsZero() {
 		log.V(1).Info("Bucket is being deleted")
 		rctx.Bucket.Status.Phase = s3v1alpha1.BucketPhaseDeleting
-		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReady, metav1.ConditionFalse, "BucketDeleting", message+", Bucket is being deleted")
+
+		// Surface why the deletion has not completed rather than a generic message, so a
+		// bucket blocked on objects is distinguishable from one that is draining.
+		reason := "Deleting"
+		deletingMessage := message + ", Bucket is being deleted"
+		if deleting := meta.FindStatusCondition(rctx.Bucket.Status.Conditions, s3v1alpha1.ConditionTypeDeleting); deleting != nil {
+			reason = deleting.Reason
+			deletingMessage = deleting.Message
+		}
+		r.setCondition(rctx.Bucket, s3v1alpha1.ConditionTypeReady, metav1.ConditionFalse, reason, deletingMessage)
+
 		return
 	}
 
@@ -2032,9 +2141,9 @@ func (r *S3BucketReconciler) tenantEndpointChangePredicate() predicate.Predicate
 }
 
 // mapTenantToBuckets returns reconcile requests for all S3Buckets that
-// reference the given S3Tenant. Uses the "spec.s3TenantRef.name" field index
-// (registered by S3TenantReconciler) to scope the list, then filters with the
-// shared resolveBucketTenantKey helper to honor namespace-defaulting semantics.
+// reference the given S3Tenant. Uses the "spec.s3TenantRef.namespacedName" field
+// index (registered by S3TenantReconciler) to scope the list, then filters with
+// the shared resolveBucketTenantKey helper to honor namespace-defaulting semantics.
 func (r *S3BucketReconciler) mapTenantToBuckets(ctx context.Context, obj client.Object) []ctrl.Request {
 	log := log.FromContext(ctx)
 	tenant, ok := obj.(*s3v1alpha1.S3Tenant)
@@ -2043,7 +2152,9 @@ func (r *S3BucketReconciler) mapTenantToBuckets(ctx context.Context, obj client.
 	}
 
 	buckets := &s3v1alpha1.S3BucketList{}
-	if err := r.List(ctx, buckets, client.MatchingFields{"spec.s3TenantRef.name": tenant.Name}); err != nil {
+	if err := r.List(ctx, buckets, client.MatchingFields{
+		"spec.s3TenantRef.namespacedName": tenant.Namespace + "/" + tenant.Name,
+	}); err != nil {
 		log.Error(err, "Failed to list buckets for tenant", "tenant", tenant.Name)
 		return nil
 	}

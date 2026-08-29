@@ -143,6 +143,16 @@ spec:
                   default bucket region to use.
                   if not set, the default region of the StorageGrid will be used.
                 type: string
+              deletionPollInterval:
+                description: |-
+                  DeletionPollInterval overrides how often this tenant re-checks whether its blocked
+                  deletion can proceed (for example while waiting for linked S3Buckets to be deleted).
+                  Falls back to the StorageGrid spec.operations.deletion.pollInterval, then to 30s.
+                  This is only a backstop: the tenant is also woken directly by its watch on S3Bucket.
+                type: string
+                x-kubernetes-validations:
+                - message: deletionPollInterval must be at least 5s
+                  rule: duration(self) >= duration('5s')
               description:
                 description: |-
                   User facing description of the S3 Tenant in Kubernetes.

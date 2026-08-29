@@ -232,6 +232,12 @@ func (r *S3TenantAccountReconciler) doReconcile(ctx context.Context, rctx *accou
 		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue, "FinalizerReconcileSucceeded", "Finalizer and deletion timestamp reconciled successfully, requeuing")
 		return nil
 	}
+	if rctx.RequeAfter.Duration > 0 {
+		// Finalization is waiting on backend confirmation; conditions were already set by
+		// finalize. Stop here: the tenant has been deleted on the backend, so the reconcile
+		// steps below (tenant class, recreate annotation, tenant creation) must not run.
+		return nil
+	}
 
 	err = r.reconcilePolicyDeletionTimestamp(ctx, rctx.Account)
 	if err != nil {
@@ -625,6 +631,31 @@ func (r *S3TenantAccountReconciler) reconcilePolicyDeletionTimestamp(ctx context
 func (r *S3TenantAccountReconciler) derivePhase(ctx context.Context, rctx *accountReconcileContext) {
 	log := log.FromContext(ctx)
 
+	// An account that is being deleted is none of Ready, Bound or Failed - it is Deleting.
+	// This has to short-circuit the condition-based derivation below, because setting a
+	// deletionTimestamp bumps metadata.generation: every readiness condition then looks
+	// stale to checkRecurringConditions, and ConditionTypeQuotaSufficient in particular is
+	// only refreshed by evaluateQuotaConditions, which doReconcile no longer reaches during
+	// deletion. Without this branch a normally-deleting account reports Failed.
+	//
+	// Returning here also protects the RequeAfter that finalize set for the backend
+	// confirmation poll: the retention branch further down would otherwise overwrite it with
+	// a now-negative duration, which Reconcile reads as "no requeue at all".
+	if !rctx.Account.DeletionTimestamp.IsZero() {
+		log.V(1).Info("S3TenantAccount is being deleted")
+		rctx.Account.Status.Phase = s3v1alpha1.PhaseDeleting
+
+		message := "Deletion in progress"
+		reason := "Deleting"
+		if deleting := meta.FindStatusCondition(rctx.Account.Status.Conditions, s3v1alpha1.ConditionTypeDeleting); deleting != nil {
+			message = deleting.Message
+			reason = deleting.Reason
+		}
+		r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReady, metav1.ConditionFalse, reason, message)
+
+		return
+	}
+
 	// all of these conditions need to be be in state true for this account to be considered ready.
 	reconciliation := false
 	backendReady := false
@@ -721,7 +752,11 @@ func (r *S3TenantAccountReconciler) derivePhase(ctx context.Context, rctx *accou
 		log.V(1).Info("S3Tenant is retained then deleted, setting phase to RetainingThenDeleting")
 		rctx.Account.Status.Phase = s3v1alpha1.PhaseRetainThenDelete
 		// on retain then delete we have to make sure it is requeued when the deletion timestamp is reached for deletion.
-		rctx.RequeAfter = metav1.Duration{Duration: rctx.Account.Status.DeletionTimestamp.Time.Sub(metav1.Now().Time)}
+		// ConditionTypeRetainThenDelete is not generation-gated, so it can outlive the status
+		// timestamp that set it - guard against dereferencing a nil one.
+		if rctx.Account.Status.DeletionTimestamp != nil {
+			rctx.RequeAfter = metav1.Duration{Duration: rctx.Account.Status.DeletionTimestamp.Time.Sub(metav1.Now().Time)}
+		}
 	} else if deletion {
 		log.V(1).Info("S3Tenant deletion timestamp reached, setting phase to Deleting")
 		rctx.Account.Status.Phase = s3v1alpha1.PhaseDeleting
@@ -826,6 +861,12 @@ func (r *S3TenantAccountReconciler) reconcileFinalizerAndDlelete(ctx context.Con
 			if err := r.finalize(ctx, rctx); err != nil {
 				log.Error(err, "Failed to finalize S3TenantAccount")
 				return err
+			}
+
+			if rctx.RequeAfter.Duration > 0 {
+				// Finalization is waiting on backend confirmation. Keep the finalizer and poll again.
+				log.V(1).Info("Finalization is waiting, keeping finalizer", "requeueAfter", rctx.RequeAfter.Duration)
+				return nil
 			}
 
 			controllerutil.RemoveFinalizer(rctx.Account, s3TenantAccountFinalizer)
@@ -1781,7 +1822,9 @@ func (r *S3TenantAccountReconciler) finalize(ctx context.Context, rctx *accountR
 		return nil
 	}
 
-	// Delete policy (default): Full deletion from StorageGrid
+	// Delete policy (default): Full deletion from StorageGrid.
+	// StorageGrid itself refuses to delete a tenant that still holds buckets, so there is no
+	// pre-check here - a rejected delete surfaces as a backend error below.
 	log.V(1).Info(fmt.Sprintf("Tenant %s still exists on the backend, starting deletion process", rctx.Account.Name))
 	r.emitEvent(rctx, corev1.EventTypeNormal, EventTenantDeleting,
 		fmt.Sprintf("Deleting tenant %s from StorageGrid backend", rctx.Account.Status.TenantID))
@@ -1797,9 +1840,31 @@ func (r *S3TenantAccountReconciler) finalize(ctx context.Context, rctx *accountR
 		"Tenant deletion initiated, waiting for backend confirmation")
 
 	log.V(1).Info(fmt.Sprintf("Successfully sent delete request of S3TenantAccount %s to the backend, requeuing to check progress", rctx.Account.Name))
-	rctx.RequeAfter = metav1.Duration{Duration: time.Minute * 1}
 
-	return fmt.Errorf("S3TenantAccount %s deletion in progress, requeuing to check again", rctx.Account.Name)
+	// Waiting for the backend to confirm the deletion is expected progress, not a failure.
+	// Returning an error here would make controller-runtime discard the Result below and
+	// fall back to exponential backoff (saturating at 16m40s), which is exactly what used
+	// to make this poll take ~17 minutes instead of the intended interval.
+	message := fmt.Sprintf("Tenant %s deletion sent to StorageGrid, waiting for backend confirmation", rctx.Account.Status.TenantID)
+	r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeDeleting, metav1.ConditionTrue,
+		"BackendConfirmationPending", message)
+	r.setCondition(rctx.Account, s3v1alpha1.ConditionTypeReconcileSucceeded, metav1.ConditionTrue,
+		"BackendConfirmationPending", message)
+	rctx.RequeAfter = metav1.Duration{Duration: r.computeBackendConfirmationInterval(rctx)}
+
+	return nil
+}
+
+// computeBackendConfirmationInterval resolves how often to poll StorageGrid for confirmation
+// that a tenant deletion completed. rctx.SG is already loaded by reconcileGridReference, so
+// this needs no extra API call.
+func (r *S3TenantAccountReconciler) computeBackendConfirmationInterval(rctx *accountReconcileContext) time.Duration {
+	if rctx.SG != nil && rctx.SG.Spec.Operations != nil && rctx.SG.Spec.Operations.Deletion != nil &&
+		rctx.SG.Spec.Operations.Deletion.BackendConfirmationInterval != nil {
+		return rctx.SG.Spec.Operations.Deletion.BackendConfirmationInterval.Duration
+	}
+
+	return s3v1alpha1.DefaultDeletionBackendConfirmationInterval
 }
 
 // tenantClassEndpointChangePredicate creates a predicate that only triggers when

@@ -31,6 +31,12 @@ const (
 	DefaultDrainInitialPollInterval     = 3 * time.Minute
 	DefaultDrainLongRunningPollInterval = 30 * time.Minute
 	DefaultDrainStuckThreshold          = 3 * time.Hour
+
+	// Default deletion wait intervals. These bound how often a blocked deletion
+	// re-checks its precondition, so that waiting never falls back to the
+	// workqueue's exponential backoff (which saturates at 16m40s).
+	DefaultDeletionPollInterval                = 30 * time.Second
+	DefaultDeletionBackendConfirmationInterval = 1 * time.Minute
 )
 
 type TenantDeletionPolicyType string
@@ -110,6 +116,11 @@ type OperationsConfig struct {
 	// +optional
 	Drain *DrainConfig `json:"drain,omitempty"`
 
+	// Deletion configures how often blocked deletions re-check their preconditions.
+	// Used by all resources of this grid unless overridden at resource level.
+	// +optional
+	Deletion *DeletionConfig `json:"deletion,omitempty"`
+
 	// TODO: Future expansion:
 	// - RateLimit for API throttling.
 	// - Retry policies.
@@ -120,21 +131,46 @@ type OperationsConfig struct {
 type DrainConfig struct {
 	// InitialPollInterval defines how often to check drain progress during.
 	// the first hour of operation (when StorageGrid typically makes faster progress).
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('5s')",message="initialPollInterval must be at least 5s"
 	// +kubebuilder:default="3m"
 	// +optional
 	InitialPollInterval *metav1.Duration `json:"initialPollInterval,omitempty"`
 
 	// LongRunningPollInterval defines how often to check drain progress after
 	// the first hour (when operations typically slow down for large buckets).
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('5s')",message="longRunningPollInterval must be at least 5s"
 	// +kubebuilder:default="30m"
 	// +optional
 	LongRunningPollInterval *metav1.Duration `json:"longRunningPollInterval,omitempty"`
 
 	// StuckThreshold defines how long without progress before considering a drain stuck.
 	// If object count doesn't decrease within this duration, a warning event is emitted.
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('5s')",message="stuckThreshold must be at least 5s"
 	// +kubebuilder:default="3h"
 	// +optional
 	StuckThreshold *metav1.Duration `json:"stuckThreshold,omitempty"`
+}
+
+// DeletionConfig defines parameters for deletion waits.
+//
+// A blocked deletion (for example an S3Tenant waiting for its linked S3Buckets to
+// disappear) is requeued on a bounded schedule rather
+// than through the controller-runtime error backoff. These values set that schedule.
+type DeletionConfig struct {
+	// PollInterval defines how often to re-check whether a blocked deletion can proceed,
+	// e.g. an S3Tenant waiting for its linked S3Buckets to be deleted. This is a backstop:
+	// the tenant is also woken directly by its watch on S3Bucket.
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('5s')",message="pollInterval must be at least 5s"
+	// +kubebuilder:default="30s"
+	// +optional
+	PollInterval *metav1.Duration `json:"pollInterval,omitempty"`
+
+	// BackendConfirmationInterval defines how often to poll StorageGrid for confirmation
+	// that a tenant deletion has completed on the backend.
+	// +kubebuilder:validation:XValidation:rule="duration(self) >= duration('5s')",message="backendConfirmationInterval must be at least 5s"
+	// +kubebuilder:default="1m"
+	// +optional
+	BackendConfirmationInterval *metav1.Duration `json:"backendConfirmationInterval,omitempty"`
 }
 
 type TenantDeletionPolicy struct {

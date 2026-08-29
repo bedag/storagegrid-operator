@@ -164,12 +164,20 @@ spec:
                   DrainPollInterval overrides the StorageGrid drain polling frequency for this bucket.
                   When set, replaces the two-tier polling strategy with this single interval.
                   Use for buckets needing different polling behavior (e.g., huge bucket = 4h+, urgent = 1m).
+                  A zero interval would translate to "never requeue" and silently stall the drain,
+                  so a lower bound is enforced.
                 type: string
+                x-kubernetes-validations:
+                - message: drainPollInterval must be at least 5s
+                  rule: duration(self) >= duration('5s')
               drainStuckThreshold:
                 description: |-
                   DrainStuckThreshold overrides when to consider this bucket's drain stuck.
                   Use for buckets with expected slow drain rates (e.g., 24h+ for multi-billion object bucket).
                 type: string
+                x-kubernetes-validations:
+                - message: drainStuckThreshold must be at least 5s
+                  rule: duration(self) >= duration('5s')
               lifecycleManagement:
                 default:
                   expirationInDays: 0

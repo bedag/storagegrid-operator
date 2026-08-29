@@ -34,4 +34,15 @@ const (
 	ConditionTypeOwnershipConflict        = "OwnershipConflict"
 	ConditionTypeS3ObjectLockSupported    = "S3ObjectLockSupported"
 	ConditionTypeLifecycleSynced          = "LifecycleSynced"
+
+	// ConditionTypeDeleting is set while a resource is being deleted. It carries the
+	// reason the deletion has not completed yet (waiting for linked buckets, waiting
+	// for backend confirmation, ...) so that a slow deletion is legible as progress
+	// rather than as a failure. Deletion waits deliberately leave
+	// ConditionTypeReconcileSucceeded true - they are waits, not errors.
+	ConditionTypeDeleting = "Deleting"
+
+	// ConditionTypeDraining is set while a bucket drain is in progress. The counts and
+	// timing live in S3Bucket.status.drainStatus; this condition carries the state.
+	ConditionTypeDraining = "Draining"
 )

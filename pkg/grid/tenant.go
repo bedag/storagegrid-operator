@@ -203,16 +203,28 @@ func FetchTenantUsage(ctx context.Context, tenantID string, gridClient *GridClie
 // Get the different values from the tenant and tenantUsage structs.
 
 func GetTenantObjectCount(tenantUsage *TenantUsage) int64 {
+	if tenantUsage == nil || tenantUsage.ObjectCount == nil {
+		return 0
+	}
+
 	count := *tenantUsage.ObjectCount
 	return count
 }
 
 func GetTenantUsedBytes(tenantUsage *TenantUsage) int64 {
+	if tenantUsage == nil || tenantUsage.DataBytes == nil {
+		return 0
+	}
+
 	bytes := *tenantUsage.DataBytes
 	return bytes
 }
 
 func GetBucketCount(tenantUsage *TenantUsage) int {
+	if tenantUsage == nil {
+		return 0
+	}
+
 	count := len(tenantUsage.Buckets)
 	return count
 }

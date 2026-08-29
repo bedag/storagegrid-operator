@@ -505,8 +505,10 @@ func (r *S3AccessReconciler) reconcileTenantClient(ctx context.Context, rctx *s3
 
 	log.V(1).Info("Successfully retrieved S3Tenant", "name", s3Tenant.Name)
 
-	// Validate tenant readiness.
-	if s3Tenant.Status.Phase != s3v1alpha1.PhaseBound {
+	// Validate tenant readiness. A terminating tenant still serves cleanup for an S3Access
+	// that is itself being deleted - this runs before the finalizer step, so refusing here
+	// would stop the S3Access from ever removing its backend user.
+	if !s3Tenant.CanServeBackendOperations(!rctx.S3Access.DeletionTimestamp.IsZero()) {
 		return fmt.Errorf("tenant %s is not ready, current phase: %s", s3Tenant.Name, s3Tenant.Status.Phase)
 	}
 

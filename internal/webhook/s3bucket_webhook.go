@@ -157,12 +157,14 @@ func (r *S3BucketValidator) ValidateDelete(ctx context.Context, obj runtime.Obje
 
 	s3bucketlog.Info("validate delete", "name", s3bucket.Name)
 
-	// Check if bucket has objects and provide helpful guidance
+	// Warn (but do not block) if the bucket still has objects. Denying the DELETE would
+	// hang namespace deletion, so the finalizer is what actually holds the bucket: it is
+	// accepted for deletion and then stays in the Deleting phase until it is empty.
 	if s3bucket.Status.BucketUsage.ObjectCount > 0 {
 		warning := fmt.Sprintf(
-			"Bucket contains %d objects. "+
-				"Deletion will be blocked by finalizer until bucket is empty. "+
-				"To drain objects automatically, add annotation: kubectl annotate s3bucket %s %s=true",
+			"Bucket contains %d object(s). Deletion is accepted but the bucket will remain in the "+
+				"Deleting phase until it is empty. No objects are removed automatically. "+
+				"To delete them, run: kubectl annotate s3bucket %s %s=true",
 			s3bucket.Status.BucketUsage.ObjectCount,
 			s3bucket.Name,
 			s3v1alpha1.AnnotationDrainBucket,

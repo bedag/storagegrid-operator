@@ -53,7 +53,7 @@ graph TB
     end
 ```
 
-To better understand the architecture, please refer to the [Architecture Documentation](./docs/architecture/README.md).
+To better understand the architecture, please refer to the [Architecture Documentation](../docs/architecture/README.md).
 
 ## Custom Resources
 

@@ -69,11 +69,19 @@ func TestInstrumentedClientRecords(t *testing.T) {
 }
 
 func TestIsUnauthorized(t *testing.T) {
-	if !IsUnauthorized(errString("API error: 401 Unauthorized")) {
-		t.Error("401 should be unauthorized")
+	cases := map[string]bool{
+		"API error: 401 Unauthorized (code: 401)": true,
+		"API error: 403 Forbidden (code: 403)":    false,
+		"API error: 404 Not Found (code: 404)":    false,
+		`tenant 34017401 usage: Get "https://grid/api/v4/grid/accounts/34017401/usage": context deadline exceeded`: false,
 	}
-	if IsUnauthorized(errString("API error: 404 Not Found")) || IsUnauthorized(nil) {
-		t.Error("404/nil should not be unauthorized")
+	for msg, want := range cases {
+		if got := IsUnauthorized(errString(msg)); got != want {
+			t.Errorf("IsUnauthorized(%q) = %v, want %v", msg, got, want)
+		}
+	}
+	if IsUnauthorized(nil) {
+		t.Error("nil should not be unauthorized")
 	}
 }
 

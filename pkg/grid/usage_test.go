@@ -18,6 +18,7 @@ package grid
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -87,6 +88,49 @@ func TestTenantUsageWithBucketsConcurrencyCap(t *testing.T) {
 	}
 	if peak.Load() > 2 {
 		t.Errorf("max concurrency %d > 2", peak.Load())
+	}
+}
+
+// usageByID fails the tenants in errs and returns usage for the others.
+func usageByID(errs map[string]error) *sgtesting.MockTenantService {
+	return &sgtesting.MockTenantService{
+		GetUsageWithBucketsFunc: func(ctx context.Context, id string) (*models.TenantUsage, error) {
+			if err := errs[id]; err != nil {
+				return nil, err
+			}
+			// Siblings must not be canceled by another tenant's failure.
+			time.Sleep(10 * time.Millisecond)
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return &models.TenantUsage{DataBytes: ptr(int64(1))}, nil
+		},
+	}
+}
+
+func TestTenantUsageWithBucketsPartialFailure(t *testing.T) {
+	api := newAPI(fakeSource{tenant: usageByID(map[string]error{
+		"2": errString("API error: 500 Internal Server Error (code: 500)"),
+	})})
+	got, err := api.TenantUsageWithBuckets(context.Background(), []string{"1", "2", "3", "4"}, 4)
+	if err == nil || !strings.Contains(err.Error(), "tenant 2") {
+		t.Errorf("err = %v, want tenant 2 failure", err)
+	}
+	if len(got) != 3 || got["1"].Bytes != 1 || got["4"].Bytes != 1 {
+		t.Errorf("unexpected partial result: %+v", got)
+	}
+}
+
+func TestTenantUsageWithBucketsSkipsNotFound(t *testing.T) {
+	api := newAPI(fakeSource{tenant: usageByID(map[string]error{
+		"2": errString("API error: 404 Not Found (code: 404)"),
+	})})
+	got, err := api.TenantUsageWithBuckets(context.Background(), []string{"1", "2", "3"}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["2"]; ok || len(got) != 2 {
+		t.Errorf("unexpected result: %+v", got)
 	}
 }
 

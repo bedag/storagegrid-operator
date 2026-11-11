@@ -71,7 +71,10 @@ func (f *fakeAPI) ListTenantUsage(ctx context.Context) (map[string]grid.TenantUs
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	return f.usage, f.err
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.usage, nil
 }
 
 func (f *fakeAPI) TenantUsageWithBuckets(_ context.Context, ids []string, _ int) (map[string]grid.TenantUsageStats, error) {
@@ -277,7 +280,7 @@ func TestTimeout(t *testing.T) {
 
 func TestUnauthorizedDropsClient(t *testing.T) {
 	api := newFakeAPI()
-	api.err = errors.New("API error: 401")
+	api.err = errors.New("API error: 401 Unauthorized (code: 401)")
 	var dropped []string
 	var mu sync.Mutex
 	drop := func(name string) { mu.Lock(); dropped = append(dropped, name); mu.Unlock() }
@@ -289,6 +292,43 @@ func TestUnauthorizedDropsClient(t *testing.T) {
 		p+`grid_scrape_success{step="tenant_usage",storagegrid="primary-grid"} 0`,
 		p+`grid_scrape_success{step="endpoints",storagegrid="primary-grid"} 0`,
 	)
+}
+
+func TestForbiddenKeepsClient(t *testing.T) {
+	api := newFakeAPI()
+	api.err = errors.New("API error: 403 Forbidden (code: 403)")
+	var dropped atomic.Int32
+	got := series(t, NewGridCollector(fakeReader(t, gridObjects(false)...), staticAPI(api), func(string) { dropped.Add(1) }, nil, defaultOpts))
+	if dropped.Load() != 0 {
+		t.Error("a 403 must not drop the client")
+	}
+	mustHave(t, got, p+`grid_scrape_success{step="tenant_usage",storagegrid="primary-grid"} 0`)
+}
+
+func TestBucketUsagePartialFailure(t *testing.T) {
+	api := newFakeAPI()
+	delete(api.usage, "7174")
+	api.err = errors.New("tenant 7174 usage: API error: 500 Internal Server Error (code: 500)")
+	got := series(t, NewGridCollector(fakeReader(t, gridObjects(true)...), staticAPI(api), func(string) {}, nil, defaultOpts))
+	mustHave(t, got,
+		p+`s3tenantaccount_usage_bytes{s3tenantaccount="acc-1",storagegrid="primary-grid",tenant_id="7173"} 1569128713`,
+		p+`s3bucket_usage_bytes{bucket_name="`+flatcarBucket+`",namespace="team-a",s3bucket="b1",s3tenant="t1"} 1000`,
+		p+`grid_scrape_success{step="bucket_usage",storagegrid="primary-grid"} 0`,
+		p+`grid_scrape_success{step="endpoints",storagegrid="primary-grid"} 0`,
+	)
+	mustNotContain(t, got, `tenant_id="7174"`)
+}
+
+func TestBucketUsageTenantNotFound(t *testing.T) {
+	// The grid API skips tenants the grid no longer has, so only the others come back.
+	api := newFakeAPI()
+	delete(api.usage, "7174")
+	got := series(t, NewGridCollector(fakeReader(t, gridObjects(true)...), staticAPI(api), func(string) {}, nil, defaultOpts))
+	mustHave(t, got,
+		p+`s3tenantaccount_usage_bytes{s3tenantaccount="acc-1",storagegrid="primary-grid",tenant_id="7173"} 1569128713`,
+		p+`grid_scrape_success{step="bucket_usage",storagegrid="primary-grid"} 1`,
+	)
+	mustNotContain(t, got, `tenant_id="7174"`)
 }
 
 func TestHalfProvisioned(t *testing.T) {

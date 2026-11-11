@@ -18,7 +18,9 @@ package grid
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -57,7 +59,8 @@ type Sample struct {
 // API reads usage and health data from the grid for metrics.
 type API interface {
 	ListTenantUsage(ctx context.Context) (map[string]TenantUsageStats, error)
-	// TenantUsageWithBuckets returns the first error together with the results gathered so far.
+	// TenantUsageWithBuckets skips tenants the grid no longer has, and returns the
+	// usage it got together with the joined errors of the tenants that failed.
 	TenantUsageWithBuckets(ctx context.Context, ids []string, concurrency int) (map[string]TenantUsageStats, error)
 	EndpointHealth(ctx context.Context) (map[string]EndpointHealth, error)
 	Query(ctx context.Context, promql string) ([]Sample, error)
@@ -101,14 +104,23 @@ func (a *api) ListTenantUsage(ctx context.Context) (map[string]TenantUsageStats,
 
 func (a *api) TenantUsageWithBuckets(ctx context.Context, ids []string, concurrency int) (map[string]TenantUsageStats, error) {
 	out := make(map[string]TenantUsageStats, len(ids))
+	var errs []error
 	var mu sync.Mutex
-	g, gctx := errgroup.WithContext(ctx)
+	// A plain group, so one tenant's failure does not cancel the others.
+	var g errgroup.Group
 	g.SetLimit(max(concurrency, 1))
 	for _, id := range ids {
 		g.Go(func() error {
-			usage, err := a.src.Tenant().GetUsageWithBuckets(gctx, id)
+			usage, err := a.src.Tenant().GetUsageWithBuckets(ctx, id)
+			// An account can keep its tenant ID after the grid deleted the tenant.
+			if hasStatus(err, http.StatusNotFound) {
+				return nil
+			}
 			if err != nil {
-				return fmt.Errorf("tenant %s usage: %w", id, err)
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("tenant %s usage: %w", id, err))
+				mu.Unlock()
+				return nil
 			}
 			u := TenantUsageStats{
 				Bytes:   deref(usage.DataBytes),
@@ -126,7 +138,8 @@ func (a *api) TenantUsageWithBuckets(ctx context.Context, ids []string, concurre
 			return nil
 		})
 	}
-	return out, g.Wait()
+	_ = g.Wait() // Goroutines report through errs.
+	return out, errors.Join(errs...)
 }
 
 func (a *api) EndpointHealth(ctx context.Context) (map[string]EndpointHealth, error) {

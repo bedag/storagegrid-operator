@@ -18,6 +18,7 @@ package metrics
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"sync"
@@ -148,6 +149,9 @@ func (g *gridCollector) pruneResults() {
 	}
 }
 
+// partialError fails a step but keeps the series it emitted.
+type partialError struct{ error }
+
 type emitFunc func(d *prometheus.Desc, v float64, labels ...string)
 
 func (g *gridCollector) scrape(sg *s3v1alpha1.StorageGrid) []prometheus.Metric {
@@ -157,7 +161,7 @@ func (g *gridCollector) scrape(sg *s3v1alpha1.StorageGrid) []prometheus.Metric {
 
 	var out []prometheus.Metric
 	api, apiErr := g.api(ctx, sg)
-	// step emits a step's series only when it succeeds, and always its scrape_success.
+	// step emits a step's series only when it succeeds or fails with a partialError, and always its scrape_success.
 	step := func(name string, run func(emit emitFunc) error) {
 		var series []prometheus.Metric
 		err := apiErr
@@ -168,7 +172,10 @@ func (g *gridCollector) scrape(sg *s3v1alpha1.StorageGrid) []prometheus.Metric {
 		}
 		ok := 1.0
 		if err != nil {
-			ok, series = 0, nil
+			ok = 0
+			if !errors.As(err, new(partialError)) {
+				series = nil
+			}
 			ctrl.Log.WithName("grid-metrics").V(1).Info("grid metrics step failed", "storagegrid", sg.Name, "step", name, "err", err.Error())
 			if grid.IsUnauthorized(err) {
 				g.drop(sg.Name)
@@ -219,7 +226,7 @@ func (g *gridCollector) usage(ctx context.Context, sg *s3v1alpha1.StorageGrid, a
 	} else {
 		usage, err = api.ListTenantUsage(ctx)
 	}
-	if err != nil {
+	if usage == nil {
 		return err
 	}
 
@@ -234,7 +241,12 @@ func (g *gridCollector) usage(ctx context.Context, sg *s3v1alpha1.StorageGrid, a
 		}
 	}
 	if withBuckets {
-		return g.buckets(ctx, managed, usage, emit)
+		if err := g.buckets(ctx, managed, usage, emit); err != nil {
+			return err
+		}
+	}
+	if err != nil {
+		return partialError{err}
 	}
 	return nil
 }

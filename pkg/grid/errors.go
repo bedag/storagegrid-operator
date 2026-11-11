@@ -16,7 +16,11 @@ limitations under the License.
 
 package grid
 
-import "strings"
+import (
+	"fmt"
+	"net/http"
+	"strings"
+)
 
 // isNotFound returns true if the error indicates the resource was not found (HTTP 404).
 // Works with the StorageGrid SDK error format: "... not found" or "API error: 404 ...".
@@ -28,11 +32,14 @@ func isNotFound(err error) bool {
 	return strings.HasSuffix(msg, "not found") || strings.Contains(msg, "404")
 }
 
-// IsUnauthorized returns true if the error indicates rejected credentials (HTTP 401 or 403).
+// hasStatus reports whether err is the SDK's error for an HTTP status code,
+// which it formats as "API error: <status> (code: <code>)".
+func hasStatus(err error, code int) bool {
+	return err != nil && strings.Contains(err.Error(), fmt.Sprintf("(code: %d)", code))
+}
+
+// IsUnauthorized returns true if the grid rejected the client's credentials (HTTP 401).
+// A 403 is a permission problem a new login would not fix, so it does not count.
 func IsUnauthorized(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "401") || strings.Contains(msg, "403")
+	return hasStatus(err, http.StatusUnauthorized)
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
@@ -70,10 +71,13 @@ func (s *stateCollector) Collect(ch chan<- prometheus.Metric) {
 		return
 	}
 	ctx := context.Background()
+	listErrors := prometheus.NewDesc(metricPrefix+"state_list_errors", "1 when listing a kind failed during the scrape.", []string{"kind"}, nil)
 	for _, k := range s.kinds {
 		items, err := k.list(ctx, s.reader)
 		if err != nil {
-			ch <- prometheus.NewInvalidMetric(prometheus.NewDesc(metricPrefix+k.name+"_list_error", "Listing failed.", nil, nil), err)
+			// Skip the kind: an invalid metric would fail the whole shared /metrics scrape.
+			ctrl.Log.WithName("state-metrics").Error(err, "listing resources failed", "kind", k.name)
+			gauge(ch, listErrors, 1, k.name)
 			continue
 		}
 		k.collect(items, ch)

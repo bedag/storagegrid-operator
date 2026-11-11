@@ -17,6 +17,8 @@ limitations under the License.
 package metrics
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -128,5 +130,30 @@ func TestClusterScopedHasNoNamespace(t *testing.T) {
 func TestNotElectedEmitsNothing(t *testing.T) {
 	if n := testutil.CollectAndCount(NewStateCollector(testReader(t), make(chan struct{}))); n != 0 {
 		t.Fatalf("got %d series, want 0", n)
+	}
+}
+
+type failingReader struct{ client.Reader }
+
+func (f failingReader) List(ctx context.Context, l client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := l.(*s3v1alpha1.S3BucketList); ok {
+		return errors.New("boom")
+	}
+	return f.Reader.List(ctx, l, opts...)
+}
+
+func TestListFailureSkipsKindOnly(t *testing.T) {
+	reg := prometheus.NewPedanticRegistry()
+	reg.MustRegister(NewStateCollector(failingReader{testReader(t)}, nil))
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather failed: %v", err)
+	}
+	got := map[string]bool{}
+	for _, mf := range mfs {
+		got[mf.GetName()] = true
+	}
+	if !got["storagegrid_operator_s3tenant_info"] || !got["storagegrid_operator_state_list_errors"] || got["storagegrid_operator_s3bucket_info"] {
+		t.Fatalf("unexpected families: %v", got)
 	}
 }

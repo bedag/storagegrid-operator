@@ -53,6 +53,15 @@ var _ = Describe("StorageGrid metrics validation", func() {
 		Expect(err).To(MatchError(ContainSubstring("Duplicate value")))
 	})
 
+	It("rejects a query name that collides with operator series", func() {
+		_, err := v.ValidateCreate(ctx, grid(&s3v1alpha1.StorageGridMetrics{
+			Grid: &s3v1alpha1.GridMetrics{Enabled: true, Queries: []s3v1alpha1.GridMetricQuery{
+				{Name: "storagegrid_operator_x", Query: "q"},
+			}},
+		}))
+		Expect(err).To(MatchError(ContainSubstring("storagegrid_operator_")))
+	})
+
 	It("accepts a non-reserved allowed label", func() {
 		_, err := v.ValidateCreate(ctx, grid(&s3v1alpha1.StorageGridMetrics{
 			Grid: &s3v1alpha1.GridMetrics{Enabled: true, AllowedLabels: []string{"site_name"}},

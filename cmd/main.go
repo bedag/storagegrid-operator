@@ -21,8 +21,13 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.).
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -36,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -44,7 +50,9 @@ import (
 	"github.com/bedag/storagegrid-operator/internal/controller"
 	s3accessctrl "github.com/bedag/storagegrid-operator/internal/controller/s3access"
 	s3polctrl "github.com/bedag/storagegrid-operator/internal/controller/s3policies"
+	"github.com/bedag/storagegrid-operator/internal/metrics"
 	s3webhook "github.com/bedag/storagegrid-operator/internal/webhook"
+	"github.com/bedag/storagegrid-operator/pkg/grid"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -69,6 +77,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var gridMetrics metrics.GridCollectorOptions
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -86,6 +95,12 @@ func main() {
 	flag.StringVar(&metricsCertName, "metrics-cert-name", "tls.crt", "The name of the metrics server certificate file.")
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 
+	flag.DurationVar(&gridMetrics.Timeout, "grid-metrics-timeout", 10*time.Second,
+		"Deadline for collecting the live metrics of one StorageGrid on /metrics/grid. Must be > 0.")
+	flag.DurationVar(&gridMetrics.CacheTTL, "grid-metrics-cache-ttl", 15*time.Second,
+		"How long a StorageGrid's live metrics are reused between scrapes. 0 disables reuse.")
+	flag.IntVar(&gridMetrics.BucketConcurrency, "grid-metrics-bucket-concurrency", 8,
+		"Maximum bucket usage requests in flight per StorageGrid. Must be >= 1.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	opts := zap.Options{
@@ -95,6 +110,12 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	if gridMetrics.Timeout <= 0 || gridMetrics.CacheTTL < 0 || gridMetrics.BucketConcurrency < 1 {
+		setupLog.Error(nil, "invalid grid metrics flags: --grid-metrics-timeout must be > 0, "+
+			"--grid-metrics-cache-ttl >= 0, --grid-metrics-bucket-concurrency >= 1")
+		os.Exit(1)
+	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled.
 	// due to its vulnerabilities. More specifically, disabling http/2 will.
@@ -158,6 +179,12 @@ func main() {
 		TLSOpts: tlsOpts,
 	}
 
+	// Live grid metrics are served on their own path so a slow grid never delays /metrics.
+	gridRegistry := prometheus.NewRegistry()
+	metricsServerOptions.ExtraHandlers = map[string]http.Handler{
+		"/metrics/grid": promhttp.HandlerFor(gridRegistry, promhttp.HandlerOpts{ErrorHandling: promhttp.ContinueOnError}),
+	}
+
 	if secureMetrics {
 		// FilterProvider is used to protect the metrics endpoint with authn/authz.
 		// These configurations ensure that only authorized users and service accounts.
@@ -208,6 +235,14 @@ func main() {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
+
+	ctrlmetrics.Registry.MustRegister(metrics.NewStateCollector(mgr.GetClient(), mgr.Elected()))
+	ctrlmetrics.Registry.MustRegister(grid.RequestCollectors()...)
+	clients := metrics.NewClientCache(mgr.GetClient())
+	gridRegistry.MustRegister(
+		metrics.NewGridCollector(mgr.GetClient(), clients.Get, clients.Drop, mgr.Elected(), gridMetrics),
+		metrics.GridQueryErrors,
+	)
 
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &s3v1alpha1.S3TenantAccount{}, "status.s3EndpointConfig.s3TenantClassName", func(rawObj client.Object) []string {
 		s3Tenant := rawObj.(*s3v1alpha1.S3TenantAccount)

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
 	"github.com/bedag/storagegrid-operator/internal/metrics"
@@ -174,6 +175,9 @@ func validateMetrics(sg *s3v1alpha1.StorageGrid) error {
 			errs = append(errs, field.Duplicate(base.Child("queries").Index(i).Child("name"), q.Name))
 		}
 		seen[q.Name] = struct{}{}
+		if strings.HasPrefix(q.Name, "storagegrid_operator_") {
+			errs = append(errs, field.Invalid(base.Child("queries").Index(i).Child("name"), q.Name, "name must not start with storagegrid_operator_"))
+		}
 	}
 	return errs.ToAggregate()
 }

@@ -117,6 +117,54 @@ spec:
                   Amount of nodes (default: 1) that can be unavailable before the StorageGrid is considered not ready.
                   This is a safeguard to prevent operations when the StorageGrid is not fully available.
                 type: integer
+              metrics:
+                description: Metrics configures the Prometheus metrics the operator
+                  exposes for this grid.
+                properties:
+                  bucketUsage:
+                    description: BucketUsage enables per-bucket usage metrics (object
+                      count and bytes).
+                    type: boolean
+                  grid:
+                    description: Grid configures metrics sourced from the StorageGrid
+                      Prometheus query API.
+                    properties:
+                      allowedLabels:
+                        description: |-
+                          AllowedLabels lists the StorageGrid Prometheus labels that are copied onto the exported series.
+                          Labels the operator sets itself are reserved and cannot be listed.
+                        items:
+                          pattern: ^[a-zA-Z_][a-zA-Z0-9_]*$
+                          type: string
+                        maxItems: 20
+                        type: array
+                      enabled:
+                        description: Enabled turns on grid metric collection.
+                        type: boolean
+                      queries:
+                        description: Queries lists additional named Prometheus queries
+                          evaluated against the grid.
+                        items:
+                          description: GridMetricQuery is a named Prometheus query
+                            evaluated against the grid.
+                          properties:
+                            name:
+                              description: Name is the metric name the query result
+                                is exported under.
+                              pattern: ^[a-zA-Z_:][a-zA-Z0-9_:]*$
+                              type: string
+                            query:
+                              description: Query is the Prometheus expression to evaluate.
+                              minLength: 1
+                              type: string
+                          required:
+                          - name
+                          - query
+                          type: object
+                        maxItems: 50
+                        type: array
+                    type: object
+                type: object
               operations:
                 description: |-
                   Operations configures execution parameters for long-running StorageGrid operations.

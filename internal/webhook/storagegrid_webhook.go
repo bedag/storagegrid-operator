@@ -19,10 +19,13 @@ package webhook
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	s3v1alpha1 "github.com/bedag/storagegrid-operator/api/v1alpha1"
+	"github.com/bedag/storagegrid-operator/internal/metrics"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -69,6 +72,10 @@ func (r *StorageGridValidator) ValidateCreate(ctx context.Context, obj runtime.O
 		}
 	}
 
+	if err := validateMetrics(storagegrid); err != nil {
+		return nil, err
+	}
+
 	return nil, nil
 }
 
@@ -86,6 +93,10 @@ func (r *StorageGridValidator) ValidateUpdate(ctx context.Context, oldObj, newOb
 		if err := r.validateS3OperationsTenantClass(ctx, storagegrid.Spec.S3OperationsTenantClass); err != nil {
 			return nil, err
 		}
+	}
+
+	if err := validateMetrics(storagegrid); err != nil {
+		return nil, err
 	}
 
 	return nil, nil
@@ -141,4 +152,28 @@ func (r *StorageGridValidator) validateS3OperationsTenantClass(ctx context.Conte
 
 	log.Info("S3OperationsTenantClass is valid", "name", tenantClassName)
 	return nil
+}
+
+// validateMetrics rejects reserved allowed labels and duplicate query names.
+func validateMetrics(sg *s3v1alpha1.StorageGrid) error {
+	if sg.Spec.Metrics == nil || sg.Spec.Metrics.Grid == nil {
+		return nil
+	}
+	grid := sg.Spec.Metrics.Grid
+	base := field.NewPath("spec", "metrics", "grid")
+
+	var errs field.ErrorList
+	for i, l := range grid.AllowedLabels {
+		if slices.Contains(metrics.ReservedLabels, l) {
+			errs = append(errs, field.Invalid(base.Child("allowedLabels").Index(i), l, "label is reserved by the operator"))
+		}
+	}
+	seen := map[string]struct{}{}
+	for i, q := range grid.Queries {
+		if _, dup := seen[q.Name]; dup {
+			errs = append(errs, field.Duplicate(base.Child("queries").Index(i).Child("name"), q.Name))
+		}
+		seen[q.Name] = struct{}{}
+	}
+	return errs.ToAggregate()
 }

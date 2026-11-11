@@ -1,6 +1,5 @@
 # Operator metrics: scrape /metrics and /metrics/grid with a service account bound to metrics-reader
 # and assert live tenant usage, scrape health and grid request counters.
-# Assumes the operator runs in storagegrid-operator-system; override with --values/bindings if not.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -10,9 +9,9 @@ spec:
     - name: tenantName
       value: metrics-test
     - name: operatorNamespace
-      value: storagegrid-operator-system
+      value: ($values.operator.namespace)
     - name: metricsService
-      value: storagegrid-operator-controller-manager-metrics-service
+      value: ($values.operator.metricsService)
   steps:
     # ── Step 1: Create tenant and wait for Bound ────────────────────────
     - name: create-tenant
@@ -57,7 +56,7 @@ spec:
               roleRef:
                 apiGroup: rbac.authorization.k8s.io
                 kind: ClusterRole
-                name: storagegrid-operator-metrics-reader
+                name: ($values.operator.metricsReaderRole)
               subjects:
                 - kind: ServiceAccount
                   name: metrics-scraper
@@ -77,8 +76,8 @@ spec:
                 value: ($namespace)
             content: |
               TOKEN=$(kubectl create token metrics-scraper -n $TENANT_NS)
-              kubectl run curl-grid -n $TENANT_NS --restart=Never --image=curlimages/curl:8.11.1 \
-                --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}}}}' \
+              kubectl run curl-grid -n $TENANT_NS --restart=Never --image=artifacts.bedag.cloud/dockerhub/curlimages/curl:8.11.1 \
+                --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"curl-grid","image":"artifacts.bedag.cloud/dockerhub/curlimages/curl:8.11.1","securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}' \
                 --command -- sleep 600
               kubectl wait pod/curl-grid -n $TENANT_NS --for=condition=Ready --timeout=60s
               kubectl exec curl-grid -n $TENANT_NS -- curl -sk --max-time 30 \
@@ -106,6 +105,7 @@ spec:
               - name: SG
                 value: ($values.storageGrid.name)
             content: |
+              set -e
               TOKEN=$(kubectl create token metrics-scraper -n $TENANT_NS)
               URL=https://$SVC.$OP_NS.svc:8443
               curl_op() { kubectl exec curl-grid -n $TENANT_NS -- curl -sk --max-time 30 -H "Authorization: Bearer $TOKEN" "$1"; }

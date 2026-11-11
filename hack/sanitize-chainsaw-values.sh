@@ -15,5 +15,8 @@ yq eval '
   .namespacePrefix = "REPLACE_ME" |
   .storageGrid.name = "REPLACE_ME" |
   .tenantClass.name = "REPLACE_ME" |
-  .alternateTenantClass.name = "REPLACE_ME"
+  .alternateTenantClass.name = "REPLACE_ME" |
+  .operator.namespace = "REPLACE_ME" |
+  .operator.metricsService = "REPLACE_ME" |
+  .operator.metricsReaderRole = "REPLACE_ME"
 '

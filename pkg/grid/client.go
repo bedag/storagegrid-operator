@@ -24,12 +24,12 @@ import (
 type GridClient = client.GridClient
 type TenantClient = client.TenantClient
 
-func InitGridClient(username string, password string, endpoint string) (*GridClient, error) {
+func InitGridClient(storageGrid, username, password, endpoint string) (*GridClient, error) {
 	creds := models.Credentials{Username: username, Password: password}
 	opts := []client.ClientOption{
 		client.WithCredentials(&creds),
 		client.WithEndpoint(endpoint),
-		client.WithSkipSSL(),
+		client.WithHTTPClient(newHTTPClient(storageGrid)),
 	}
 
 	gridClient, err := client.NewGridClient(opts...)
@@ -40,13 +40,13 @@ func InitGridClient(username string, password string, endpoint string) (*GridCli
 	return gridClient, nil
 }
 
-func InitTenantClient(username string, password string, endpoint string, tenantId string) (*TenantClient, error) {
+func InitTenantClient(storageGrid, username, password, endpoint, tenantId string) (*TenantClient, error) {
 	// no once, because this needs to be called for each tenant.
 	creds := models.Credentials{Username: username, Password: password, AccountId: &tenantId}
 	opts := []client.ClientOption{
 		client.WithCredentials(&creds),
 		client.WithEndpoint(endpoint),
-		client.WithSkipSSL(),
+		client.WithHTTPClient(newHTTPClient(storageGrid)),
 	}
 
 	tenantClient, err := client.NewTenantClient(opts...)

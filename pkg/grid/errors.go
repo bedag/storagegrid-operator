@@ -27,3 +27,12 @@ func isNotFound(err error) bool {
 	msg := err.Error()
 	return strings.HasSuffix(msg, "not found") || strings.Contains(msg, "404")
 }
+
+// IsUnauthorized returns true if the error indicates rejected credentials (HTTP 401 or 403).
+func IsUnauthorized(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "401") || strings.Contains(msg, "403")
+}

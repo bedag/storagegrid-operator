@@ -478,7 +478,7 @@ func (r *S3BucketReconciler) reconcileTenantClient(ctx context.Context, rctx *bu
 	log.V(1).Info("Successfully fetched tenant credentials")
 
 	// Initialize tenant client.
-	client, err := grid.InitTenantClient(username, password, rctx.S3Tenant.Status.GridEndpoint, rctx.S3Tenant.Status.TenantID)
+	client, err := grid.InitTenantClient(rctx.S3Tenant.Spec.StorageGridRef.Name, username, password, rctx.S3Tenant.Status.GridEndpoint, rctx.S3Tenant.Status.TenantID)
 	if err != nil {
 		return fmt.Errorf("failed to initialize tenant client: %w", err)
 	}

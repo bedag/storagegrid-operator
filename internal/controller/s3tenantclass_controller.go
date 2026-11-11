@@ -336,7 +336,7 @@ func (r *S3TenantClassReconciler) initGridClient(ctx context.Context, rctx *s3Te
 	}
 
 	log.V(1).Info("Initializing grid client if not initialized")
-	client, err := grid.InitGridClient(username, password, rctx.StorageGrid.Spec.ManagementEndpoint)
+	client, err := grid.InitGridClient(rctx.StorageGrid.Name, username, password, rctx.StorageGrid.Spec.ManagementEndpoint)
 	if err != nil {
 		log.Error(err, "Failed to initialize grid client")
 		return err

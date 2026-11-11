@@ -95,9 +95,15 @@ func (t instrumentedTransport) RoundTrip(req *http.Request) (*http.Response, err
 	return resp, nil
 }
 
+// baseTransport is shared by all grid clients, so a client built per reconcile
+// reuses pooled connections instead of a fresh TLS handshake each time.
+var baseTransport = func() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // matches the previous WithSkipSSL behavior.
+	return t
+}()
+
 // newHTTPClient builds an instrumented client that skips TLS verification, like the SDK's WithSkipSSL.
 func newHTTPClient(storageGrid string) *http.Client {
-	base := http.DefaultTransport.(*http.Transport).Clone()
-	base.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // matches the previous WithSkipSSL behavior.
-	return &http.Client{Transport: instrumentedTransport{storageGrid: storageGrid, next: base}}
+	return &http.Client{Transport: instrumentedTransport{storageGrid: storageGrid, next: baseTransport}}
 }

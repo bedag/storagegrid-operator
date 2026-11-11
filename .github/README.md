@@ -1432,7 +1432,7 @@ Only tenants managed by this operator (an S3TenantAccount of the grid with a ten
 | Metric | Labels |
 | --- | --- |
 | `storagegrid_operator_s3tenant_usage_bytes`, `_usage_objects`, `_quota_bytes` (only for bound tenants) | `namespace`, `s3tenant`, `s3tenantaccount`, `storagegrid`, `tenant_id` |
-| `storagegrid_operator_s3tenantaccount_usage_bytes`, `_usage_objects`, `_quota_bytes` (all accounts, bound or not) | `s3tenantaccount`, `storagegrid`, `tenant_id` |
+| `storagegrid_operator_s3tenantaccount_usage_bytes`, `_usage_objects`, `_quota_bytes` (bound or not) | `s3tenantaccount`, `storagegrid`, `tenant_id` |
 | `storagegrid_operator_s3bucket_usage_bytes`, `_usage_objects` (needs `spec.metrics.bucketUsage`, only buckets with an S3Bucket CR) | `namespace`, `s3bucket`, `s3tenant`, `bucket_name` |
 | `storagegrid_operator_s3tenantclass_endpoint_bound` (1 if bound on all gateway nodes) | `s3tenantclass`, `storagegrid` |
 | `storagegrid_operator_s3tenantclass_endpoint_cert_expiry_timestamp_seconds` (earliest expiry) | `s3tenantclass`, `storagegrid` |
@@ -1440,9 +1440,9 @@ Only tenants managed by this operator (an S3TenantAccount of the grid with a ten
 | `storagegrid_operator_grid_scrape_duration_seconds` | `storagegrid` |
 | `storagegrid_operator_grid_query_errors_total` (counter; failed or skipped forwarded queries) | `storagegrid`, `query` |
 
-The account series are always emitted, so `sum(storagegrid_operator_s3tenantaccount_usage_bytes)` is the platform total. Tenant usage comes from one `accounts-cache` call per grid; with `bucketUsage` it comes from the per-tenant usage call instead, so tenant and bucket numbers agree.
+The account series are emitted for every S3TenantAccount of the grid whose tenant ID the grid reports usage for, bound or not, so `sum(storagegrid_operator_s3tenantaccount_usage_bytes)` is the platform total. With `bucketUsage`, a tenant the grid no longer has (404) is skipped; if another tenant's usage call fails, the remaining tenants are still exported and `step="bucket_usage"` is 0. Tenant usage comes from one `accounts-cache` call per grid; with `bucketUsage` it comes from the per-tenant usage call instead, so tenant and bucket numbers agree.
 
-`grid_scrape_success` is 0 or 1 per enabled `step`: `tenant_usage`, `bucket_usage`, `endpoints`, `grid`. A failing step omits its series and the rest is still served; `/metrics/grid` never answers HTTP 500 for backend errors. `step="grid"` is 0 only if every forwarded query failed (or on 401/403); partial query failures show up only in `grid_query_errors_total`.
+`grid_scrape_success` is 0 or 1 per enabled `step`: `tenant_usage`, `bucket_usage`, `endpoints`, `grid`. A failing step omits its series and the rest is still served; `/metrics/grid` never answers HTTP 500 for backend errors. On a 401 the operator drops its cached grid client, so the next scrape logs in again; a 403 does not. `step="grid"` is 0 only if every forwarded query failed (or on a 401); partial query failures show up only in `grid_query_errors_total`.
 
 ### StorageGrid `spec.metrics`
 

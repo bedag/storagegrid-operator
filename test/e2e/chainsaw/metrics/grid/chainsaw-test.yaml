@@ -1,0 +1,115 @@
+# Operator metrics: scrape /metrics and /metrics/grid with a service account bound to metrics-reader
+# and assert live tenant usage, scrape health and grid request counters.
+# Assumes the operator runs in storagegrid-operator-system; override with --values/bindings if not.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: metrics-grid
+spec:
+  bindings:
+    - name: tenantName
+      value: metrics-test
+    - name: operatorNamespace
+      value: storagegrid-operator-system
+    - name: metricsService
+      value: storagegrid-operator-controller-manager-metrics-service
+  steps:
+    # ── Step 1: Create tenant and wait for Bound ────────────────────────
+    - name: create-tenant
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+                defaultBucketRegion: us-east-1
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+
+    # ── Step 2: Service account allowed to read the metrics endpoints ───
+    - name: metrics-reader
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: ServiceAccount
+              metadata:
+                name: metrics-scraper
+        - apply:
+            resource:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRoleBinding
+              metadata:
+                name: (join('-', ['metrics-scraper', $namespace]))
+              roleRef:
+                apiGroup: rbac.authorization.k8s.io
+                kind: ClusterRole
+                name: storagegrid-operator-metrics-reader
+              subjects:
+                - kind: ServiceAccount
+                  name: metrics-scraper
+                  namespace: ($namespace)
+
+    # ── Step 3: Scrape /metrics/grid ────────────────────────────────────
+    - name: scrape-grid
+      try:
+        - script:
+            timeout: 90s
+            env:
+              - name: OP_NS
+                value: ($operatorNamespace)
+              - name: SVC
+                value: ($metricsService)
+              - name: TENANT_NS
+                value: ($namespace)
+            content: |
+              TOKEN=$(kubectl create token metrics-scraper -n $TENANT_NS)
+              kubectl run curl-grid -n $TENANT_NS --restart=Never --image=curlimages/curl:8.11.1 \
+                --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}}}}' \
+                --command -- sleep 600
+              kubectl wait pod/curl-grid -n $TENANT_NS --for=condition=Ready --timeout=60s
+              kubectl exec curl-grid -n $TENANT_NS -- curl -sk --max-time 30 \
+                -H "Authorization: Bearer $TOKEN" https://$SVC.$OP_NS.svc:8443/metrics/grid > /dev/null
+              # The first scrape may race the grid cache; scrape again for the asserted output.
+              kubectl exec curl-grid -n $TENANT_NS -- curl -sk --max-time 30 \
+                -H "Authorization: Bearer $TOKEN" https://$SVC.$OP_NS.svc:8443/metrics/grid
+            check:
+              ($error == null): true
+              (contains($stdout, join('', ['storagegrid_operator_s3tenant_usage_bytes{namespace="', $namespace, '"']))): true
+              (contains($stdout, 'storagegrid_operator_grid_scrape_success{step="tenant_usage"')): true
+
+    # ── Step 4: grid_scrape_success is 1 and request counter > 0 on /metrics ──
+    - name: verify-values
+      try:
+        - script:
+            timeout: 60s
+            env:
+              - name: OP_NS
+                value: ($operatorNamespace)
+              - name: SVC
+                value: ($metricsService)
+              - name: TENANT_NS
+                value: ($namespace)
+              - name: SG
+                value: ($values.storageGrid.name)
+            content: |
+              TOKEN=$(kubectl create token metrics-scraper -n $TENANT_NS)
+              URL=https://$SVC.$OP_NS.svc:8443
+              curl_op() { kubectl exec curl-grid -n $TENANT_NS -- curl -sk --max-time 30 -H "Authorization: Bearer $TOKEN" "$1"; }
+              curl_op $URL/metrics/grid | grep "storagegrid_operator_grid_scrape_success{step=\"tenant_usage\",storagegrid=\"$SG\"} 1"
+              curl_op $URL/metrics | grep "^storagegrid_operator_grid_requests_total{" | awk '{s+=$2} END {exit !(s>0)}'
+            check:
+              ($error == null): true

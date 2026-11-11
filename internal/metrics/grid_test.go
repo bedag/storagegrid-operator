@@ -47,6 +47,9 @@ type fakeAPI struct {
 	block       bool
 	listCalls   atomic.Int32
 	bucketCalls atomic.Int32
+	queryCalls  atomic.Int32
+	queryErr    map[string]error
+	queryResult map[string][]grid.Sample
 	mu          sync.Mutex
 	bucketIDs   []string
 }
@@ -87,7 +90,13 @@ func (f *fakeAPI) EndpointHealth(context.Context) (map[string]grid.EndpointHealt
 	return map[string]grid.EndpointHealth{"c47f902c": {Bound: true, CertExpiry: &expiry}}, nil
 }
 
-func (f *fakeAPI) Query(context.Context, string) ([]grid.Sample, error) { return nil, nil }
+func (f *fakeAPI) Query(_ context.Context, q string) ([]grid.Sample, error) {
+	f.queryCalls.Add(1)
+	if e, ok := f.queryErr[q]; ok {
+		return nil, e
+	}
+	return f.queryResult[q], nil
+}
 
 func storageGrid(name string, bucketUsage bool) *s3v1alpha1.StorageGrid {
 	return &s3v1alpha1.StorageGrid{

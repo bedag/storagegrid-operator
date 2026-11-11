@@ -185,7 +185,14 @@ func (g *gridCollector) scrape(sg *s3v1alpha1.StorageGrid) []prometheus.Metric {
 	}
 	step(usageStep, func(emit emitFunc) error { return g.usage(ctx, sg, api, withBuckets, emit) })
 	step("endpoints", func(emit emitFunc) error { return g.endpoints(ctx, sg, api, emit) })
-	// Step 5, the opt-in grid queries of spec.metrics.grid, is a no-op hook for now.
+	if m := sg.Spec.Metrics; m != nil && m.Grid != nil && m.Grid.Enabled {
+		var forwarded []prometheus.Metric
+		step("grid", func(emit emitFunc) (err error) {
+			forwarded, err = gridQueries(ctx, sg, api)
+			return err
+		})
+		out = append(out, forwarded...)
+	}
 
 	return append(out, prometheus.MustNewConstMetric(scrapeDuration, prometheus.GaugeValue, time.Since(start).Seconds(), sg.Name))
 }

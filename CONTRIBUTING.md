@@ -138,12 +138,15 @@ The project uses [Kyverno Chainsaw](https://kyverno.github.io/chainsaw/) for dec
 
    Key fields:
 
-   | Field                       | Description                                            |
-   | --------------------------- | ------------------------------------------------------ |
-   | `namespacePrefix`           | Prefix for test namespaces (empty for no prefix)       |
-   | `storageGrid.name`          | Name of the StorageGrid CR in the cluster              |
-   | `tenantClass.name`          | Name of the S3TenantClass CR                           |
-   | `alternateTenantClass.name` | Second S3TenantClass for class-change tests (optional) |
+   | Field                        | Description                                            |
+   | ---------------------------- | ------------------------------------------------------ |
+   | `namespacePrefix`            | Prefix for test namespaces (empty for no prefix)       |
+   | `storageGrid.name`           | Name of the StorageGrid CR in the cluster              |
+   | `tenantClass.name`           | Name of the S3TenantClass CR                           |
+   | `alternateTenantClass.name`  | Second S3TenantClass for class-change tests (optional) |
+   | `operator.namespace`         | Namespace the operator runs in (metrics test)          |
+   | `operator.metricsService`    | Operator metrics Service name (metrics test)           |
+   | `operator.metricsReaderRole` | `metrics-reader` ClusterRole name (metrics test)       |
 
 #### Running Tests
 

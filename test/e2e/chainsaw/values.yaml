@@ -14,3 +14,8 @@ tenantClass:
 # Optional: a second S3TenantClass for class-change tests.
 alternateTenantClass:
   name: "REPLACE_ME"
+# Where the operator runs; used by the metrics test.
+operator:
+  namespace: REPLACE_ME
+  metricsService: REPLACE_ME
+  metricsReaderRole: REPLACE_ME

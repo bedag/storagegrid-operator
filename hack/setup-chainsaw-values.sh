@@ -68,6 +68,9 @@ prompt_field '.namespacePrefix'          'Namespace prefix (leave empty for no p
 prompt_field '.storageGrid.name'         'StorageGrid CR name'                          '' 'false'
 prompt_field '.tenantClass.name'         'S3TenantClass CR name'                        '' 'false'
 prompt_field '.alternateTenantClass.name' 'Alternate S3TenantClass name (for class-change tests, optional)' '' 'true'
+prompt_field '.operator.namespace'         'Operator namespace (metrics test)'         'storagegrid-operator-system' 'false'
+prompt_field '.operator.metricsService'    'Operator metrics Service name (metrics test)' 'storagegrid-operator-controller-manager-metrics-service' 'false'
+prompt_field '.operator.metricsReaderRole' 'metrics-reader ClusterRole name (metrics test)' 'storagegrid-operator-metrics-reader' 'false'
 
 if [ "$changed" = true ]; then
   echo "=== $VALUES_FILE configured successfully ==="

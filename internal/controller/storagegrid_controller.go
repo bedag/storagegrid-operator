@@ -427,7 +427,7 @@ func (r *StorageGridReconciler) initGridClient(ctx context.Context, rctx *sgReco
 
 	// initialize client for grid.
 	log.V(1).Info("Initializing grid client if not initialized")
-	client, err := grid.InitGridClient(username, password, rctx.SG.Spec.ManagementEndpoint)
+	client, err := grid.InitGridClient(rctx.SG.Name, username, password, rctx.SG.Spec.ManagementEndpoint)
 	if err != nil {
 		log.Error(err, "Failed to initialize grid client")
 		return err

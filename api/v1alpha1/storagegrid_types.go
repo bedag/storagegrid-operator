@@ -123,6 +123,51 @@ type StorageGridSpec struct {
 	// These settings tune how operations execute, not what operations to perform.
 	// +optional
 	Operations *OperationsConfig `json:"operations,omitempty"`
+
+	// Metrics configures the Prometheus metrics the operator exposes for this grid.
+	// +optional
+	Metrics *StorageGridMetrics `json:"metrics,omitempty"`
+}
+
+// StorageGridMetrics configures optional metrics collection for a StorageGrid.
+type StorageGridMetrics struct {
+	// BucketUsage enables per-bucket usage metrics (object count and bytes).
+	// +optional
+	BucketUsage bool `json:"bucketUsage,omitempty"`
+
+	// Grid configures metrics sourced from the StorageGrid Prometheus query API.
+	// +optional
+	Grid *GridMetrics `json:"grid,omitempty"`
+}
+
+// GridMetrics configures grid-wide metrics sourced from StorageGrid Prometheus queries.
+type GridMetrics struct {
+	// Enabled turns on grid metric collection.
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// AllowedLabels lists the StorageGrid Prometheus labels that are copied onto the exported series.
+	// Labels the operator sets itself are reserved and cannot be listed.
+	// +kubebuilder:validation:MaxItems=20
+	// +kubebuilder:validation:items:Pattern=^[a-zA-Z_][a-zA-Z0-9_]*$
+	// +optional
+	AllowedLabels []string `json:"allowedLabels,omitempty"`
+
+	// Queries lists additional named Prometheus queries evaluated against the grid.
+	// +kubebuilder:validation:MaxItems=50
+	// +optional
+	Queries []GridMetricQuery `json:"queries,omitempty"`
+}
+
+// GridMetricQuery is a named Prometheus query evaluated against the grid.
+type GridMetricQuery struct {
+	// Name is the metric name the query result is exported under.
+	// +kubebuilder:validation:Pattern="^[a-zA-Z_:][a-zA-Z0-9_:]*$"
+	Name string `json:"name"`
+
+	// Query is the Prometheus expression to evaluate.
+	// +kubebuilder:validation:MinLength=1
+	Query string `json:"query"`
 }
 
 // OperationsConfig defines operational parameters for StorageGrid operations.

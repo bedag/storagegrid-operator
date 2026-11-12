@@ -1376,9 +1376,100 @@ The operator exposes metrics on port 8443 (HTTPS) or 8080 (HTTP). Health checks 
 
 ### Available Endpoints
 
-- `/metrics` - Prometheus metrics
+- `/metrics` - Prometheus metrics (controller-runtime, CR state, grid request metrics)
+- `/metrics/grid` - live usage and grid metrics, fetched from the StorageGrid at scrape time
 - `/healthz` - Health check
 - `/readyz` - Readiness check
+
+Both metrics endpoints share the metrics port and its authn/authz. The `metrics-reader` ClusterRole (`config/rbac/metrics_reader_role.yaml`) grants `get` on `/metrics` and `/metrics/grid`. Only the elected leader emits the custom series, so extra replicas add no duplicates and no extra grid calls.
+
+Without `honorLabels: true` on the scrape config (ServiceMonitor), Prometheus renames the operator's `namespace` label to `exported_namespace`.
+
+Scrape `/metrics/grid` as its own target with its own interval and timeout, so a slow grid never delays `/metrics`. Its timeout must exceed `--grid-metrics-timeout`.
+
+### Prerequisites
+
+The grid account in `StorageGrid.spec.secretRef` needs the StorageGrid **Metrics query** permission plus tenant read (tenant accounts permission). Without Metrics query, `/metrics/grid` still serves usage, but endpoint health and forwarded grid metrics fail (see `grid_scrape_success`). The operator only issues GET requests to the grid, apart from its own login.
+
+### CR state metrics (`/metrics`)
+
+Namespaced kinds carry `namespace`; cluster-scoped kinds do not. The identity label is named after the kind: `storagegrid`, `s3tenantclass`, `s3tenantaccount`, `s3tenant`, `s3bucket`, `s3access`, `globals3policy`, `s3policy`. Series come from the manager's cache and cost no API server calls.
+
+| Metric | Value | Labels (besides identity) |
+| --- | --- | --- |
+| `storagegrid_operator_<kind>_info` | 1 | descriptive labels, see below |
+| `storagegrid_operator_<kind>_status_condition` | 1 per condition present | `type`, `status` |
+| `storagegrid_operator_<kind>_status_phase` | 1 for the current phase, 0 for the others | `phase` (S3Tenant, S3TenantAccount, S3Bucket, S3Access) |
+| `storagegrid_operator_storagegrid_ready` | 0/1 | none |
+| `storagegrid_operator_<kind>_created` | creation time, Unix seconds | none |
+| `storagegrid_operator_s3tenant_quota_limit_bytes`, `storagegrid_operator_s3tenantaccount_quota_limit_bytes` | quota from status | none |
+| `storagegrid_operator_state_list_errors` | 1 when listing a kind failed; that kind's series are skipped for the scrape | `kind` |
+
+Descriptive `_info` labels:
+
+- storagegrid: `management_endpoint`
+- s3tenantclass: `storagegrid`, `backing_id`, `display_name`
+- s3tenantaccount: `storagegrid`, `s3tenantclass`, `tenant_id`, `backend_name`, `deletion_policy`, `bound_namespace`, `bound_s3tenant`
+- s3tenant: `storagegrid`, `s3tenantclass`, `s3tenantaccount`, `tenant_id`
+- s3bucket: `s3tenant`, `bucket_name`, `region`
+- s3access: `s3bucket`
+- policies: none
+
+### Operator calls to the grid (`/metrics`)
+
+| Metric | Labels |
+| --- | --- |
+| `storagegrid_operator_grid_requests_total` | `storagegrid`, `method`, `route`, `code` |
+| `storagegrid_operator_grid_request_duration_seconds` (histogram) | `storagegrid`, `method`, `route` |
+| `storagegrid_operator_grid_request_errors_total` (transport errors without an HTTP code) | `storagegrid`, `method`, `route` |
+
+`route` is a path template to keep cardinality bounded: `/grid/accounts/{id}/usage`, `/org/containers/{name}/usage`, `/grid/metric-query`, `/grid/accounts-cache`, `/authorize`, or `other`.
+
+### Live grid metrics (`/metrics/grid`)
+
+Only tenants managed by this operator (an S3TenantAccount of the grid with a tenant ID) are exported; other tenants on a shared grid are dropped.
+
+| Metric | Labels |
+| --- | --- |
+| `storagegrid_operator_s3tenant_usage_bytes`, `_usage_objects`, `_quota_bytes` (only for bound tenants) | `namespace`, `s3tenant`, `s3tenantaccount`, `storagegrid`, `tenant_id` |
+| `storagegrid_operator_s3tenantaccount_usage_bytes`, `_usage_objects`, `_quota_bytes` (bound or not) | `s3tenantaccount`, `storagegrid`, `tenant_id` |
+| `storagegrid_operator_s3bucket_usage_bytes`, `_usage_objects` (needs `spec.metrics.bucketUsage`, only buckets with an S3Bucket CR) | `namespace`, `s3bucket`, `s3tenant`, `bucket_name` |
+| `storagegrid_operator_s3tenantclass_endpoint_bound` (1 if bound on all gateway nodes) | `s3tenantclass`, `storagegrid` |
+| `storagegrid_operator_s3tenantclass_endpoint_cert_expiry_timestamp_seconds` (earliest expiry) | `s3tenantclass`, `storagegrid` |
+| `storagegrid_operator_grid_scrape_success` | `storagegrid`, `step` |
+| `storagegrid_operator_grid_scrape_duration_seconds` | `storagegrid` |
+| `storagegrid_operator_grid_query_errors_total` (counter; failed or skipped forwarded queries) | `storagegrid`, `query` |
+
+The account series are emitted for every S3TenantAccount of the grid whose tenant ID the grid reports usage for, bound or not, so `sum(storagegrid_operator_s3tenantaccount_usage_bytes)` is the platform total. With `bucketUsage`, a tenant the grid no longer has (404) is skipped; if another tenant's usage call fails, the remaining tenants are still exported and `step="bucket_usage"` is 0. Tenant usage comes from one `accounts-cache` call per grid; with `bucketUsage` it comes from the per-tenant usage call instead, so tenant and bucket numbers agree.
+
+`grid_scrape_success` is 0 or 1 per enabled `step`: `tenant_usage`, `bucket_usage`, `endpoints`, `grid`. A failing step omits its series and the rest is still served; `/metrics/grid` never answers HTTP 500 for backend errors. On a 401 the operator drops its cached grid client, so the next scrape logs in again; a 403 does not. `step="grid"` is 0 only if every forwarded query failed (or on a 401); partial query failures show up only in `grid_query_errors_total`.
+
+### StorageGrid `spec.metrics`
+
+```yaml
+spec:
+  metrics:
+    bucketUsage: false            # per-bucket usage, one usage call per managed tenant
+    grid:
+      enabled: false              # forward grid-level Prometheus data
+      allowedLabels: [site_name]  # labels kept on forwarded series; everything else is dropped
+      queries:                    # optional; built-in defaults when empty
+      - name: storagegrid_storage_utilization_data_bytes
+        query: sum by (site_name) (storagegrid_storage_utilization_data_bytes)
+```
+
+- Each query runs through the grid's `metric-query` API and is exported as a gauge `<name>` with the `storagegrid` label plus the allowed labels. Aggregate in the query: if two results collide after dropping labels, the query is skipped and counted in `grid_query_errors_total`.
+- `name` must be a valid metric name, unique within the list, and must not start with `storagegrid_operator_`. `allowedLabels` must be valid label names (max 20) and must not contain the reserved labels `namespace`, `storagegrid`, `s3tenantclass`, `s3tenantaccount`, `s3tenant`, `s3bucket`, `s3access`, `tenant_id`, `step`. Max 50 queries.
+- Default queries (when `queries` is empty): `storagegrid_storage_utilization_{data,usable_space,total_space,metadata,metadata_allowed}_bytes` by `site_name`, `storagegrid_alerts_firing` by `severity`, and `storagegrid_s3_requests_rate` by `operation` and `code`. Use `allowedLabels` to keep the labels they group by.
+- Per-tenant S3 traffic is not available: the grid has no tenant or bucket dimension on traffic metrics.
+
+### Operator flags
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--grid-metrics-timeout` | `10s` | Deadline for collecting one grid on `/metrics/grid` (> 0) |
+| `--grid-metrics-cache-ttl` | `15s` | How long one grid's result is shared between scrapes; `0` disables (>= 0) |
+| `--grid-metrics-bucket-concurrency` | `8` | Parallel bucket usage requests per grid (>= 1) |
 
 ## Troubleshooting
 
@@ -1429,6 +1520,5 @@ For issues and questions:
 - [x] Allow the import of existing S3 buckets with S3 tagging-based ownership protection
 - [ ] Implement labels for all resources for easier filtering
 - [ ] Integrate proper e2e tests - currently unable to test against a real StorageGrid instance due to lack of grid docker license. 
-- [ ] Write proper metrics of CRs created and backend calls
 - [ ] Allow the use of labels for `S3Tenant.spec.AllowedNamespaces` to allow more flexible tenant access control
 

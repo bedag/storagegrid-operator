@@ -1048,7 +1048,7 @@ func (r *S3TenantAccountReconciler) initGridClient(ctx context.Context, rctx *ac
 	}
 
 	log.V(1).Info("Initializing grid client if not initialized")
-	client, err := grid.InitGridClient(username, password, rctx.SG.Spec.ManagementEndpoint)
+	client, err := grid.InitGridClient(rctx.SG.Name, username, password, rctx.SG.Spec.ManagementEndpoint)
 	if err != nil {
 		log.Error(err, "Failed to initialize grid client")
 		return err
@@ -1070,7 +1070,7 @@ func (r *S3TenantAccountReconciler) initTenantClient(ctx context.Context, rctx *
 	}
 
 	// use initialize the tenant client.
-	client, err := grid.InitTenantClient(username, password, rctx.Account.Status.GridEndpoint, rctx.Account.Status.TenantID)
+	client, err := grid.InitTenantClient(rctx.Account.Spec.StorageGridRef.Name, username, password, rctx.Account.Status.GridEndpoint, rctx.Account.Status.TenantID)
 	if err != nil {
 		log.Error(err, "Failed to initialize tenant client")
 		return err

@@ -157,10 +157,7 @@ func quotaBytes(q *resource.Quantity) *float64 {
 
 func tenantPhases() []string {
 	// Union of the CRD enum on CommonTenantStatus.Phase and the Go constants.
-	var out []string
-	for _, p := range []string{"Pending", "Ready", "Failed", "Deleting", "InProgress", "Retaining", "RetainWait", "Bound"} {
-		out = append(out, p)
-	}
+	out := []string{"Pending", "Ready", "Failed", "Deleting", "InProgress", "Retaining", "RetainWait", "Bound"}
 	for _, p := range []s3v1alpha1.Phase{
 		s3v1alpha1.PhasePending, s3v1alpha1.PhaseReady, s3v1alpha1.PhaseFailed, s3v1alpha1.PhaseDeleting,
 		s3v1alpha1.PhaseInProgress, s3v1alpha1.PhaseRetainThenDelete, s3v1alpha1.PhaseBound,

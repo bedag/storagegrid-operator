@@ -33,7 +33,8 @@ import (
 type BucketUsage = models.BucketStats
 
 // CreateBucket creates a new bucket with the specified name and region and returns admin credentials for s3 access.
-// When objectLock is non-nil and Mode != Disabled, S3 Object Lock is enabled with the supplied default retention.
+// When objectLock is non-nil and Mode != Disabled, S3 Object Lock is enabled with the supplied default retention,
+// or without any default retention when RetentionInDays is S3ObjectLockRetentionNoDefault (-1).
 func CreateBucket(ctx context.Context, name string, region string, objectLock *s3v1alpha1.S3ObjectLockBucketSpec, tenantClient *TenantClient) (err error) {
 	log := log.FromContext(ctx).WithValues("func", "CreateBucket")
 	log.V(1).Info(fmt.Sprintf("Creating bucket: name=%s, region=%s, objectLock=%+v", name, region, objectLock))
@@ -420,12 +421,18 @@ func CancelBucketDrain(ctx context.Context, bucketName string, tenantClient *Ten
 
 // objectLockToSDK converts an S3ObjectLockBucketSpec into the SDK's BucketS3ObjectLockSettings.
 // Returns nil when the spec is nil or Mode is Disabled (omits the field from the request body).
+// A RetentionInDays of S3ObjectLockRetentionNoDefault (-1) enables Object Lock without a default
+// retention: DefaultRetentionSetting stays nil, so it is omitted from the request body and S3
+// clients set retention per object.
 func objectLockToSDK(spec *s3v1alpha1.S3ObjectLockBucketSpec) *models.BucketS3ObjectLockSettings {
 	if spec == nil || spec.Mode == "" || spec.Mode == s3v1alpha1.S3ObjectLockModeDisabled {
 		return nil
 	}
 
 	enabled := true
+	if spec.RetentionInDays == s3v1alpha1.S3ObjectLockRetentionNoDefault {
+		return &models.BucketS3ObjectLockSettings{Enabled: &enabled}
+	}
 	return &models.BucketS3ObjectLockSettings{
 		Enabled: &enabled,
 		DefaultRetentionSetting: &models.BucketS3ObjectLockDefaultRetentionSettings{

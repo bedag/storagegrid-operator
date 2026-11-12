@@ -231,10 +231,8 @@ func (r *S3BucketValidator) validateBucketObjectLock(ctx context.Context, bucket
 		return nil
 	}
 
-	// Required: retentionInDays > 0 when mode != Disabled.
-	if bucket.Spec.S3ObjectLock == nil || bucket.Spec.S3ObjectLock.RetentionInDays <= 0 {
-		return fmt.Errorf("spec.s3ObjectLock.retentionInDays must be greater than 0 when mode is %s", bucketMode)
-	}
+	// That retentionInDays is set when mode != Disabled is enforced by the CRD's CEL rule on
+	// S3ObjectLockBucketSpec, so the API server rejects such a spec before this webhook runs.
 
 	// Grid must support S3 Object Lock.
 	gridName := tenant.Spec.StorageGridRef.Name

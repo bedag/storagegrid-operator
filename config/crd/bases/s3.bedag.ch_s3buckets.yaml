@@ -256,11 +256,18 @@ spec:
                   retentionInDays:
                     description: |-
                       RetentionInDays is the default retention period applied to new objects when Mode is not Disabled.
-                      Must be greater than zero. Capped by the parent tenant's s3ObjectLock.maxRetentionInDays.
+                      Required when Mode is not Disabled. Capped by the parent tenant's s3ObjectLock.maxRetentionInDays.
+                      Set to -1 to enable Object Lock without a default retention ("Default retention: Disabled"),
+                      leaving it to S3 clients to set retention per object; Mode then only acts against the tenant ceiling.
                     format: int32
-                    minimum: 0
+                    minimum: -1
                     type: integer
                 type: object
+                x-kubernetes-validations:
+                - message: 'retentionInDays is required when mode is not Disabled:
+                    use a positive number of days, or -1 for no default retention'
+                  rule: '!has(self.mode) || self.mode == ''Disabled'' || (has(self.retentionInDays)
+                    && self.retentionInDays != 0)'
               s3TenantRef:
                 description: tenant the bucket will be created in.
                 properties:

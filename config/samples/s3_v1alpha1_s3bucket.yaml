@@ -14,6 +14,8 @@ spec:
   # Compliance requires the parent tenant to have s3ObjectLock.mode=Compliance and the
   # parent StorageGrid to have S3 Object Lock enabled grid-wide.
   # Changes to retentionInDays apply to NEW objects only; existing objects keep their prior retention.
+  # retentionInDays is required when mode is not Disabled. Set it to -1 to enable Object Lock
+  # without a default retention, so S3 clients (e.g. Veeam) set retention per object.
   s3ObjectLock:
     mode: Governance
     retentionInDays: 30

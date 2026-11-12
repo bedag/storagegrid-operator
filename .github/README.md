@@ -656,6 +656,40 @@ Monitor bucket phase:
 kubectl get s3bucket my-bucket -o jsonpath='{.status.phase}'
 ```
 
+#### Bucket S3 Object Lock
+
+```yaml
+apiVersion: s3.bedag.ch/v1alpha1
+kind: S3Bucket
+metadata:
+  name: my-locked-bucket
+spec:
+  s3TenantRef:
+    name: my-tenant
+  s3ObjectLock:
+    # Disabled (default), Governance or Compliance. Cannot exceed the tenant's s3ObjectLock.mode.
+    mode: Governance
+    # Required when mode is not Disabled.
+    #   > 0 : default retention in days for new objects, capped by the tenant's maxRetentionInDays.
+    #   -1  : enable Object Lock WITHOUT a default retention.
+    retentionInDays: 30
+```
+
+| `mode` | `retentionInDays` | Result on StorageGrid |
+| --- | --- | --- |
+| `Disabled` / omitted | ignored | Object Lock not enabled (an already-enabled bucket keeps it, with its default retention cleared) |
+| `Governance` / `Compliance` | `> 0` | Object Lock enabled, default retention of that many days in that mode |
+| `Governance` / `Compliance` | `-1` | Object Lock enabled, **Default retention: Disabled** |
+| `Governance` / `Compliance` | omitted or `0` | Rejected by the API server |
+
+`retentionInDays: -1` is meant for S3 clients that manage immutability themselves and set
+retention per object, such as Veeam Backup for Microsoft 365. With no default retention the
+`mode` is not written to the bucket; it is still checked against the tenant's `s3ObjectLock.mode`,
+so `Compliance` still requires a Compliance tenant.
+
+Switching an existing bucket between a positive value and `-1` only changes the default for
+objects written afterwards; objects already in the bucket keep their retention.
+
 #### Bucket Consistency
 
 Every bucket has a consistency value that trades read-after-write guarantees against

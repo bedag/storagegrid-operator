@@ -1,0 +1,197 @@
+# S3Bucket with S3 Object Lock enabled but no default retention (retentionInDays: -1).
+# Needed by S3 clients that set retention per object themselves, e.g. Veeam Backup for M365.
+#
+# The operator only sets ConfigurationSynced=True/ObjectLockInSync after reading the bucket's
+# Object Lock configuration back from StorageGrid and finding it equal to the spec, so asserting
+# that condition at the current generation verifies the backend state, not just the CR.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: s3bucket-objectlock-no-default-retention
+spec:
+  bindings:
+    - name: tenantName
+      value: objectlock-nodefault-tenant
+    - name: bucketName
+      value: objectlock-nodefault-bucket
+  steps:
+    # ── Step 1: Create tenant that allows Governance object lock ──────────
+    - name: create-tenant
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              spec:
+                s3TenantClassName: ($values.tenantClass.name)
+                storageGridRef:
+                  name: ($values.storageGrid.name)
+                storageQuota: 10Gi
+                defaultBucketRegion: us-east-1
+                s3ObjectLock:
+                  mode: Governance
+                  maxRetentionInDays: 365
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)
+              status:
+                phase: Bound
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+
+    # ── Step 2: Verify auto-created S3TenantAccount and set Delete policy ──
+    - name: verify-account
+      use:
+        template: ../../s3tenant/_step-templates/verify-account-set-delete-policy.yaml
+
+    # ── Step 3: The CRD rejects an enabled mode without retentionInDays ───
+    - name: reject-missing-retention
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: objectlock-missing-retention
+              spec:
+                region: us-east-1
+                s3TenantRef:
+                  name: ($tenantName)
+                s3ObjectLock:
+                  mode: Governance
+            expect:
+              - check:
+                  ($error != null): true
+                  (contains($error, 'retentionInDays is required')): true
+
+    # ── Step 4: Create the bucket with Object Lock and no default retention ─
+    - name: create-bucket-no-default-retention
+      try:
+        - create:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                region: us-east-1
+                s3TenantRef:
+                  name: ($tenantName)
+                s3ObjectLock:
+                  mode: Governance
+                  retentionInDays: -1
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                phase: Ready
+                (bucketName != ''): true
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+                (conditions[?type == 'ConfigurationSynced']):
+                  - status: "True"
+                    reason: ObjectLockInSync
+                    observedGeneration: 1
+
+    # ── Step 5: Switch to a 30-day default retention ──────────────────────
+    - name: set-default-retention
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                s3ObjectLock:
+                  retentionInDays: 30
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                phase: Ready
+                (conditions[?type == 'ConfigurationSynced']):
+                  - status: "True"
+                    reason: ObjectLockInSync
+                    observedGeneration: 2
+        - assert:
+            timeout: 1m
+            resource:
+              apiVersion: v1
+              kind: Event
+              reason: BucketObjectLockUpdated
+              involvedObject:
+                kind: S3Bucket
+                name: ($bucketName)
+
+    # ── Step 6: Clear the default retention again on the existing bucket ──
+    - name: clear-default-retention
+      try:
+        - patch:
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              spec:
+                s3ObjectLock:
+                  retentionInDays: -1
+        - assert:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+              status:
+                phase: Ready
+                (conditions[?type == 'ConfigurationSynced']):
+                  - status: "True"
+                    reason: ObjectLockInSync
+                    observedGeneration: 3
+
+    # ── Step 7: Delete the bucket and confirm cleanup ─────────────────────
+    - name: delete-bucket
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              name: ($bucketName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Bucket
+              metadata:
+                name: ($bucketName)
+
+    # ── Step 8: Delete the tenant and confirm cleanup ─────────────────────
+    - name: delete-tenant
+      try:
+        - delete:
+            ref:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              name: ($tenantName)
+        - error:
+            timeout: 3m
+            resource:
+              apiVersion: s3.bedag.ch/v1alpha1
+              kind: S3Tenant
+              metadata:
+                name: ($tenantName)

@@ -264,7 +264,12 @@ type LifecycleManagementSpec struct {
 	ExpirationInDays int32 `json:"expirationInDays"`
 }
 
+// S3ObjectLockRetentionNoDefault is the retentionInDays sentinel that enables S3 Object Lock on a
+// bucket without configuring a default retention. Clients (e.g. Veeam) then set retention per object.
+const S3ObjectLockRetentionNoDefault int32 = -1
+
 // S3ObjectLockBucketSpec configures S3 Object Lock for a bucket.
+// +kubebuilder:validation:XValidation:rule="!has(self.mode) || self.mode == 'Disabled' || (has(self.retentionInDays) && self.retentionInDays != 0)",message="retentionInDays is required when mode is not Disabled: use a positive number of days, or -1 for no default retention"
 type S3ObjectLockBucketSpec struct {
 	// Mode is the default retention mode applied to new objects.
 	// - Disabled: object lock is not enabled on the bucket.
@@ -276,8 +281,10 @@ type S3ObjectLockBucketSpec struct {
 	Mode S3ObjectLockMode `json:"mode,omitempty"`
 
 	// RetentionInDays is the default retention period applied to new objects when Mode is not Disabled.
-	// Must be greater than zero. Capped by the parent tenant's s3ObjectLock.maxRetentionInDays.
-	// +kubebuilder:validation:Minimum=0
+	// Required when Mode is not Disabled. Capped by the parent tenant's s3ObjectLock.maxRetentionInDays.
+	// Set to -1 to enable Object Lock without a default retention ("Default retention: Disabled"),
+	// leaving it to S3 clients to set retention per object; Mode then only acts against the tenant ceiling.
+	// +kubebuilder:validation:Minimum=-1
 	// +optional
 	RetentionInDays int32 `json:"retentionInDays,omitempty"`
 }

@@ -566,6 +566,9 @@ func (r *S3BucketReconciler) reconcileBucketObjectLock(ctx context.Context, rctx
 
 	r.emitEvent(rctx, corev1.EventTypeWarning, EventBucketObjectLockUpdated,
 		fmt.Sprintf("Updated S3 Object Lock configuration for bucket %s; the new default retention applies to NEW objects only — existing objects keep their prior retention", rctx.Bucket.Status.BucketName))
+	// Requeue so the next loop reads the configuration back from the grid and confirms it via
+	// ConfigurationSynced, instead of leaving the condition at the previous generation.
+	rctx.DoRequeue = true
 	return nil
 }
 
@@ -1368,7 +1371,8 @@ func lifecycleSpecFromBucket(bucket *s3v1alpha1.S3Bucket) s3.LifecycleSpec {
 // delete locked objects when the lifecycle fires; we surface this so users notice early.
 func (r *S3BucketReconciler) warnLifecycleObjectLockConflict(rctx *bucketReconcileContext, desired s3.LifecycleSpec) {
 	lock := rctx.Bucket.Spec.S3ObjectLock
-	if lock == nil || lock.Mode == s3v1alpha1.S3ObjectLockModeDisabled {
+	// Without a default retention (retentionInDays=-1) there is no bucket-level period to compare against.
+	if lock == nil || lock.Mode == s3v1alpha1.S3ObjectLockModeDisabled || lock.RetentionInDays <= 0 {
 		return
 	}
 	if desired.ExpirationInDays > 0 && desired.ExpirationInDays < lock.RetentionInDays {

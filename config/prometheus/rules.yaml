@@ -1,0 +1,142 @@
+# Alerting rules for the storagegrid-operator. Tests: config/prometheus/rules_test.yaml.
+# Tenant alerts keep the CR's namespace label, so Alertmanager can route them per team.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    control-plane: controller-manager
+    app.kubernetes.io/name: storagegrid-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: controller-manager-rules
+  namespace: system
+spec:
+  groups:
+    - name: storagegrid-operator
+      rules:
+        - alert: StorageGridOperatorMetricsDown
+          expr: up{job=~".*storagegrid-operator.*"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: storagegrid-operator metrics scrape is failing
+            description: Prometheus cannot scrape {{ $labels.metrics_path }} from {{ $labels.job }}.
+
+        - alert: StorageGridNotReady
+          expr: storagegrid_operator_storagegrid_ready == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: StorageGrid {{ $labels.storagegrid }} is not ready
+            description: The StorageGrid {{ $labels.storagegrid }} has not been ready for 15 minutes; check its conditions.
+
+        - alert: StorageGridScrapeFailing
+          expr: storagegrid_operator_grid_scrape_success == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Live metrics from StorageGrid {{ $labels.storagegrid }} are failing
+            description: The {{ $labels.step }} step of /metrics/grid has failed for 15 minutes.
+
+        - alert: StorageGridLoginFailing
+          expr: sum by (cluster, storagegrid) (rate(storagegrid_operator_grid_requests_total{route="/authorize",code="401"}[15m])) > 0
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: Logins to StorageGrid {{ $labels.storagegrid }} are rejected
+            description: The operator gets 401 responses on /authorize; the credentials of the grid or of a tenant are invalid.
+
+        - alert: StorageGridAPIErrors
+          # Transport errors are not counted in requests_total, so both sides add them. `or` keeps
+          # either counter when the other has no series yet (e.g. no 5xx since the pod started).
+          # No traffic gives 0/0 = NaN, which never compares true.
+          expr: |
+            sum by (cluster, storagegrid) (
+              rate(storagegrid_operator_grid_requests_total{code=~"5.."}[15m])
+              or rate(storagegrid_operator_grid_request_errors_total[15m])
+            )
+            / sum by (cluster, storagegrid) (
+              rate(storagegrid_operator_grid_requests_total[15m])
+              or rate(storagegrid_operator_grid_request_errors_total[15m])
+            )
+            > 0.1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: StorageGrid {{ $labels.storagegrid }} API calls are failing
+            description: "{{ $value | humanizePercentage }} of the operator's API calls to the grid fail."
+
+        - alert: S3TenantClassEndpointUnbound
+          expr: storagegrid_operator_s3tenantclass_endpoint_bound == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: Endpoint of S3TenantClass {{ $labels.s3tenantclass }} is not bound
+            description: The load balancer endpoint behind S3TenantClass {{ $labels.s3tenantclass }} is not bound on all gateway nodes of StorageGrid {{ $labels.storagegrid }}.
+
+        - alert: S3TenantClassCertificateExpiring
+          expr: |
+            (storagegrid_operator_s3tenantclass_endpoint_cert_expiry_timestamp_seconds - time()) < 30 * 86400
+            >= 7 * 86400
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: Certificate of S3TenantClass {{ $labels.s3tenantclass }} expires within 30 days
+            description: The endpoint certificate expires in {{ $value | humanizeDuration }}.
+
+        - alert: S3TenantClassCertificateExpiringSoon
+          expr: (storagegrid_operator_s3tenantclass_endpoint_cert_expiry_timestamp_seconds - time()) < 7 * 86400
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: Certificate of S3TenantClass {{ $labels.s3tenantclass }} expires within 7 days
+            description: The endpoint certificate expires in {{ $value | humanizeDuration }}.
+
+        - alert: StorageGridOperatorResourcesSkipped
+          expr: storagegrid_operator_state_list_errors > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: storagegrid-operator cannot list {{ $labels.kind }}
+            description: Metrics for {{ $labels.kind }} resources are missing because listing them fails.
+
+        - alert: S3TenantQuotaAlmostFull
+          expr: |
+            storagegrid_operator_s3tenant_usage_bytes / (storagegrid_operator_s3tenant_quota_bytes > 0) > 0.85
+            <= 0.95
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: S3Tenant {{ $labels.namespace }}/{{ $labels.s3tenant }} is almost full
+            description: The tenant uses {{ $value | humanizePercentage }} of its quota.
+
+        - alert: S3TenantQuotaFull
+          expr: storagegrid_operator_s3tenant_usage_bytes / (storagegrid_operator_s3tenant_quota_bytes > 0) > 0.95
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: S3Tenant {{ $labels.namespace }}/{{ $labels.s3tenant }} is full
+            description: The tenant uses {{ $value | humanizePercentage }} of its quota.
+
+        - alert: S3ResourceNotReady
+          expr: |
+            label_replace(
+              {__name__=~"storagegrid_operator_.+_status_condition", type="Ready", status!="True"},
+              "kind", "$1", "__name__", "storagegrid_operator_(.+)_status_condition"
+            ) == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: A {{ $labels.kind }} is not ready
+            description: The {{ $labels.kind }} has not been ready for 30 minutes; check its conditions with kubectl describe.

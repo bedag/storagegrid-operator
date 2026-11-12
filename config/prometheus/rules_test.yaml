@@ -1,0 +1,286 @@
+# Unit tests for rules.yaml. Run with `make test-prometheus-rules`.
+rule_files:
+  - rules.generated.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: metrics down fires only for the failing path
+    interval: 1m
+    input_series:
+      - series: 'up{job="storagegrid-operator-controller-manager-metrics-service",metrics_path="/metrics"}'
+        values: '1x20'
+      - series: 'up{job="storagegrid-operator-controller-manager-metrics-service",metrics_path="/metrics/grid"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: StorageGridOperatorMetricsDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: storagegrid-operator-controller-manager-metrics-service
+              metrics_path: /metrics/grid
+            exp_annotations:
+              summary: storagegrid-operator metrics scrape is failing
+              description: Prometheus cannot scrape /metrics/grid from storagegrid-operator-controller-manager-metrics-service.
+
+  - name: grid not ready
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_storagegrid_ready{storagegrid="primary"}'
+        values: '0x20'
+      - series: 'storagegrid_operator_storagegrid_ready{storagegrid="backup"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: StorageGridNotReady
+        exp_alerts:
+          - exp_labels: {severity: warning, storagegrid: primary}
+            exp_annotations:
+              summary: StorageGrid primary is not ready
+              description: The StorageGrid primary has not been ready for 15 minutes; check its conditions.
+
+  - name: grid scrape failing per step
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_grid_scrape_success{storagegrid="primary",step="endpoints"}'
+        values: '0x20'
+      - series: 'storagegrid_operator_grid_scrape_success{storagegrid="primary",step="tenant_usage"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: StorageGridScrapeFailing
+        exp_alerts:
+          - exp_labels: {severity: warning, storagegrid: primary, step: endpoints}
+            exp_annotations:
+              summary: Live metrics from StorageGrid primary are failing
+              description: The endpoints step of /metrics/grid has failed for 15 minutes.
+
+  - name: login failing
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_grid_requests_total{storagegrid="primary",method="POST",route="/authorize",code="401"}'
+        values: '0+5x60'
+      - series: 'storagegrid_operator_grid_requests_total{storagegrid="backup",method="POST",route="/authorize",code="401"}'
+        values: '3x60'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: StorageGridLoginFailing
+        exp_alerts:
+          - exp_labels: {severity: warning, storagegrid: primary}
+            exp_annotations:
+              summary: Logins to StorageGrid primary are rejected
+              description: The operator gets 401 responses on /authorize; the credentials of the grid or of a tenant are invalid.
+
+  - name: api errors fire above 10 percent
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_grid_requests_total{storagegrid="primary",method="GET",route="/grid/accounts-cache",code="500"}'
+        values: '0+10x40'
+      - series: 'storagegrid_operator_grid_requests_total{storagegrid="primary",method="GET",route="/grid/accounts-cache",code="200"}'
+        values: '0+10x40'
+      - series: 'storagegrid_operator_grid_request_errors_total{storagegrid="primary",method="GET",route="/grid/accounts-cache"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: StorageGridAPIErrors
+        exp_alerts:
+          - exp_labels: {severity: warning, storagegrid: primary}
+            exp_annotations:
+              summary: StorageGrid primary API calls are failing
+              description: 50% of the operator's API calls to the grid fail.
+
+  - name: api errors fire on transport errors only
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_grid_requests_total{storagegrid="primary",method="GET",route="/grid/accounts-cache",code="200"}'
+        values: '0+10x40'
+      - series: 'storagegrid_operator_grid_request_errors_total{storagegrid="primary",method="GET",route="/grid/accounts-cache"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: StorageGridAPIErrors
+        exp_alerts:
+          - exp_labels: {severity: warning, storagegrid: primary}
+            exp_annotations:
+              summary: StorageGrid primary API calls are failing
+              description: 50% of the operator's API calls to the grid fail.
+
+  - name: api errors fire when the grid was never reachable
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_grid_request_errors_total{storagegrid="primary",method="POST",route="/authorize"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: StorageGridAPIErrors
+        exp_alerts:
+          - exp_labels: {severity: warning, storagegrid: primary}
+            exp_annotations:
+              summary: StorageGrid primary API calls are failing
+              description: 100% of the operator's API calls to the grid fail.
+
+  - name: api errors silent without traffic
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_grid_requests_total{storagegrid="primary",method="GET",route="/grid/accounts-cache",code="200"}'
+        values: '0x40'
+      - series: 'storagegrid_operator_grid_request_errors_total{storagegrid="primary",method="GET",route="/grid/accounts-cache"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: StorageGridAPIErrors
+        exp_alerts: []
+
+  - name: endpoint unbound
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_s3tenantclass_endpoint_bound{storagegrid="primary",s3tenantclass="shcofe"}'
+        values: '0x20'
+      - series: 'storagegrid_operator_s3tenantclass_endpoint_bound{storagegrid="primary",s3tenantclass="itpfe"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: S3TenantClassEndpointUnbound
+        exp_alerts:
+          - exp_labels: {severity: critical, storagegrid: primary, s3tenantclass: shcofe}
+            exp_annotations:
+              summary: Endpoint of S3TenantClass shcofe is not bound
+              description: The load balancer endpoint behind S3TenantClass shcofe is not bound on all gateway nodes of StorageGrid primary.
+
+  # time() starts at 0 in promtool, so the series values are seconds from test start.
+  - name: certificate expiring within 30 days warns, not critical
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_s3tenantclass_endpoint_cert_expiry_timestamp_seconds{storagegrid="primary",s3tenantclass="shcofe"}'
+        values: '1728000x150'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: S3TenantClassCertificateExpiring
+        exp_alerts:
+          - exp_labels: {severity: warning, storagegrid: primary, s3tenantclass: shcofe}
+            exp_annotations:
+              summary: Certificate of S3TenantClass shcofe expires within 30 days
+              description: The endpoint certificate expires in 19d 22h 0m 0s.
+      - eval_time: 2h
+        alertname: S3TenantClassCertificateExpiringSoon
+        exp_alerts: []
+
+  - name: certificate expiring within 7 days is critical only
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_s3tenantclass_endpoint_cert_expiry_timestamp_seconds{storagegrid="primary",s3tenantclass="shcofe"}'
+        values: '259200x150'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: S3TenantClassCertificateExpiringSoon
+        exp_alerts:
+          - exp_labels: {severity: critical, storagegrid: primary, s3tenantclass: shcofe}
+            exp_annotations:
+              summary: Certificate of S3TenantClass shcofe expires within 7 days
+              description: The endpoint certificate expires in 2d 22h 0m 0s.
+      - eval_time: 2h
+        alertname: S3TenantClassCertificateExpiring
+        exp_alerts: []
+
+  - name: resource kind skipped
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_state_list_errors{kind="s3bucket"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: StorageGridOperatorResourcesSkipped
+        exp_alerts:
+          - exp_labels: {severity: warning, kind: s3bucket}
+            exp_annotations:
+              summary: storagegrid-operator cannot list s3bucket
+              description: Metrics for s3bucket resources are missing because listing them fails.
+
+  - name: quota almost full warns, not critical
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_s3tenant_usage_bytes{namespace="team-a",s3tenant="t1"}'
+        values: '90x40'
+      - series: 'storagegrid_operator_s3tenant_quota_bytes{namespace="team-a",s3tenant="t1"}'
+        values: '100x40'
+      - series: 'storagegrid_operator_s3tenant_usage_bytes{namespace="team-b",s3tenant="t2"}'
+        values: '50x40'
+      - series: 'storagegrid_operator_s3tenant_quota_bytes{namespace="team-b",s3tenant="t2"}'
+        values: '100x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: S3TenantQuotaAlmostFull
+        exp_alerts:
+          - exp_labels: {severity: warning, namespace: team-a, s3tenant: t1}
+            exp_annotations:
+              summary: S3Tenant team-a/t1 is almost full
+              description: The tenant uses 90% of its quota.
+      - eval_time: 35m
+        alertname: S3TenantQuotaFull
+        exp_alerts: []
+
+  - name: quota full is critical only
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_s3tenant_usage_bytes{namespace="team-a",s3tenant="t1"}'
+        values: '96x40'
+      - series: 'storagegrid_operator_s3tenant_quota_bytes{namespace="team-a",s3tenant="t1"}'
+        values: '100x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: S3TenantQuotaFull
+        exp_alerts:
+          - exp_labels: {severity: critical, namespace: team-a, s3tenant: t1}
+            exp_annotations:
+              summary: S3Tenant team-a/t1 is full
+              description: The tenant uses 96% of its quota.
+      - eval_time: 35m
+        alertname: S3TenantQuotaAlmostFull
+        exp_alerts: []
+
+  - name: quota alert ignores tenants without quota
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_s3tenant_usage_bytes{namespace="team-a",s3tenant="t1"}'
+        values: '1000x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: S3TenantQuotaAlmostFull
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: S3TenantQuotaFull
+        exp_alerts: []
+
+  - name: quota alert ignores a zero quota
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_s3tenant_usage_bytes{namespace="team-a",s3tenant="t1"}'
+        values: '5x40'
+      - series: 'storagegrid_operator_s3tenant_quota_bytes{namespace="team-a",s3tenant="t1"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: S3TenantQuotaAlmostFull
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: S3TenantQuotaFull
+        exp_alerts: []
+
+  - name: not ready derives kind
+    interval: 1m
+    input_series:
+      - series: 'storagegrid_operator_s3tenantaccount_status_condition{s3tenantaccount="a1",type="Ready",status="False"}'
+        values: '1x40'
+      - series: 'storagegrid_operator_s3tenantaccount_status_condition{s3tenantaccount="a1",type="Ready",status="True"}'
+        values: '0x40'
+      - series: 'storagegrid_operator_s3bucket_status_condition{namespace="team-a",s3bucket="b1",type="Ready",status="True"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: S3ResourceNotReady
+        exp_alerts:
+          - exp_labels: {severity: warning, kind: s3tenantaccount, s3tenantaccount: a1, type: Ready, status: "False"}
+            exp_annotations:
+              summary: A s3tenantaccount is not ready
+              description: The s3tenantaccount has not been ready for 30 minutes; check its conditions with kubectl describe.

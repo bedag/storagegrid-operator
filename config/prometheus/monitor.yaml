@@ -25,6 +25,28 @@ spec:
         # certFile: /etc/metrics-certs/tls.crt
         # keyFile: /etc/metrics-certs/tls.key
         insecureSkipVerify: true
+      # Keep the CR's namespace label instead of renaming it to exported_namespace.
+      honorLabels: true
+      # Both endpoints share port and job; this label keeps their `up` series apart.
+      relabelings:
+        - sourceLabels: [__metrics_path__]
+          targetLabel: metrics_path
+          action: replace
+    # Live StorageGrid usage, fetched from the grid on every scrape.
+    - path: /metrics/grid
+      port: https
+      scheme: https
+      interval: 60s
+      scrapeTimeout: 30s
+      bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      tlsConfig:
+        # See the TODO above on insecureSkipVerify.
+        insecureSkipVerify: true
+      honorLabels: true
+      relabelings:
+        - sourceLabels: [__metrics_path__]
+          targetLabel: metrics_path
+          action: replace
   selector:
     matchLabels:
       control-plane: controller-manager

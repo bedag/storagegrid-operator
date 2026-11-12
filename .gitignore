@@ -34,3 +34,4 @@ tmp/
 tests/crds/*.yml
 .tilt-tmp
 __debug*
+config/prometheus/rules.generated.yaml

@@ -1,0 +1,619 @@
+{
+  "title": "S3 Storage / Resources",
+  "uid": "storagegrid-s3-resources",
+  "description": "State of the S3Tenants, S3Buckets and S3Accesses in your namespaces.",
+  "tags": [
+    "storagegrid",
+    "s3"
+  ],
+  "editable": true,
+  "graphTooltip": 1,
+  "schemaVersion": 39,
+  "version": 1,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "timezone": "browser",
+  "annotations": {
+    "list": []
+  },
+  "links": [],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus",
+        "regex": "",
+        "current": {},
+        "hide": 0,
+        "refresh": 1
+      },
+      {
+        "name": "cluster",
+        "label": "Cluster",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(storagegrid_operator_s3tenant_info, cluster)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery",
+          "qryType": 1
+        },
+        "definition": "label_values(storagegrid_operator_s3tenant_info, cluster)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {},
+        "sort": 1,
+        "hide": 0
+      },
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(storagegrid_operator_s3tenant_info{cluster=~\"$cluster\"}, namespace)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery",
+          "qryType": 1
+        },
+        "definition": "label_values(storagegrid_operator_s3tenant_info{cluster=~\"$cluster\"}, namespace)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {},
+        "sort": 1,
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "id": 1,
+      "title": "Health",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Resources not ready",
+      "description": "S3Tenants, S3Buckets, S3Accesses and S3Policies whose Ready condition is not True.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count(max without (pod, instance) (label_replace({__name__=~\"storagegrid_operator_(s3tenant|s3bucket|s3access|s3policy)_status_condition\",type=\"Ready\",status!=\"True\",cluster=~\"$cluster\",namespace=~\"$namespace\"}, \"kind\", \"$1\", \"__name__\", \"storagegrid_operator_(.+)_status_condition\") == 1)) or vector(0)",
+          "refId": "A",
+          "legendFormat": "not ready",
+          "range": true,
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2
+    },
+    {
+      "type": "table",
+      "title": "Not ready",
+      "description": "Look at the resource's conditions with kubectl describe for the reason.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max without (pod, instance) (label_replace({__name__=~\"storagegrid_operator_(s3tenant|s3bucket|s3access|s3policy)_status_condition\",type=\"Ready\",status!=\"True\",cluster=~\"$cluster\",namespace=~\"$namespace\"}, \"kind\", \"$1\", \"__name__\", \"storagegrid_operator_(.+)_status_condition\") == 1)",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "endpoint": true,
+              "instance": true,
+              "job": true,
+              "pod": true,
+              "service": true,
+              "k8s_cluster_name": true,
+              "metrics_path": true,
+              "Value": true,
+              "type": true,
+              "status": true
+            },
+            "renameByName": {
+              "kind": "Kind"
+            },
+            "indexByName": {
+              "kind": 0,
+              "cluster": 1,
+              "namespace": 2
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 6,
+        "w": 18,
+        "x": 6,
+        "y": 1
+      },
+      "id": 3
+    },
+    {
+      "type": "row",
+      "id": 4,
+      "title": "Resources",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 7
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "S3Tenants",
+      "description": "Phase and tenant class of each S3Tenant.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max without (pod, instance) (storagegrid_operator_s3tenant_status_phase{cluster=~\"$cluster\",namespace=~\"$namespace\"} == 1) * on (cluster, namespace, s3tenant) group_left (s3tenantclass, storagegrid) max without (pod, instance) (storagegrid_operator_s3tenant_info{cluster=~\"$cluster\",namespace=~\"$namespace\"})",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Phase"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Ready": {
+                        "color": "green"
+                      },
+                      "Bound": {
+                        "color": "green"
+                      },
+                      "Failed": {
+                        "color": "red"
+                      },
+                      "Deleting": {
+                        "color": "orange"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "endpoint": true,
+              "instance": true,
+              "job": true,
+              "pod": true,
+              "service": true,
+              "k8s_cluster_name": true,
+              "metrics_path": true,
+              "Value": true
+            },
+            "renameByName": {
+              "phase": "Phase",
+              "bucket_name": "Bucket name"
+            },
+            "indexByName": {
+              "cluster": 0,
+              "namespace": 1,
+              "s3tenant": 2
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 5
+    },
+    {
+      "type": "table",
+      "title": "S3Buckets",
+      "description": "Phase, tenant and backend bucket name of each S3Bucket.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max without (pod, instance) (storagegrid_operator_s3bucket_status_phase{cluster=~\"$cluster\",namespace=~\"$namespace\"} == 1) * on (cluster, namespace, s3bucket) group_left (s3tenant, bucket_name, region) max without (pod, instance) (storagegrid_operator_s3bucket_info{cluster=~\"$cluster\",namespace=~\"$namespace\"})",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Phase"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Ready": {
+                        "color": "green"
+                      },
+                      "Bound": {
+                        "color": "green"
+                      },
+                      "Failed": {
+                        "color": "red"
+                      },
+                      "Deleting": {
+                        "color": "orange"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "endpoint": true,
+              "instance": true,
+              "job": true,
+              "pod": true,
+              "service": true,
+              "k8s_cluster_name": true,
+              "metrics_path": true,
+              "Value": true
+            },
+            "renameByName": {
+              "phase": "Phase",
+              "bucket_name": "Bucket name"
+            },
+            "indexByName": {
+              "cluster": 0,
+              "namespace": 1,
+              "s3bucket": 2
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 6
+    },
+    {
+      "type": "table",
+      "title": "S3Accesses",
+      "description": "Phase and bucket of each S3Access.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max without (pod, instance) (storagegrid_operator_s3access_status_phase{cluster=~\"$cluster\",namespace=~\"$namespace\"} == 1) * on (cluster, namespace, s3access) group_left (s3bucket) max without (pod, instance) (storagegrid_operator_s3access_info{cluster=~\"$cluster\",namespace=~\"$namespace\"})",
+          "refId": "A",
+          "legendFormat": "__auto",
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Phase"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "Ready": {
+                        "color": "green"
+                      },
+                      "Bound": {
+                        "color": "green"
+                      },
+                      "Failed": {
+                        "color": "red"
+                      },
+                      "Deleting": {
+                        "color": "orange"
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "endpoint": true,
+              "instance": true,
+              "job": true,
+              "pod": true,
+              "service": true,
+              "k8s_cluster_name": true,
+              "metrics_path": true,
+              "Value": true
+            },
+            "renameByName": {
+              "phase": "Phase",
+              "bucket_name": "Bucket name"
+            },
+            "indexByName": {
+              "cluster": 0,
+              "namespace": 1,
+              "s3access": 2
+            }
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 7
+    },
+    {
+      "type": "timeseries",
+      "title": "Resources by phase",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count by (phase) (max without (pod, instance) (storagegrid_operator_s3tenant_status_phase{cluster=~\"$cluster\",namespace=~\"$namespace\"} == 1))",
+          "refId": "A",
+          "legendFormat": "S3Tenant {{phase}}",
+          "range": true,
+          "format": "time_series"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count by (phase) (max without (pod, instance) (storagegrid_operator_s3bucket_status_phase{cluster=~\"$cluster\",namespace=~\"$namespace\"} == 1))",
+          "refId": "B",
+          "legendFormat": "S3Bucket {{phase}}",
+          "range": true,
+          "format": "time_series"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count by (phase) (max without (pod, instance) (storagegrid_operator_s3access_status_phase{cluster=~\"$cluster\",namespace=~\"$namespace\"} == 1))",
+          "refId": "C",
+          "legendFormat": "S3Access {{phase}}",
+          "range": true,
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "id": 8
+    }
+  ]
+}

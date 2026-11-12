@@ -1471,6 +1471,60 @@ spec:
 | `--grid-metrics-cache-ttl` | `15s` | How long one grid's result is shared between scrapes; `0` disables (>= 0) |
 | `--grid-metrics-bucket-concurrency` | `8` | Parallel bucket usage requests per grid (>= 1) |
 
+### Prometheus Operator integration
+
+`config/prometheus` holds an opt-in ServiceMonitor and PrometheusRule. Enable it by uncommenting `- ../prometheus` in `config/default/kustomization.yaml` (needs the Prometheus Operator CRDs).
+
+The ServiceMonitor scrapes `/metrics` and `/metrics/grid` (every 60s, 30s timeout) with `honorLabels: true`, and adds a `metrics_path` label so both endpoints get their own `up` series.
+
+Prometheus authenticates with its own ServiceAccount token, so bind that ServiceAccount to the operator's metrics-reader ClusterRole:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: storagegrid-operator-metrics-reader-prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: storagegrid-operator-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-k8s          # your Prometheus ServiceAccount
+    namespace: monitoring
+```
+
+If your Prometheus only selects monitors and rules with a label (e.g. kube-prometheus-stack's `release`), add it with a kustomize patch:
+
+```yaml
+patches:
+  - target:
+      group: monitoring.coreos.com
+    patch: |-
+      - op: add
+        path: /metadata/labels/release
+        value: kube-prometheus-stack
+```
+
+Alerts (`config/prometheus/rules.yaml`, unit-tested with `make test-prometheus-rules`). Tenant alerts keep the CR's `namespace`, so Alertmanager can route them per team:
+
+| Alert | Severity | Fires when |
+| --- | --- | --- |
+| `StorageGridOperatorMetricsDown` | warning | A metrics endpoint cannot be scraped for 10m |
+| `StorageGridNotReady` | warning | A StorageGrid is not ready for 15m |
+| `StorageGridScrapeFailing` | warning | A step of `/metrics/grid` fails for 15m |
+| `StorageGridLoginFailing` | warning | Logins to the grid return 401 for 30m |
+| `StorageGridAPIErrors` | warning | More than 10% of grid API calls fail (5xx or transport) for 15m |
+| `S3TenantClassEndpointUnbound` | critical | A tenant class endpoint is not bound on all gateway nodes for 10m |
+| `S3TenantClassCertificateExpiring` | warning | An endpoint certificate expires within 30 days |
+| `S3TenantClassCertificateExpiringSoon` | critical | An endpoint certificate expires within 7 days |
+| `StorageGridOperatorResourcesSkipped` | warning | Listing a resource kind fails for 15m (its metrics are missing) |
+| `S3TenantQuotaAlmostFull` | warning | An S3Tenant uses more than 85% of its quota for 30m |
+| `S3TenantQuotaFull` | critical | An S3Tenant uses more than 95% of its quota for 15m |
+| `S3ResourceNotReady` | warning | Any custom resource's Ready condition is not True for 30m |
+
+Grafana dashboards for admins and namespace users are in [`grafana/`](../grafana/README.md).
+
 ## Troubleshooting
 
 ### Common Issues

@@ -146,6 +146,12 @@ e2e-s3tnt-existing: chainsaw ## Run S3Tenant e2e tests against pre-existing Stor
 	$(call check-chainsaw-values,$(CHAINSAW_VALUES_EXISTING))
 	$(CHAINSAW) test test/e2e/chainsaw/s3tenant/ --config $(CHAINSAW_CONFIG_EXISTING) --values $(CHAINSAW_VALUES_EXISTING) $(CHAINSAW_ARGS)
 
+.PHONY: test-prometheus-rules
+test-prometheus-rules: promtool ## Unit-test the PrometheusRule alerts with promtool (needs yq).
+	yq '.spec' config/prometheus/rules.yaml > config/prometheus/rules.generated.yaml
+	$(PROMTOOL) check rules config/prometheus/rules.generated.yaml
+	cd config/prometheus && $(PROMTOOL) test rules rules_test.yaml
+
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	$(GOLANGCI_LINT) run
@@ -254,6 +260,7 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 CHAINSAW ?= $(LOCALBIN)/chainsaw
+PROMTOOL ?= $(LOCALBIN)/promtool
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.7.1
@@ -264,6 +271,7 @@ ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
 GOLANGCI_LINT_VERSION ?= v2.11.3
 CHAINSAW_VERSION ?= v0.2.14
+PROMTOOL_VERSION ?= 3.15.1
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -305,6 +313,20 @@ $(CHAINSAW): $(LOCALBIN)
 	mv $(LOCALBIN)/chainsaw $(CHAINSAW)-$(CHAINSAW_VERSION) ;\
 	}
 	@ln -sf $(CHAINSAW)-$(CHAINSAW_VERSION) $(CHAINSAW)
+
+.PHONY: promtool
+promtool: $(PROMTOOL) ## Download promtool locally if necessary.
+$(PROMTOOL): $(LOCALBIN)
+	@[ -f "$(PROMTOOL)-$(PROMTOOL_VERSION)" ] || { \
+	set -e; \
+	OS=$$(uname -s | tr '[:upper:]' '[:lower:]') ;\
+	ARCH=$$(uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/') ;\
+	echo "Downloading promtool $(PROMTOOL_VERSION) for $${OS}/$${ARCH}" ;\
+	curl -fsSL "https://github.com/prometheus/prometheus/releases/download/v$(PROMTOOL_VERSION)/prometheus-$(PROMTOOL_VERSION).$${OS}-$${ARCH}.tar.gz" \
+	  | tar xz -C $(LOCALBIN) --strip-components=1 "prometheus-$(PROMTOOL_VERSION).$${OS}-$${ARCH}/promtool" ;\
+	mv $(LOCALBIN)/promtool $(PROMTOOL)-$(PROMTOOL_VERSION) ;\
+	}
+	@ln -sf $(PROMTOOL)-$(PROMTOOL_VERSION) $(PROMTOOL)
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary

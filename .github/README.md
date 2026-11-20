@@ -122,7 +122,7 @@ Currently it supports basic bucket CRUD operations as well as defining a policy 
 The operator emits Kubernetes events for state transitions, errors, and significant operations across all controllers. Events provide a user-visible timeline of operations without requiring log access.
 
 **Key characteristics:**
-- 64 unique event types across 5 controllers
+- 66 unique event types across 5 controllers
 - Immediate emission for real-time visibility
 - State-change emission to prevent spam
 - Separate event streams per resource (no cross-resource propagation)
@@ -140,8 +140,23 @@ For detailed information on event architecture and implementation, see [Event Ar
 - `BackendConnectionRestored`: Management API connection restored
 
 **Grid Health** - For overall grid status:
-- `GridUnhealthy`: Too many unavailable nodes
+- `GridUnhealthy`: Too many unavailable nodes (more than `spec.maxUnavailableNodes`)
 - `GridHealthRecovered`: Grid has recovered
+- `GridAlertsActive`: Alerts are active on the grid (informational)
+- `GridAlertsCleared`: All grid alerts have been resolved
+
+Only node connectivity affects readiness: if more nodes than `spec.maxUnavailableNodes` are
+unavailable, the `StorageGrid` becomes not ready and so do the resources depending on it.
+Alerts on the grid (critical, major or minor) are monitored but have **no impact** on readiness.
+They are reported in the informational `BackendHealth` condition of the `StorageGrid`:
+
+```bash
+$ kubectl describe storagegrid my-storagegrid
+Status:
+  Conditions:
+    Type: BackendHealth   Status: False   Reason: AlertsActive
+      Message: Active alerts on StorageGrid (critical: 0, major: 2, minor: 1). Informational only, does not affect readiness
+```
 
 ## Installation
 

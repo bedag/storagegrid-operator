@@ -36,6 +36,12 @@ const (
 	ConditionTypeLifecycleSynced          = "LifecycleSynced"
 	ConditionTypeConsistencySynced        = "ConsistencySynced"
 
+	// ConditionTypeBackendHealth reports the alerts active on the StorageGrid. It is purely
+	// informational: it never influences the readiness of the StorageGrid or of any resource
+	// depending on it. Node connectivity, which does gate readiness, is reported via
+	// ConditionTypeReachable.
+	ConditionTypeBackendHealth = "BackendHealth"
+
 	// ConditionTypeDeleting is set while a resource is being deleted. It carries the
 	// reason the deletion has not completed yet (waiting for linked buckets, waiting
 	// for backend confirmation, ...) so that a slow deletion is legible as progress

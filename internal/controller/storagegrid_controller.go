@@ -493,47 +493,64 @@ func (r *StorageGridReconciler) reconcileGridHealth(ctx context.Context, rctx *s
 	log := log.FromContext(ctx)
 
 	log.V(1).Info("Checking grid health")
-	isOperative, err := grid.IsOperative(ctx, rctx.GridClient, rctx.SG.Spec.MaxUnavailableNodes)
+	report, err := grid.GetHealthReport(ctx, rctx.GridClient, rctx.SG.Spec.MaxUnavailableNodes)
 	if err != nil {
 		log.Error(err, "Failed to check grid health")
 		r.emitEvent(rctx, corev1.EventTypeWarning, EventGridHealthCheckFailed,
 			fmt.Sprintf("Health check failed: %v", err))
+		r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeBackendHealth, metav1.ConditionUnknown, "HealthCheckFailed",
+			fmt.Sprintf("Failed to fetch grid health: %v", err))
 		return err
 	}
+
+	// alerts are informational only and never gate readiness.
+	r.reconcileGridAlerts(ctx, rctx, report)
 
 	// Check previous health state
 	reachableCondition := meta.FindStatusCondition(rctx.SG.Status.Conditions, s3v1alpha1.ConditionTypeReachable)
 	wasHealthy := reachableCondition != nil && reachableCondition.Status == metav1.ConditionTrue
 
-	if isOperative {
-		log.V(1).Info("Grid is healthy and operative")
-		// Emit recovery event if grid was previously unhealthy
-		if !wasHealthy && reachableCondition != nil {
-			r.emitEvent(rctx, corev1.EventTypeNormal, EventGridHealthRecovered,
-				"StorageGrid has recovered and is now healthy")
-		}
-	} else {
-		log.V(1).Info("Grid is not healthy or operative, checking for reasons")
-		reasons, err := grid.GetOperativeReason(ctx, rctx.GridClient, rctx.SG.Spec.MaxUnavailableNodes)
-		if err != nil {
-			log.Error(err, "Failed to get reason for grid health issues")
-			return fmt.Errorf("failed to get reason for grid health issues: %w", err)
-		}
+	if !report.Operative() {
+		log.V(1).Info("Grid is not operative", "reasons", report.NodeIssues)
+		r.emitEvent(rctx, corev1.EventTypeWarning, EventGridUnhealthy,
+			fmt.Sprintf("StorageGrid is unhealthy: %v", report.NodeIssues))
+		return fmt.Errorf("grid is not healthy, reasons: %v", report.NodeIssues)
+	}
 
-		if len(reasons) > 0 {
-			log.V(1).Info("Grid health issues found", "reasons", reasons)
-			r.emitEvent(rctx, corev1.EventTypeWarning, EventGridUnhealthy,
-				fmt.Sprintf("StorageGrid is unhealthy: %v", reasons))
-			return fmt.Errorf("grid is not healthy, reasons: %v", reasons)
-		} else {
-			log.V(1).Info("Grid is considered not healthy but no specific issues found, please check the grid manually")
-			r.emitEvent(rctx, corev1.EventTypeWarning, EventGridUnhealthy,
-				"StorageGrid is unhealthy but no specific issues identified")
-			return fmt.Errorf("grid is not healthy but no specific issues found, please check the grid manually")
-		}
+	log.V(1).Info("Grid is operative")
+	// Emit recovery event if grid was previously unhealthy
+	if !wasHealthy && reachableCondition != nil {
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventGridHealthRecovered,
+			"StorageGrid has recovered and is now healthy")
 	}
 
 	return nil
+}
+
+// reconcileGridAlerts mirrors the active grid alerts into the BackendHealth condition. The
+// condition is informational: deriveReadiness ignores it, so alerts never affect the readiness
+// of the StorageGrid or of the tenants, classes and accounts depending on it.
+func (r *StorageGridReconciler) reconcileGridAlerts(ctx context.Context, rctx *sgReconcileContext, report *grid.HealthReport) {
+	log := log.FromContext(ctx)
+
+	previous := meta.FindStatusCondition(rctx.SG.Status.Conditions, s3v1alpha1.ConditionTypeBackendHealth)
+
+	if report.HasAlerts() {
+		message := fmt.Sprintf("Active alerts on StorageGrid (%s). Informational only, does not affect readiness", report.AlertSummary())
+		log.V(1).Info("Grid has active alerts", "alerts", report.AlertSummary())
+		// emit only when the alert situation changes.
+		if previous == nil || previous.Status != metav1.ConditionFalse || previous.Message != message {
+			r.emitEvent(rctx, corev1.EventTypeWarning, EventGridAlertsActive,
+				fmt.Sprintf("StorageGrid has active alerts (%s)", report.AlertSummary()))
+		}
+		r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeBackendHealth, metav1.ConditionFalse, "AlertsActive", message)
+		return
+	}
+
+	if previous != nil && previous.Status == metav1.ConditionFalse {
+		r.emitEvent(rctx, corev1.EventTypeNormal, EventGridAlertsCleared, "StorageGrid has no active alerts anymore")
+	}
+	r.setCondition(rctx.SG, s3v1alpha1.ConditionTypeBackendHealth, metav1.ConditionTrue, "NoActiveAlerts", "No active alerts on StorageGrid")
 }
 
 func (r *StorageGridReconciler) setCondition(sg *s3v1alpha1.StorageGrid, condType string, status metav1.ConditionStatus, reason string, message string) {

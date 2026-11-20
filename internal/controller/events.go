@@ -105,6 +105,8 @@ const (
 	EventGridHealthCheckFailed = "GridHealthCheckFailed"
 	EventGridUnhealthy         = "GridUnhealthy"
 	EventGridHealthRecovered   = "GridHealthRecovered"
+	EventGridAlertsActive      = "GridAlertsActive"
+	EventGridAlertsCleared     = "GridAlertsCleared"
 
 	// Configuration Events.
 	EventRegionsUpdated     = "RegionsUpdated"

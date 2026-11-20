@@ -20,62 +20,80 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/bedag/storagegrid-sdk-go/models"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func IsOperative(ctx context.Context, gridClient *GridClient, maxUnavailable int) (bool, error) {
-	log := log.FromContext(ctx).WithValues("func", "IsOperative")
-	log.V(1).Info("Checking if grid is operative")
+// HealthReport summarizes the grid health endpoint.
+//
+// Only node connectivity decides whether the grid is operative. Alert counts are purely
+// informational: they are surfaced to users but must never block operations, because a grid
+// with active alerts (e.g. a pending update or a full disk on one node) is usually still
+// perfectly usable for tenant and bucket management.
+type HealthReport struct {
+	CriticalAlerts int
+	MajorAlerts    int
+	MinorAlerts    int
 
-	// Check if the Grid is healthy and available.
-	health, err := gridClient.Health().Get(ctx)
-	if err != nil {
-		log.Error(err, "Failed to get grid health")
-		return false, err
-	}
-
-	return health.Operative(maxUnavailable), nil
+	// NodeIssues lists the reasons why the grid is not operative. Empty means operative.
+	NodeIssues []string
 }
 
-func GetOperativeReason(ctx context.Context, gridClient *GridClient, maxUnavailableNodes int) ([]string, error) {
-	log := log.FromContext(ctx).WithValues("func", "GetHealthIssues")
-	log.V(1).Info("Fetching grid health issues")
+// Operative reports whether the grid is usable, i.e. node connectivity is within limits.
+func (h *HealthReport) Operative() bool {
+	return len(h.NodeIssues) == 0
+}
 
-	returnedIssues := make([]string, 0)
+// HasAlerts reports whether any alert of any severity is active on the grid.
+func (h *HealthReport) HasAlerts() bool {
+	return h.CriticalAlerts+h.MajorAlerts+h.MinorAlerts > 0
+}
 
-	// Get the health issues from the Grid.
+// AlertSummary returns a human-readable summary of the active alert counts.
+func (h *HealthReport) AlertSummary() string {
+	return fmt.Sprintf("critical: %d, major: %d, minor: %d", h.CriticalAlerts, h.MajorAlerts, h.MinorAlerts)
+}
+
+// GetHealthReport fetches the grid health and evaluates it against maxUnavailableNodes.
+func GetHealthReport(ctx context.Context, gridClient *GridClient, maxUnavailableNodes int) (*HealthReport, error) {
+	log := log.FromContext(ctx).WithValues("func", "GetHealthReport")
+	log.V(1).Info("Fetching grid health")
+
 	health, err := gridClient.Health().Get(ctx)
 	if err != nil {
 		log.Error(err, "Failed to get grid health")
-		return returnedIssues, err
+		return nil, err
 	}
 
-	// check if there are major alerts.
+	return newHealthReport(health, maxUnavailableNodes), nil
+}
+
+func newHealthReport(health *models.Health, maxUnavailableNodes int) *HealthReport {
+	report := &HealthReport{NodeIssues: make([]string, 0)}
+	if health == nil {
+		return report
+	}
+
 	if health.Alerts != nil {
-		log.V(1).Info("Grid health issues found", "issues", health.Alerts)
-		if health.Alerts.Major != nil {
-			returnedIssues = append(returnedIssues, fmt.Sprintf("Too many major alerts present: %d", *health.Alerts.Major))
-		} else {
-			log.V(1).Info("No major alerts present")
-		}
+		report.CriticalAlerts = derefInt(health.Alerts.Critical)
+		report.MajorAlerts = derefInt(health.Alerts.Major)
+		report.MinorAlerts = derefInt(health.Alerts.Minor)
 	}
 
 	if health.Nodes != nil {
-		notConnected := 0
-		if health.Nodes.AdministrativelyDown != nil {
-			notConnected += *health.Nodes.AdministrativelyDown
-		}
-
-		if health.Nodes.Unknown != nil {
-			notConnected += *health.Nodes.Unknown
-		}
+		notConnected := derefInt(health.Nodes.AdministrativelyDown) + derefInt(health.Nodes.Unknown)
 		if notConnected > maxUnavailableNodes {
-			log.V(1).Info("Grid health issues found", "notConnected", notConnected)
-			returnedIssues = append(returnedIssues, fmt.Sprintf("Too many nodes not connected: %d", notConnected))
+			report.NodeIssues = append(report.NodeIssues,
+				fmt.Sprintf("Too many nodes not connected: %d (max unavailable: %d)", notConnected, maxUnavailableNodes))
 		}
-	} else {
-		log.V(1).Info("No node health issues found")
 	}
 
-	return returnedIssues, nil
+	return report
+}
+
+func derefInt(v *int) int {
+	if v == nil {
+		return 0
+	}
+	return *v
 }

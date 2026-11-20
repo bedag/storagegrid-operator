@@ -137,7 +137,7 @@ Generated RBAC manifests include these permissions automatically.
 
 ## Event Categories
 
-Events are organized by controller and operation type. See [`internal/controller/events.go`](../../internal/controller/events.go) for the complete list (64 unique event reasons).
+Events are organized by controller and operation type. See [`internal/controller/events.go`](../../internal/controller/events.go) for the complete list (66 unique event reasons).
 
 ### Critical Events
 
@@ -154,6 +154,8 @@ These events are critical for diagnosing network connectivity issues between the
 **Health Monitoring** (StorageGrid controller):
 - `EventGridUnhealthy`: Grid has too many unavailable nodes
 - `EventGridHealthRecovered`: Grid has recovered from unhealthy state
+- `EventGridAlertsActive`: Alerts are active on the grid, or their counts changed (informational, does not affect readiness)
+- `EventGridAlertsCleared`: All grid alerts have been resolved
 
 ### State Transitions
 
